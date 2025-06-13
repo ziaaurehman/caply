@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Output directories
+.next/
+out/
+next
+# Testing
+coverage/
+
+# Production
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Editor-specific
+.vscode/
+.idea/
+*.swp
+
+# Build artifacts
+*.tsbuildinfo
+
+# Next.js build cache
+.next/cache/
+
+# Optional: Ignore local database files, if any
+*.sqlite
+*.db
+
+# Optional: Ignore uploads or temp storage
+/public/uploads/*
+/public/temp/*
+
+# Optional: Ignore vercel CLI deployment config
+.vercel/
+
+# Optional: Ignore local SSL certs
+*.pem
+*.key
