@@ -1,5 +1,6 @@
 "use client"
-import { redirect } from "next/navigation"
+import { useEffect } from "react"
+import Link from "next/link"
 import { PieChart } from "lucide-react"
 import SignUpForm from "./SignUpForm"
 import { useSession } from "next-auth/react"
@@ -7,13 +8,18 @@ import { useSession } from "next-auth/react"
 export default function SignUpPage() {
   const { status } = useSession()
 
-  if (status === "authenticated") {
-    redirect("/dashboard")
-  }
+  useEffect(() => {
+    if (status === "authenticated") {
+      window.location.href = "/dashboard"
+    }
+  }, [status])
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
+        <Link href="/" className="flex justify-center items-center mb-4 text-primary-600 hover:text-primary-700">
+          ← Back to Home
+        </Link>
         <div className="flex justify-center">
           <PieChart className="h-12 w-12 text-primary-600" />
         </div>

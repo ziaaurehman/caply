@@ -85,8 +85,8 @@ export default function SignUpForm() {
           return
         }
 
-        // Redirect to dashboard on successful login
-        router.push("/dashboard")
+        // Use window.location instead of router.push for a clean page reload
+        window.location.href = "/dashboard"
       } else {
         // Email confirmation is required
         console.log("Email confirmation required")
