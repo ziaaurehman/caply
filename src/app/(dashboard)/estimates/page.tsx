@@ -1,5 +1,5 @@
-import EstimatePage from "@/components/pages/estimates/EstimatePage"
+import EstimateList from "@/components/pages/estimates/EstimateList"
 
 export default function Estimates() {
-  return <EstimatePage />
+  return <EstimateList />
 }

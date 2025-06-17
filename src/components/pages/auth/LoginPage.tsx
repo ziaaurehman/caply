@@ -1,6 +1,6 @@
 "use client"
 import Link from "next/link"
-import { redirect } from "next/navigation"
+import { useEffect } from "react"
 import { PieChart } from "lucide-react"
 import LoginForm from "./LoginForm"
 import { useSession } from "next-auth/react"
@@ -8,9 +8,11 @@ import { useSession } from "next-auth/react"
 export default function LoginPage() {
   const { status } = useSession()
 
-  if (status === "authenticated") {
-    redirect("/dashboard")
-  }
+  useEffect(() => {
+    if (status === "authenticated") {
+      window.location.href = "/dashboard"
+    }
+  }, [status])
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">

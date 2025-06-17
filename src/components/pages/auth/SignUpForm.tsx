@@ -99,7 +99,7 @@ export default function SignUpForm() {
           email: "",
           password: "",
           confirmPassword: "",
-        })
+      })
       }
     } catch (error: any) {
       console.error("Registration error:", error)

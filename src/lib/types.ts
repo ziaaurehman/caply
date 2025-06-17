@@ -48,6 +48,8 @@ export interface Task {
   dueDate?: string
   estimatedHours?: number
   actualHours?: number
+  progress?: number
+  milestone?: boolean
 }
 
 export interface Assignment {
@@ -67,6 +69,10 @@ export interface LeaveRequest {
   endDate: string
   status: "pending" | "approved" | "rejected"
   comment?: string
+  approverComment?: string
+  approvedBy?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface TimesheetEntry {
@@ -77,5 +83,18 @@ export interface TimesheetEntry {
   date: string
   hours: number
   description: string
-  status: "draft" | "submitted" | "approved"
+  status: "draft" | "submitted" | "approved" | "rejected"
+  rejectionReason?: string
+}
+
+export interface TimeEntry {
+  id: string
+  employeeId: string
+  projectId: string
+  taskId?: string
+  date: string
+  hours: number
+  description: string
+  status: "draft" | "submitted" | "approved" | "rejected"
+  rejectionReason?: string
 }

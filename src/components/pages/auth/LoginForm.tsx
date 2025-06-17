@@ -17,15 +17,18 @@ export default function LoginForm() {
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
+  // Handle URL search params in a safe way for SSR
   useEffect(() => {
+    if (!searchParams) return;
+    
     // Check for verification success
-    const verified = searchParams?.get('verified')
+    const verified = searchParams.get('verified')
     if (verified === 'true') {
       setSuccess('Email verified successfully! You can now log in.')
     }
 
     // Check for verification error
-    const verificationError = searchParams?.get('error')
+    const verificationError = searchParams.get('error')
     if (verificationError === 'verification_failed') {
       setError('Email verification failed. Please try again or contact support.')
     }
@@ -55,8 +58,9 @@ export default function LoginForm() {
         return
       }
 
-      // Redirect to dashboard on successful login
-      router.push("/dashboard")
+      // Use window.location.href instead of router.push to force a full page reload
+      // This avoids React Hook inconsistencies by ensuring a clean mount of all components
+      window.location.href = "/dashboard"
     } catch (error) {
       console.error("Login error:", error)
       setError("Something went wrong. Please try again.")

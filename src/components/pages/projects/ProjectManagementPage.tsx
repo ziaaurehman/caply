@@ -1,56 +1,227 @@
 "use client"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
+
+import React, { useEffect, useState } from 'react';
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import Button from '@/components/ui/Button';
+import { useProjectStore } from '@/lib/stores/projectStore';
+import { useTaskStore } from '@/lib/stores/taskStore';
+import { useEmployeeStore } from '@/lib/stores/employeeStore';
+import { 
+  DndContext, 
+  DragEndEvent, 
+  DragOverlay,
+  useSensor,
+  useSensors,
+  MouseSensor,
+  TouchSensor,
+  KeyboardSensor,
+  defaultDropAnimationSideEffects
+} from '@dnd-kit/core';
+import { Plus, Filter, Download } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import KanbanColumn from './KanbanColumn';
+import KanbanCard from './KanbanCard';
+import TaskModal from './TaskModal';
+
+const dropAnimation = {
+  sideEffects: defaultDropAnimationSideEffects({
+    styles: {
+      active: {
+        opacity: '0.5'
+      }
+    }
+  })
+};
 
 export default function ProjectManagementPage() {
+  const { projects } = useProjectStore();
+  const { tasks, fetchTasks, updateTask } = useTaskStore();
+  const { employees, fetchEmployees } = useEmployeeStore();
+  
+  const [selectedProject, setSelectedProject] = useState<string>('1');
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [showCompleted, setShowCompleted] = useState(true);
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
+  
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 10, // Minimum distance before drag starts
+      }
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // Delay before touch drag starts
+        tolerance: 5, // Touch movement tolerance
+      }
+    }),
+    useSensor(KeyboardSensor)
+  );
+  
+  useEffect(() => {
+    fetchTasks();
+    fetchEmployees();
+  }, [fetchTasks, fetchEmployees]);
+  
+  const columns = [
+    { id: 'todo', title: 'To Do' },
+    { id: 'in-progress', title: 'In Progress' },
+    { id: 'completed', title: 'Done' },
+  ];
+  
+  const filteredTasks = tasks
+    .filter(task => task.projectId === selectedProject)
+    .filter(task => showCompleted || task.status !== 'completed')
+    .filter(task => assigneeFilter === 'all' || task.assignedTo.includes(assigneeFilter));
+  
+  const tasksByStatus = columns.reduce((acc, column) => {
+    acc[column.id] = filteredTasks.filter(task => task.status === column.id);
+    return acc;
+  }, {} as Record<string, typeof tasks>);
+  
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (!over) return;
+    
+    const task = tasks.find(t => t.id === active.id);
+    if (!task) return;
+    
+    const oldStatus = task.status;
+    const newStatus = over.id as string;
+    
+    if (oldStatus !== newStatus) {
+      await updateTask(task.id, { status: newStatus as 'todo' | 'in-progress' | 'completed' });
+    }
+    
+    setActiveId(null);
+  };
+  
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Project Management</h1>
-        <p className="mt-1 text-sm text-gray-500">Manage tasks with Kanban board</p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Kanban Board</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-medium text-gray-900 mb-4">To Do</h3>
-              <div className="space-y-3">
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">Design homepage</p>
-                  <p className="text-xs text-gray-500 mt-1">Due: Tomorrow</p>
-                </div>
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">Setup database</p>
-                  <p className="text-xs text-gray-500 mt-1">Due: Next week</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-medium text-gray-900 mb-4">In Progress</h3>
-              <div className="space-y-3">
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">Implement authentication</p>
-                  <p className="text-xs text-gray-500 mt-1">Assigned to: John</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-medium text-gray-900 mb-4">Done</h3>
-              <div className="space-y-3">
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm font-medium">Project setup</p>
-                  <p className="text-xs text-gray-500 mt-1">Completed yesterday</p>
-                </div>
-              </div>
-            </div>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Project Management</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Manage tasks with Kanban board
+          </p>
+        </div>
+        
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <Filter size={16} className="text-gray-500" />
+            <select
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              className="text-sm border-gray-300 rounded-md shadow-sm focus:border-primary-500 focus:ring-primary-500"
+            >
+              {projects.map(project => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
           </div>
-        </CardContent>
-      </Card>
+          
+          <div className="flex items-center space-x-2">
+            <select
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              className="text-sm border-gray-300 rounded-md shadow-sm focus:border-primary-500 focus:ring-primary-500"
+            >
+              <option value="all">All Assignees</option>
+              {employees.map(employee => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="showCompleted"
+              checked={showCompleted}
+              onChange={(e) => setShowCompleted(e.target.checked)}
+              className="rounded text-primary-600 focus:ring-primary-500"
+            />
+            <label htmlFor="showCompleted" className="text-sm text-gray-600">
+              Show completed tasks
+            </label>
+          </div>
+          
+          <Button
+            variant="outline"
+            onClick={() => {/* Export functionality */}}
+            leftIcon={<Download size={18} />}
+          >
+            Export
+          </Button>
+          
+          <Button
+            variant="default"
+            onClick={() => {
+              setSelectedTask(null);
+              setShowTaskModal(true);
+            }}
+            leftIcon={<Plus size={18} />}
+          >
+            Add Task
+          </Button>
+        </div>
+      </div>
+      
+      <div className="h-[calc(100vh-12rem)] flex gap-6">
+        <DndContext 
+          sensors={sensors}
+          onDragStart={({ active }) => setActiveId(active.id as string)}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveId(null)}
+        >
+          {columns.map(column => (
+            <KanbanColumn
+              key={column.id}
+              id={column.id}
+              title={column.title}
+              tasks={tasksByStatus[column.id] || []}
+              onAddTask={() => {
+                setSelectedTask(null);
+                setShowTaskModal(true);
+              }}
+              onEditTask={(taskId) => {
+                setSelectedTask(taskId);
+                setShowTaskModal(true);
+              }}
+            />
+          ))}
+          
+          <DragOverlay dropAnimation={dropAnimation}>
+            {activeId ? (
+              <div className="transform rotate-3 cursor-grabbing">
+                <KanbanCard
+                  task={tasks.find(t => t.id === activeId)!}
+                  isDragging
+                />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      </div>
+      
+      {showTaskModal && (
+        <TaskModal
+          isOpen={showTaskModal}
+          onClose={() => {
+            setShowTaskModal(false);
+            setSelectedTask(null);
+          }}
+          projectId={selectedProject}
+          taskId={selectedTask}
+        />
+      )}
     </div>
-  )
+  );
 }

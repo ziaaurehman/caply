@@ -10,6 +10,7 @@ interface ProjectState {
   addProject: (project: Omit<Project, "id">) => Promise<void>
   updateProject: (id: string, updates: Partial<Project>) => Promise<void>
   deleteProject: (id: string) => Promise<void>
+  addAssignment: (assignment: Omit<Assignment, "id">) => Promise<void>
   updateAssignment: (id: string, updates: Partial<Assignment>) => Promise<void>
   deleteAssignment: (id: string) => Promise<void>
 }
@@ -92,6 +93,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
   deleteProject: async (id) => {
     set((state) => ({
       projects: state.projects.filter((project) => project.id !== id),
+    }))
+  },
+
+  addAssignment: async (assignment) => {
+    const newAssignment: Assignment = {
+      ...assignment,
+      id: Date.now().toString(),
+    }
+    set((state) => ({
+      assignments: [...state.assignments, newAssignment],
     }))
   },
 
