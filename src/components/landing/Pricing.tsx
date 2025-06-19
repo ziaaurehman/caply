@@ -71,13 +71,17 @@ export default function Pricing() {
   ]
 
   return (
-    <section className="py-20 bg-gray-50">
+    <section className="py-10 bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center">
-          <h2 className="text-3xl font-extrabold text-gray-900">Simple, Transparent Pricing</h2>
-          <p className="mt-4 text-lg text-gray-500">No hidden fees. Free updates. Cancel anytime.</p>
+        
+        <div className="text-center mb-16">
+          <h2 className="text-4xl lg:text-5xl font-semibold text-gray-900 mb-4 leading-tight">
+          Simple, Transparent Pricing
+          </h2>
+          <p className="text-lg lg:text-xl text-gray-600 max-w-2xl mx-auto">
+          No hidden fees. Free updates. Cancel anytime.
+          </p>
         </div>
-
         <div className="mt-16 grid grid-cols-1 gap-8 lg:grid-cols-4 items-stretch">
           {pricingTiers.map((tier, index) => (
             <div key={index} className="h-full flex flex-col">

@@ -1,17 +1,47 @@
 "use client"
+
+import { ArrowRight, Menu, X } from "lucide-react"
 import Link from "next/link"
 import { PieChart, UserCircle, LogOut } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
 
-export default function LandingHeader() {
-  // Always call all hooks at the top level, regardless of auth state
+interface NavbarProps {
+  activeSection?: string
+  isScrolled?: boolean
+  onSectionClick?: (sectionId: string) => void
+}
+
+export default function LandingHeader({ 
+  activeSection = "Home", 
+  isScrolled = false, 
+  onSectionClick = () => {} 
+}: NavbarProps) {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const { data: session, status } = useSession()
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const isAuthenticated = status === 'authenticated' && session
+  const [scrolled, setScrolled] = useState(isScrolled)
+
+  // Handle scroll events
+  useEffect(() => {
+    const handleScroll = () => {
+      const isScrolled = window.scrollY > 20;
+      setScrolled(isScrolled);
+    };
+
+    // Add scroll event listener
+    window.addEventListener('scroll', handleScroll);
+    
+    // Initial check
+    handleScroll();
+    
+    // Remove event listener on cleanup
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -31,15 +61,69 @@ export default function LandingHeader() {
     router.push("/login")
   }
 
+  const navItems = [
+    { id: "Home", label: "Home" },
+    { id: "features", label: "Features" },
+    { id: "pricing", label: "Pricing" },
+    { id: "contact", label: "Contact" },
+  ]
+
+  const handleSectionClick = (sectionId: string) => {
+    onSectionClick(sectionId)
+    setIsMobileMenuOpen(false)
+  }
+
   return (
-    <header className="bg-white sticky top-0 z-50 border-b border-gray-100">
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <header
+      className={`fixed top-0 w-full z-50 transition-all duration-500 ease-in-out ${
+        scrolled
+          ? "bg-black/90 backdrop-blur-md py-3 shadow-lg border-b border-gray-700/50"
+          : "bg-transparent py-4 border-b border-gray-100/30"
+      }`}
+    >
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center">
+          {/* Logo */}
           <div className="flex items-center">
             <PieChart className="h-10 w-10 text-primary-600" />
             <span className="ml-2 text-2xl font-bold text-primary-600">Caply</span>
           </div>
-          
+
+          {/* Desktop Navigation */}
+          <nav className="hidden lg:flex">
+            <div
+              className={`rounded-full px-2 py-2 flex space-x-1 transition-all duration-300 ${
+                scrolled ? "bg-gray-700/90 backdrop-blur-sm" : "bg-gray-700/70 backdrop-blur-sm"
+              }`}
+            >
+              {navItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => handleSectionClick(item.id)}
+                  className={`relative px-6 py-2 rounded-full text-sm font-medium transition-all duration-500 ease-in-out ${
+                    activeSection === item.id
+                      ? "bg-primary-600 text-white shadow-lg transform scale-105"
+                      : "text-gray-300 hover:text-white hover:bg-gray-700/50"
+                  }`}
+                >
+                  {item.label}
+                  {activeSection === item.id && (
+                    <span className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-1.5 h-1.5 bg-primary-400 rounded-full" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </nav>
+
+          {/* Mobile Menu Button */}
+          <button
+            className="lg:hidden text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          >
+            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+
+          {/* Desktop CTA Button */}
           {isAuthenticated ? (
             <div className="relative" ref={dropdownRef}>
               <button 
@@ -73,24 +157,43 @@ export default function LandingHeader() {
                 </div>
               )}
             </div>
-          ) : (
-            <div className="flex space-x-4">
-              <Link
-                href="/login"
-                className="inline-flex items-center justify-center rounded-xl border border-gray-300 px-6 py-2.5 text-base font-medium text-primary-600 bg-white hover:bg-gray-50 transition-colors"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/signup"
-                className="inline-flex items-center justify-center rounded-xl px-6 py-2.5 text-base font-medium text-white bg-primary-600 hover:bg-primary-700 transition-colors"
-              >
-                Start Free Trial
-              </Link>
-            </div>
-          )}
+          ) :(
+          <button onClick={() => router.push("/signup")} className="hidden lg:flex bg-primary-600 hover:bg-primary-700 transition-colors text-white px-6 py-3 rounded-full font-medium text-sm transition-all duration-300 hover:shadow-lg hover:scale-105 items-center">
+            START FREE TRIAL
+            <ArrowRight className="ml-2 w-4 h-4" />
+          </button>
+        )}
         </div>
-      </nav>
+
+        {/* Mobile Navigation Menu */}
+        <div
+          className={`lg:hidden transition-all duration-300 ease-in-out overflow-hidden ${
+            isMobileMenuOpen ? "max-h-96 opacity-100 mt-4" : "max-h-0 opacity-0"
+          }`}
+        >
+          <div className="bg-gray-800/95 backdrop-blur-md rounded-2xl p-4 space-y-2 border border-gray-700/30">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleSectionClick(item.id)}
+                className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeSection === item.id
+                    ? "bg-primary-600 text-white"
+                    : "text-gray-300 hover:text-white hover:bg-gray-700/50"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+            <div className="pt-2 border-t border-gray-700">
+              <button onClick={() => router.push("/signup")} className="w-full bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-3 rounded-xl font-medium text-sm transition-colors flex items-center justify-center">
+                START FREE TRIAL
+                <ArrowRight className="ml-2 w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </header>
   )
 }

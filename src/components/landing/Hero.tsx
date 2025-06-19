@@ -1,58 +1,84 @@
-"use client"
-import Link from "next/link"
-import Button from "../ui/Button"
-import { Shield, ArrowRight, PlayCircle } from "lucide-react"
+"use client";
 
+import { ArrowRight } from "lucide-react";
+import { PieChart } from "lucide-react";
+import { useRouter } from "next/navigation";
 export default function Hero() {
+  const router = useRouter();
   return (
-    <section className="relative overflow-hidden py-20">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-primary-50 via-white to-white" />
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
-        <div className="lg:grid lg:grid-cols-12 lg:gap-8">
-          <div className="lg:col-span-6">
-            <div className="inline-flex items-center rounded-full bg-primary-50 px-4 py-1 text-sm font-medium text-primary-700 mb-6">
-              <Shield className="h-4 w-4 mr-2" />
-              Canadian-built platform
-            </div>
-            <h1 className="text-4xl font-extrabold text-gray-900 sm:text-5xl md:text-6xl lg:text-5xl xl:text-6xl">
-              <span className="block">Plan smarter.</span>
-              <span className="block text-primary-600">Track better.</span>
-              <span className="block">Deliver faster.</span>
-            </h1>
-            <p className="mt-6 text-xl text-gray-500">
-              Run your business with confidence on a secure, Canadian-built platform.
-            </p>
-            <div className="mt-8 flex space-x-4">
-              <Link href="/signup">
-                <Button size="lg" className="bg-primary-600 hover:bg-primary-700 group">
-                  Start Free Trial
-                  <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </Link>
-              <Button
-                variant="outline"
-                size="lg"
-                leftIcon={<PlayCircle className="h-5 w-5" />}
-                className="text-primary-600 border-primary-600 hover:bg-primary-50"
-              >
-                Book a Demo
-              </Button>
-            </div>
-            <p className="mt-3 text-sm text-gray-500 flex items-center">
-              <Shield className="h-4 w-4 mr-1 text-success-500" />
-              No credit card required
-            </p>
-          </div>
-          <div className="mt-12 lg:mt-0 lg:col-span-6">
-            <div className="relative">
-              <div className="absolute -inset-4">
-                <div className="w-full h-full mx-auto opacity-30 blur-lg filter bg-gradient-to-r from-primary-600 to-secondary-500" />
+    <section
+      id="demos"
+      className="relative overflow-hidden min-h-screen flex items-center"
+    >
+      {/* Background Image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{
+          backgroundImage: `url('/hero-background.jpeg')`,
+        }}
+      ></div>
+
+      {/* Dark Overlay */}
+      <div className="absolute inset-0 bg-black/80"></div>
+
+      {/* Background Pattern */}
+      <div className="absolute inset-0 opacity-5">
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fillRule='evenodd'%3E%3Cg fill='%23ffffff' fillOpacity='0.1'%3E%3Ccircle cx='30' cy='30' r='1'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+          }}
+        ></div>
+      </div>
+
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24  md:pb-24">
+        {/* Hero Content */}
+        <div className="text-center pb-20 lg:pb-32">
+          {/* Logo Icon */}
+          <div className="flex justify-center mb-8">
+            <div className="w-36 h-20  rounded-full flex items-center justify-center shadow-lg">
+              <div className="w-36 h-16  rounded-full flex items-center justify-center border-2 border-primary-600">
+                <div className="flex items-center">
+                <PieChart className="h-10 w-10 text-primary-600" />
+                <span className="ml-2 text-2xl font-bold text-primary-600">Caply</span>
+         
+                </div>
               </div>
-              <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg" alt="Team planning" className="rounded-lg shadow-2xl" />
             </div>
+          </div>
+
+          {/* Headline */}
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight mb-6">
+            Plan smarter. Track better.
+            <br />
+            Deliver faster.
+          </h1>
+
+          {/* Subheadline */}
+          <p className="text-lg md:text-xl text-gray-200 mb-8 max-w-3xl mx-auto">
+            Run your business with confidence on a secure, Canadian-built
+            platform.
+          </p>
+
+          {/* CTA Buttons */}
+          <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
+            <button
+              onClick={() => router.push("/signup")}
+              className="bg-primary-600 hover:bg-primary-700 text-white px-8 py-4 rounded-full font-semibold text-lg transition-all duration-300 hover:shadow-lg hover:scale-105 flex items-center justify-center"
+            >
+              Start Free
+              <ArrowRight className="ml-2 w-5 h-5" />
+            </button>
+            <button
+              onClick={() => router.push("/contact")}
+              className="bg-white hover:bg-gray-100 text-gray-900 px-8 py-4 rounded-full font-semibold text-lg transition-all duration-300 hover:shadow-lg hover:scale-105 flex items-center justify-center"
+            >
+              Book a Demo
+              <ArrowRight className="ml-2 w-5 h-5" />
+            </button>
           </div>
         </div>
       </div>
     </section>
-  )
+  );
 }

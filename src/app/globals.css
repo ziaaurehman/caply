@@ -49,3 +49,50 @@
     @apply h-12 rounded-md px-10 text-base;
   }
 }
+
+/* Custom animations */
+@keyframes slowScroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-slow-scroll {
+  animation: slowScroll 30s linear infinite;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Slow upward scroll animation for left and right columns */
+@keyframes scroll-up-slow {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}
+
+/* Slow downward scroll animation for center column */
+@keyframes scroll-down-slow {
+  0% {
+    transform: translateY(-50%);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.animate-scroll-up-slow {
+  animation: scroll-up-slow 60s linear infinite;
+}
+
+.animate-scroll-down-slow {
+  animation: scroll-down-slow 60s linear infinite;
+}
