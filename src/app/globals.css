@@ -96,3 +96,66 @@
 .animate-scroll-down-slow {
   animation: scroll-down-slow 60s linear infinite;
 }
+
+/* Custom scrollbar styles */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgb(203 213 225);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(148 163 184);
+}
+
+/* Ensure body doesn't scroll when sidebar is open on mobile */
+.overflow-hidden {
+  overflow: hidden;
+}
+
+/* Custom focus styles for better accessibility */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+}
+
+/* Smooth transitions for sidebar */
+.sidebar-transition {
+  transition: transform 0.3s ease-in-out;
+}
+
+/* Responsive layout helpers */
+@media (min-width: 768px) {
+  .sidebar-expanded {
+    width: 14rem; /* w-56 */
+  }
+  
+  .sidebar-collapsed {
+    width: 4rem; /* w-16 */
+  }
+}
+
+/* Tooltip animation */
+.tooltip {
+  transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+}
+
+/* Icon button hover effects */
+.icon-button {
+  @apply transition-all duration-200 ease-in-out;
+}
+
+.icon-button:hover {
+  @apply scale-105;
+}

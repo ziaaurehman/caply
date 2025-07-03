@@ -14,7 +14,6 @@ declare module "next-auth" {
       name?: string | null
       email?: string | null
       image?: string | null
-      role?: "admin" | "manager" | "employee"
       avatar?: string | null
     }
   }
@@ -23,7 +22,6 @@ declare module "next-auth" {
     name?: string | null
     email?: string | null
     image?: string | null
-    role?: "admin" | "manager" | "employee"
     avatar?: string | null
   }
 }
@@ -32,8 +30,36 @@ declare module "next-auth" {
 declare module "next-auth/jwt" {
   interface JWT {
     id?: string
-    role?: "admin" | "manager" | "employee"
     avatar?: string | null
+  }
+}
+
+// Helper function to get user profile from database
+async function getUserProfile(userId: string) {
+  try {
+    const supabase = await createClient()
+    
+    // Get user profile from users table (organization-based schema)
+    const { data: userData, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single()
+    
+    if (error || !userData) {
+      console.log('No user found for:', userId)
+      return null
+    }
+    
+    return {
+      id: userData.id,
+      email: userData.email,
+      name: userData.full_name,
+      avatar: userData.avatar_url,
+    }
+  } catch (error) {
+    console.error('Error fetching user profile:', error)
+    return null
   }
 }
 
@@ -77,15 +103,25 @@ export const authConfig: NextAuthOptions = {
           }
 
           console.log("User authenticated successfully:", data.user.id)
-          console.log("User metadata:", data.user.user_metadata)
 
-          // Return the user object
-          return {
-            id: data.user.id,
-            email: data.user.email,
-            name: data.user.user_metadata?.name || data.user.email?.split('@')[0],
-            role: data.user.user_metadata?.role || "employee",
-            avatar: data.user.user_metadata?.avatar || null,
+          // Get user profile from database
+          const profile = await getUserProfile(data.user.id)
+          
+          if (profile) {
+            return {
+              id: profile.id,
+              email: profile.email,
+              name: profile.name || data.user.email?.split('@')[0],
+              avatar: profile.avatar,
+            }
+          } else {
+            // Fallback to user metadata if no profile (shouldn't happen in normal flow)
+            return {
+              id: data.user.id,
+              email: data.user.email,
+              name: data.user.user_metadata?.name || data.user.email?.split('@')[0],
+              avatar: data.user.user_metadata?.avatar || null,
+            }
           }
         } catch (error: any) {
           console.error("Error in authorize function:", error)
@@ -107,27 +143,80 @@ export const authConfig: NextAuthOptions = {
     newUser: "/dashboard",
   },
   callbacks: {
-    async jwt({ token, user }: { token: JWT; user: any }) {
+    async jwt({ token, user, account }: { token: JWT; user: any; account: any }) {
+      // Initial sign in
       if (user) {
         console.log("JWT callback - user:", user)
         token.id = user.id
-        token.role = user.role
         token.avatar = user.avatar
       }
+      
+      // On subsequent requests, refresh user data from database
+      else if (token.id) {
+        const profile = await getUserProfile(token.id as string)
+        if (profile) {
+          token.avatar = profile.avatar
+        }
+      }
+      
       return token
     },
+    
     async session({ session, token }: { session: Session; token: JWT }) {
       if (token && session.user) {
         console.log("Session callback - token:", token)
         session.user.id = token.id as string
-        session.user.role = token.role as "admin" | "manager" | "employee"
         session.user.avatar = token.avatar as string | undefined
       }
       return session
     },
+
+    async signIn({ user, account, profile }) {
+      // For OAuth providers (Google), handle profile creation
+      if (account?.provider === "google" && user.email) {
+        try {
+          const supabase = await createClient()
+          
+          // Check if user already exists in our users table
+          const { data: existingUser } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', user.email)
+            .single()
+          
+          if (!existingUser) {
+            // Create user profile manually for OAuth users
+            console.log('Creating profile for OAuth user:', user.email)
+            
+            const { error: profileError } = await supabase
+              .from('users')
+              .insert({
+                id: user.id,
+                email: user.email,
+                full_name: user.name || user.email?.split('@')[0] || 'Unknown User'
+              })
+            
+            if (profileError) {
+              console.error('Failed to create OAuth user profile:', profileError)
+              return false
+            }
+          }
+          
+          return true
+        } catch (error) {
+          console.error('Error in signIn callback:', error)
+          return false
+        }
+      }
+      
+      return true
+    },
   },
 }
 
-// Create auth helpers
-const { auth, signIn, signOut } = NextAuth(authConfig)
-export { auth, signIn, signOut } 
+// Export NextAuth configuration for API routes
+const authHandler = NextAuth(authConfig)
+
+// For NextAuth v4, export signIn and signOut separately
+export const { signIn, signOut } = authHandler
+export default authHandler 

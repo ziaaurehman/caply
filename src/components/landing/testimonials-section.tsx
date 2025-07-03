@@ -133,7 +133,7 @@ export default function TestimonialsSection() {
   return (
     <section className="py-16 lg:py-24 bg-gray-50 overflow-hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
+       
         <div className="text-center mb-16">
           <h2 className="text-4xl lg:text-5xl font-semibold text-gray-900 mb-4 leading-tight">
             Trusted by<br />businesses worldwide

@@ -14,19 +14,35 @@ export async function registerUser(formData: {
 }) {
   const supabase = await createClient()
 
+  // Register user with Supabase auth (clean schema approach)
   const { data, error } = await supabase.auth.signUp({
     email: formData.email,
     password: formData.password,
     options: {
       data: {
         name: formData.fullName,
-        role: "employee", // Default role
       },
     },
   })
 
   if (error) {
     return { success: false, error: error.message }
+  }
+
+  // If user is immediately signed in, create their profile
+  if (data.user && data.session) {
+    const { error: profileError } = await supabase
+      .from('users')
+      .insert({
+        id: data.user.id,
+        email: data.user.email,
+        full_name: formData.fullName
+      })
+
+    if (profileError) {
+      console.error("Profile creation error:", profileError)
+      return { success: false, error: "Account created but profile setup failed" }
+    }
   }
 
   return { success: true, data }

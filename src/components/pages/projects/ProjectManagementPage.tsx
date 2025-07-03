@@ -67,14 +67,14 @@ export default function ProjectManagementPage() {
   
   const columns = [
     { id: 'todo', title: 'To Do' },
-    { id: 'in-progress', title: 'In Progress' },
+    { id: 'in_progress', title: 'In Progress' },
     { id: 'completed', title: 'Done' },
   ];
   
   const filteredTasks = tasks
-    .filter(task => task.projectId === selectedProject)
+    .filter(task => task.project_id === selectedProject)
     .filter(task => showCompleted || task.status !== 'completed')
-    .filter(task => assigneeFilter === 'all' || task.assignedTo.includes(assigneeFilter));
+    .filter(task => assigneeFilter === 'all' || task.assigned_to.includes(assigneeFilter));
   
   const tasksByStatus = columns.reduce((acc, column) => {
     acc[column.id] = filteredTasks.filter(task => task.status === column.id);
@@ -93,7 +93,7 @@ export default function ProjectManagementPage() {
     const newStatus = over.id as string;
     
     if (oldStatus !== newStatus) {
-      await updateTask(task.id, { status: newStatus as 'todo' | 'in-progress' | 'completed' });
+      await updateTask(task.id, { status: newStatus as 'todo' | 'in_progress' | 'completed' });
     }
     
     setActiveId(null);

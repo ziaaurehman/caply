@@ -1,5 +1,6 @@
 import { create } from "zustand"
-import type { Employee } from "@/lib/types"
+import type { Employee, Role } from "@/lib/types"
+import { DEFAULT_ROLES } from "@/utils/rbac/roles"
 
 interface EmployeeState {
   employees: Employee[]
@@ -11,6 +12,17 @@ interface EmployeeState {
   updateEmployee: (id: string, employee: Partial<Employee>) => Promise<Employee>
   deleteEmployee: (id: string) => Promise<void>
 }
+
+// Create proper role objects for mock data
+const createMockRole = (roleId: string): Role => {
+  const baseRole = DEFAULT_ROLES.find(r => r.id === roleId)!;
+  return {
+    ...baseRole,
+    organizationId: "demo-org",
+    createdAt: "2023-01-01T00:00:00Z",
+    updatedAt: "2023-01-01T00:00:00Z",
+  };
+};
 
 // Mock data
 const mockEmployees: Employee[] = [
@@ -24,6 +36,10 @@ const mockEmployees: Employee[] = [
     availability: "full-time",
     startDate: "2022-01-15",
     skills: ["React", "TypeScript", "CSS"],
+    roleId: "employee",
+    role: createMockRole("employee"),
+    organizationId: "demo-org",
+    isActive: true,
   },
   {
     id: "2",
@@ -36,6 +52,10 @@ const mockEmployees: Employee[] = [
     avatar: "/avatars/jane-smith.jpg",
     startDate: "2021-11-01",
     skills: ["Figma", "UI Design", "User Research"],
+    roleId: "manager",
+    role: createMockRole("manager"),
+    organizationId: "demo-org",
+    isActive: true,
   },
   {
     id: "3",
@@ -47,6 +67,10 @@ const mockEmployees: Employee[] = [
     availability: "part-time",
     startDate: "2023-02-10",
     skills: ["Node.js", "PostgreSQL", "API Design"],
+    roleId: "employee",
+    role: createMockRole("employee"),
+    organizationId: "demo-org",
+    isActive: true,
   },
 ]
 

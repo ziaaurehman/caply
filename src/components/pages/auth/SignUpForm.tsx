@@ -45,14 +45,13 @@ export default function SignUpForm() {
     try {
       console.log("Attempting to register user:", formData.email)
       
-      // Register the user with Supabase
+      // Register the user with Supabase (simple approach - no role logic needed)
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
           data: {
             name: formData.fullName,
-            role: "employee", // Default role
           },
           emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
@@ -72,6 +71,26 @@ export default function SignUpForm() {
         // User is immediately signed in, proceed to login with NextAuth
         console.log("User created and signed in with Supabase, proceeding to NextAuth login")
         
+        // Create user profile manually (clean schema approach)
+        console.log("Creating user profile for:", data.user.email)
+        
+        const { error: profileError } = await supabase
+          .from('users')
+          .insert({
+            id: data.user.id,
+            email: data.user.email,
+            full_name: formData.fullName
+          })
+        
+        if (profileError) {
+          console.error("Profile creation error:", profileError)
+          setError("Account created but profile setup failed. Please try logging in.")
+          setIsLoading(false)
+          return
+        }
+        
+        console.log("User profile created successfully")
+        
         const signInResult = await signIn("credentials", {
           redirect: false,
           email: formData.email,
@@ -86,7 +105,7 @@ export default function SignUpForm() {
         }
 
         // Use window.location instead of router.push for a clean page reload
-        window.location.href = "/dashboard"
+        window.location.href = "/workspace"
       } else {
         // Email confirmation is required
         console.log("Email confirmation required")
@@ -118,7 +137,7 @@ export default function SignUpForm() {
   const handleGoogleSignUp = async () => {
     setIsLoading(true)
     try {
-      await signIn("google", { callbackUrl: "/dashboard" })
+      await signIn("google", { callbackUrl: "/workspace" })
     } catch (error) {
       console.error("Google sign up error:", error)
       setError("Failed to sign up with Google")

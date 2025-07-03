@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useRef } from "react"
+import { useSession } from "next-auth/react"
 import TopBanner from "@/components/landing/TopBanner"
 import LandingHeader from "@/components/landing/Header"
 import Hero from "@/components/landing/Hero"
@@ -13,8 +14,28 @@ import TestimonialsSection from "@/components/landing/testimonials-section"
 import DemoSection from "@/components/landing/DemoSection"
 import FAQSection from "@/components/landing/FAQSection"
 import CTABanner from "@/components/landing/CTABanner"
+import { useSubscriptionStore } from "@/lib/stores/subscriptionStore"
+import { useAuthStore } from "@/lib/stores/authStore"
+
 export default function LandingPage() {
   const [activeSection, setActiveSection] = useState("Home")
+  const { data: session } = useSession()
+  const { organization, fetchUserFromNextAuth } = useAuthStore()
+  const { fetchCurrentSubscription } = useSubscriptionStore()
+
+  // Initialize auth store when NextAuth session exists
+  useEffect(() => {
+    if (session && !organization) {
+      fetchUserFromNextAuth(session)
+    }
+  }, [session, organization, fetchUserFromNextAuth])
+
+  // Load subscription data for authenticated users
+  useEffect(() => {
+    if (session && organization) {
+      fetchCurrentSubscription(organization.id)
+    }
+  }, [session, organization, fetchCurrentSubscription])
 
   // Detect which section is currently in view
   useEffect(() => {

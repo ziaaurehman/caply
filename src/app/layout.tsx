@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "Caply - Resource & Capacity Planning",
   description: "Your complete resource and capacity planning solution",
-    generator: 'v0.dev'
+    generator: 'v0.0.1'
 }
 
 export default function RootLayout({

@@ -26,6 +26,11 @@ const mockProjects: Project[] = [
     endDate: "2024-03-31",
     budget: { hours: 400, cost: 50000 },
     actual: { hours: 280, cost: 35000 },
+    ownerId: "1",
+    organizationId: "1",
+    isPublic: false,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-15T00:00:00Z",
   },
   {
     id: "2",
@@ -36,6 +41,11 @@ const mockProjects: Project[] = [
     endDate: "2024-06-30",
     budget: { hours: 800, cost: 120000 },
     actual: { hours: 0, cost: 0 },
+    ownerId: "1",
+    organizationId: "1",
+    isPublic: true,
+    createdAt: "2024-02-01T00:00:00Z",
+    updatedAt: "2024-02-01T00:00:00Z",
   },
 ]
 
@@ -78,6 +88,11 @@ export const useProjectStore = create<ProjectState>((set) => ({
     const newProject: Project = {
       ...project,
       id: Date.now().toString(),
+      ownerId: project.ownerId || "1",
+      organizationId: project.organizationId || "1",
+      isPublic: project.isPublic || false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     }
     set((state) => ({
       projects: [...state.projects, newProject],
