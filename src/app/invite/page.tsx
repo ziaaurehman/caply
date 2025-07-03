@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession, signIn } from 'next-auth/react'
 import { CheckCircle, XCircle, Clock, Users, Shield, Mail } from 'lucide-react'
@@ -23,7 +23,7 @@ interface InvitationData {
   expires_at: string
 }
 
-const InvitePage = () => {
+const InvitePageContent = () => {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { data: session, status } = useSession()
@@ -322,6 +322,25 @@ const InvitePage = () => {
         </div>
       </div>
     </div>
+  )
+}
+
+// Loading fallback component
+const InvitePageLoading = () => (
+  <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+    <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full mx-4">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+      <p className="text-center text-gray-600 mt-4">Loading invitation...</p>
+    </div>
+  </div>
+)
+
+// Main page component with Suspense boundary
+const InvitePage = () => {
+  return (
+    <Suspense fallback={<InvitePageLoading />}>
+      <InvitePageContent />
+    </Suspense>
   )
 }
 

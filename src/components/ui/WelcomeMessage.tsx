@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from 'react'
+import React, { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
@@ -8,7 +8,7 @@ import { Crown, Shield, Users, X, CheckCircle } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 
-export default function WelcomeMessage() {
+const WelcomeMessageContent = () => {
   const searchParams = useSearchParams()
   const { data: session } = useSession()
   const [isVisible, setIsVisible] = useState(false)
@@ -133,5 +133,14 @@ export default function WelcomeMessage() {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// Main component with Suspense boundary
+export default function WelcomeMessage() {
+  return (
+    <Suspense fallback={null}>
+      <WelcomeMessageContent />
+    </Suspense>
   )
 } 
