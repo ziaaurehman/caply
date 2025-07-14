@@ -128,7 +128,7 @@ export default function DashboardPage() {
     });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 px-4">
       <WelcomeMessage />
       
       <div className="flex justify-between items-center">

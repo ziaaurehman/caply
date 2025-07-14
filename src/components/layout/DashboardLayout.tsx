@@ -37,8 +37,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         
         {/* Main content with single scroll */}
         <main className="min-h-[calc(100vh-4rem)] overflow-y-auto focus:outline-none scrollbar-thin">
-          <div className="py-6">
-            <div className="mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl">
+          <div className="py-6">     {/* sm:px-6 lg:px-8 */}
+            <div className="mx-auto max-w-7xl">   
               {children}
             </div>
           </div>
