@@ -21,14 +21,13 @@ import WelcomeMessage from "@/components/ui/WelcomeMessage"
 export default function DashboardPage() {
   const router = useRouter();
   const { employees, fetchEmployees } = useEmployeeStore()
-  const { projects, assignments, fetchProjects, fetchAssignments } = useProjectStore()
+  const { projects, fetchProjects } = useProjectStore()
   const { data: session } = useSession()
 
   useEffect(() => {
     fetchEmployees()
     fetchProjects()
-    fetchAssignments()
-  }, [fetchEmployees, fetchProjects, fetchAssignments])
+  }, [fetchEmployees, fetchProjects])
 
   // Calculate active employees (excluding those on leave today)
   const today = format(new Date(), 'yyyy-MM-dd');
@@ -40,14 +39,21 @@ export default function DashboardPage() {
   const previousPeriodHours = 1100; // Mock data
   const hoursChange = totalHoursLogged - previousPeriodHours;
   
+  // Mock assignments data for now
+  const mockAssignments = [
+    { employeeId: '1', hoursPerDay: 8 },
+    { employeeId: '2', hoursPerDay: 6 },
+    { employeeId: '3', hoursPerDay: 7 },
+  ];
+
   // Calculate resource utilization
   const totalCapacity = employees.reduce((sum, employee) => sum + employee.capacityHours, 0);
-  const totalAllocated = assignments.reduce((sum, assignment) => sum + assignment.hoursPerDay, 0);
+  const totalAllocated = mockAssignments.reduce((sum, assignment) => sum + assignment.hoursPerDay, 0);
   const utilizationRate = totalCapacity > 0 ? Math.round((totalAllocated / totalCapacity) * 100) : 0;
   
   // Calculate overallocated resources
   const overallocatedEmployees = employees.filter(employee => {
-    const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
+    const employeeAssignments = mockAssignments.filter(a => a.employeeId === employee.id);
     const allocatedHours = employeeAssignments.reduce((sum, a) => sum + a.hoursPerDay, 0);
     return allocatedHours > employee.capacityHours;
   });
@@ -97,7 +103,7 @@ export default function DashboardPage() {
 
   // Calculate capacity data for each employee
   const capacityData = employees.map(employee => {
-    const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
+    const employeeAssignments = mockAssignments.filter(a => a.employeeId === employee.id);
     const allocatedHours = employeeAssignments.reduce((sum, a) => sum + a.hoursPerDay, 0);
     const utilizationRate = Math.round((allocatedHours / employee.capacityHours) * 100);
     

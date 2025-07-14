@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { X, Users } from 'lucide-react';
 import Button from '@/components/ui/Button';
-import { useTaskStore } from '@/lib/stores/taskStore';
 import { useEmployeeStore } from '@/lib/stores/employeeStore';
+import { taskAPI, type Task, type CreateTaskData, type UpdateTaskData } from '@/utils/api';
 import { cn } from '@/lib/utils';
 
 interface TaskModalProps {
@@ -20,31 +20,45 @@ const TaskModal: React.FC<TaskModalProps> = ({
   projectId,
   taskId,
 }) => {
-  const { tasks, addTask, updateTask } = useTaskStore();
   const { employees } = useEmployeeStore();
+  const [tasks, setTasks] = useState<Task[]>([]);
   
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    assignedTo: [] as string[],
-    estimatedHours: '',
-    dueDate: '',
+    assigned_to: [] as string[],
+    estimated_hours: '',
+    due_date: '',
     priority: 'medium',
     milestone: false,
   });
   
+  // Fetch tasks for the project
+  const fetchTasks = async () => {
+    try {
+      const data = await taskAPI.getTasksByProject(projectId);
+      setTasks(data.tasks);
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchTasks();
+  }, [projectId]);
+
   useEffect(() => {
     if (taskId) {
-      const task = tasks.find(t => t.id === taskId);
+      const task = tasks.find((t: Task) => t.id === taskId);
       if (task) {
         setFormData({
           title: task.title,
-          description: task.description,
-          assignedTo: task.assignedTo,
-          estimatedHours: task.estimatedHours?.toString() || '',
-          dueDate: task.dueDate || '',
+          description: task.description || '',
+          assigned_to: task.assigned_to ? [task.assigned_to] : [],
+          estimated_hours: task.estimated_hours?.toString() || '',
+          due_date: task.due_date || '',
           priority: task.priority,
-          milestone: task.milestone || false,
+          milestone: false, // milestone is not in the Task interface
         });
       }
     } else {
@@ -52,9 +66,9 @@ const TaskModal: React.FC<TaskModalProps> = ({
       setFormData({
         title: '',
         description: '',
-        assignedTo: [],
-        estimatedHours: '',
-        dueDate: '',
+        assigned_to: [],
+        estimated_hours: '',
+        due_date: '',
         priority: 'medium',
         milestone: false,
       });
@@ -67,22 +81,24 @@ const TaskModal: React.FC<TaskModalProps> = ({
     const taskData = {
       title: formData.title,
       description: formData.description,
-      assignedTo: formData.assignedTo,
-      projectId,
-      estimatedHours: formData.estimatedHours ? Number(formData.estimatedHours) : undefined,
-      dueDate: formData.dueDate || undefined,
+      assigned_to: formData.assigned_to[0], // Task interface expects single string, not array
+      project_id: projectId,
+      estimated_hours: formData.estimated_hours ? Number(formData.estimated_hours) : undefined,
+      due_date: formData.due_date || undefined,
       status: 'todo' as const,
-      priority: formData.priority as 'low' | 'medium' | 'high',
-      actualHours: 0,
-      progress: 0,
-      milestone: formData.milestone,
+      priority: formData.priority as 'low' | 'medium' | 'high' | 'urgent',
+      actual_hours: 0,
+      position: 0, // This should be calculated based on current tasks
+      created_by: "1", // This should come from auth context
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
     
     try {
       if (taskId) {
-        await updateTask(taskId, taskData);
+        await taskAPI.updateTask(taskId, taskData);
       } else {
-        await addTask(taskData);
+        await taskAPI.createTask(taskData);
       }
       onClose();
     } catch (error) {
@@ -141,14 +157,14 @@ const TaskModal: React.FC<TaskModalProps> = ({
                     key={employee.id}
                     type="button"
                     onClick={() => {
-                      const newAssigned = formData.assignedTo.includes(employee.id)
-                        ? formData.assignedTo.filter(id => id !== employee.id)
-                        : [...formData.assignedTo, employee.id];
-                      setFormData({ ...formData, assignedTo: newAssigned });
+                      const newAssigned = formData.assigned_to.includes(employee.id)
+                        ? formData.assigned_to.filter(id => id !== employee.id)
+                        : [...formData.assigned_to, employee.id];
+                      setFormData({ ...formData, assigned_to: newAssigned });
                     }}
                     className={cn(
                       "inline-flex items-center px-3 py-1 rounded-full text-sm border transition-colors",
-                      formData.assignedTo.includes(employee.id)
+                      formData.assigned_to.includes(employee.id)
                         ? "bg-primary-50 border-primary-200 text-primary-700"
                         : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100"
                     )}
@@ -177,8 +193,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  value={formData.estimatedHours}
-                  onChange={(e) => setFormData({ ...formData, estimatedHours: e.target.value })}
+                  value={formData.estimated_hours}
+                  onChange={(e) => setFormData({ ...formData, estimated_hours: e.target.value })}
                   className="mt-1 block w-full rounded-lg border border-gray-200 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                   min="0"
                   step="0.5"
@@ -191,8 +207,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 </label>
                 <input
                   type="date"
-                  value={formData.dueDate}
-                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                  value={formData.due_date}
+                  onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
                   className="mt-1 block w-full rounded-lg border border-gray-200 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                 />
               </div>
@@ -211,20 +227,8 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
                 </select>
-              </div>
-              
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="milestone"
-                  checked={formData.milestone}
-                  onChange={(e) => setFormData({ ...formData, milestone: e.target.checked })}
-                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                />
-                <label htmlFor="milestone" className="ml-2 block text-sm text-gray-700">
-                  Mark as milestone
-                </label>
               </div>
             </div>
           </div>

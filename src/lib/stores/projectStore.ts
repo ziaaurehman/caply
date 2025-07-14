@@ -1,76 +1,58 @@
 import { create } from "zustand"
-import type { Project, Assignment } from "@/lib/types"
+import type { Project, CreateProjectData } from "@/lib/types"
 
 interface ProjectState {
   projects: Project[]
-  assignments: Assignment[]
   isLoading: boolean
   fetchProjects: () => Promise<void>
-  fetchAssignments: () => Promise<void>
-  addProject: (project: Omit<Project, "id">) => Promise<void>
+  addProject: (project: CreateProjectData) => Promise<void>
   updateProject: (id: string, updates: Partial<Project>) => Promise<void>
   deleteProject: (id: string) => Promise<void>
-  addAssignment: (assignment: Omit<Assignment, "id">) => Promise<void>
-  updateAssignment: (id: string, updates: Partial<Assignment>) => Promise<void>
-  deleteAssignment: (id: string) => Promise<void>
 }
 
 // Mock data
 const mockProjects: Project[] = [
   {
     id: "1",
+    organization_id: "1",
+    client_id: "1",
     name: "Website Redesign",
+    code: "WEB-001",
     description: "Complete overhaul of company website",
-    status: "in-progress",
-    startDate: "2024-01-01",
-    endDate: "2024-03-31",
-    budget: { hours: 400, cost: 50000 },
-    actual: { hours: 280, cost: 35000 },
-    ownerId: "1",
-    organizationId: "1",
-    isPublic: false,
-    createdAt: "2024-01-01T00:00:00Z",
-    updatedAt: "2024-01-15T00:00:00Z",
+    project_type: "time_materials",
+    billing_rate: 125,
+    budget_hours: 400,
+    budget_amount: 50000,
+    start_date: "2024-01-01",
+    end_date: "2024-03-31",
+    status: "active",
+    time_tracking_enabled: true,
+    visibility: "team",
+    created_by: "1",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-15T00:00:00Z",
   },
   {
     id: "2",
+    organization_id: "1",
     name: "Mobile App Development",
     description: "Native iOS and Android app",
-    status: "planned",
-    startDate: "2024-02-15",
-    endDate: "2024-06-30",
-    budget: { hours: 800, cost: 120000 },
-    actual: { hours: 0, cost: 0 },
-    ownerId: "1",
-    organizationId: "1",
-    isPublic: true,
-    createdAt: "2024-02-01T00:00:00Z",
-    updatedAt: "2024-02-01T00:00:00Z",
-  },
-]
-
-const mockAssignments: Assignment[] = [
-  {
-    id: "1",
-    employeeId: "1",
-    projectId: "1",
-    hoursPerDay: 6,
-    startDate: "2024-01-01",
-    endDate: "2024-03-31",
-  },
-  {
-    id: "2",
-    employeeId: "2",
-    projectId: "1",
-    hoursPerDay: 4,
-    startDate: "2024-01-15",
-    endDate: "2024-03-15",
+    project_type: "fixed_fee",
+    budget_hours: 800,
+    budget_amount: 120000,
+    start_date: "2024-02-15",
+    end_date: "2024-06-30",
+    status: "active",
+    time_tracking_enabled: true,
+    visibility: "organization",
+    created_by: "1",
+    created_at: "2024-02-01T00:00:00Z",
+    updated_at: "2024-02-01T00:00:00Z",
   },
 ]
 
 export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
-  assignments: [],
   isLoading: false,
 
   fetchProjects: async () => {
@@ -79,20 +61,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({ projects: mockProjects, isLoading: false })
   },
 
-  fetchAssignments: async () => {
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    set({ assignments: mockAssignments })
-  },
-
-  addProject: async (project) => {
+  addProject: async (projectData) => {
     const newProject: Project = {
-      ...project,
+      ...projectData,
       id: Date.now().toString(),
-      ownerId: project.ownerId || "1",
-      organizationId: project.organizationId || "1",
-      isPublic: project.isPublic || false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      organization_id: projectData.organization_id || "1",
+      status: 'active',
+      time_tracking_enabled: true,
+      visibility: projectData.visibility || 'team',
+      created_by: "1", // This should come from auth context
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }
     set((state) => ({
       projects: [...state.projects, newProject],
@@ -101,37 +80,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   updateProject: async (id, updates) => {
     set((state) => ({
-      projects: state.projects.map((project) => (project.id === id ? { ...project, ...updates } : project)),
+      projects: state.projects.map((project) => 
+        project.id === id 
+          ? { ...project, ...updates, updated_at: new Date().toISOString() } 
+          : project
+      ),
     }))
   },
 
   deleteProject: async (id) => {
     set((state) => ({
       projects: state.projects.filter((project) => project.id !== id),
-    }))
-  },
-
-  addAssignment: async (assignment) => {
-    const newAssignment: Assignment = {
-      ...assignment,
-      id: Date.now().toString(),
-    }
-    set((state) => ({
-      assignments: [...state.assignments, newAssignment],
-    }))
-  },
-
-  updateAssignment: async (id, updates) => {
-    set((state) => ({
-      assignments: state.assignments.map((assignment) =>
-        assignment.id === id ? { ...assignment, ...updates } : assignment,
-      ),
-    }))
-  },
-
-  deleteAssignment: async (id) => {
-    set((state) => ({
-      assignments: state.assignments.filter((assignment) => assignment.id !== id),
     }))
   },
 }))

@@ -2,47 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { X, Mail, Users, DollarSign, Clock, User, Shield } from 'lucide-react';
+import { X, Mail, Users, DollarSign, Clock, User, Shield, ChevronDown } from 'lucide-react';
 import Button from '@/components/ui/Button';
-
-interface Role {
-  id: string;
-  name: string;
-  display_name: string;
-  description: string;
-  permissions: Permission[];
-}
-
-interface Permission {
-  id: string;
-  name: string;
-  display_name: string;
-  description: string;
-  module: string;
-  action: string;
-}
-
-interface TeamMember {
-  id: string;
-  user_id: string;
-  role_id: string;
-  hourly_rate?: number;
-  weekly_capacity: number;
-  department?: string;
-  users: {
-    id: string;
-    email: string;
-    full_name: string;
-    avatar_url?: string;
-    position?: string;
-  };
-  roles: {
-    id: string;
-    name: string;
-    display_name: string;
-    description: string;
-  };
-}
+import { teamAPI, type Role, type Permission, type TeamMember } from '@/utils/api';
 
 interface TeamMemberModalProps {
   isOpen: boolean;
@@ -127,11 +89,8 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
 
   const checkEmailProvider = async () => {
     try {
-      const response = await fetch('/api/debug?check=email-provider');
-      if (response.ok) {
-        const data = await response.json();
-        setEmailProvider(data.provider || 'console');
-      }
+      const data = await teamAPI.getEmailProvider();
+      setEmailProvider(data.provider);
     } catch (error) {
       console.error('Error checking email provider:', error);
       setEmailProvider('console');
@@ -141,13 +100,8 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   const fetchRoles = async () => {
     setLoadingRoles(true);
     try {
-      const response = await fetch('/api/roles');
-      if (response.ok) {
-        const data = await response.json();
-        setRoles(data.roles || []);
-      } else {
-        console.error('Failed to fetch roles');
-      }
+      const data = await teamAPI.getRoles();
+      setRoles(data.roles);
     } catch (error) {
       console.error('Error fetching roles:', error);
     } finally {
@@ -178,7 +132,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-6 border-b">
+        <div className="flex justify-between items-center p-6 border-b border-gray-200">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">
               {isEditing ? 'Edit Team Member' : 'Invite Team Member'}
@@ -192,7 +146,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-500"
+            className="text-gray-400 hover:text-gray-500 transition-colors"
           >
             <X size={24} />
           </button>
@@ -202,31 +156,31 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           {/* Email Section */}
           <div className="space-y-4">
             <div className="flex items-center space-x-2">
-              <Mail className="h-5 w-5 text-gray-400" />
+              <Mail className="h-5 w-5 text-orange-500" />
               <h3 className="text-lg font-medium text-gray-900">Contact Information</h3>
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 Email Address
               </label>
               <input
                 type="email"
                 {...register('email', { required: 'Email is required' })}
                 disabled={isEditing}
-                className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 ${
+                className={`block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
                   isEditing ? 'bg-gray-50 cursor-not-allowed' : ''
                 }`}
                 placeholder="member@company.com"
               />
               {errors.email && (
-                <p className="mt-1 text-sm text-error-600">{errors.email.message}</p>
+                <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
               )}
               {!isEditing && (
                 <p className="mt-1 text-xs text-gray-500">
                   If this email has an account, they'll be added immediately. Otherwise, they'll receive an invitation to create an account.
                   {emailProvider && emailProvider !== 'console' && (
-                    <span className="ml-1 text-blue-500">
+                    <span className="ml-1 text-orange-500">
                       Email will be sent via {emailProvider === 'sendgrid' ? 'SendGrid' : 'Resend'}.
                     </span>
                   )}
@@ -238,51 +192,56 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           {/* Role & Permissions Section */}
           <div className="space-y-4">
             <div className="flex items-center space-x-2">
-              <Shield className="h-5 w-5 text-gray-400" />
+              <Shield className="h-5 w-5 text-orange-500" />
               <h3 className="text-lg font-medium text-gray-900">Role & Permissions</h3>
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 Role
               </label>
-              <select
-                {...register('roleId', { required: 'Role is required' })}
-                disabled={loadingRoles}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
-              >
-                <option value="">
-                  {loadingRoles ? 'Loading roles...' : 'Select a role'}
-                </option>
-                {roles.map((role) => (
-                  <option key={role.id} value={role.id}>
-                    {role.display_name}
+              <div className="relative">
+                <select
+                  {...register('roleId', { required: 'Role is required' })}
+                  disabled={loadingRoles}
+                  className="block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md appearance-none"
+                >
+                  <option value="">
+                    {loadingRoles ? 'Loading roles...' : 'Select a role'}
                   </option>
-                ))}
-              </select>
+                  {roles.map((role) => (
+                    <option key={role.id} value={role.id}>
+                      {role.display_name}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
+                  <ChevronDown className="h-4 w-4" />
+                </div>
+              </div>
               {errors.roleId && (
-                <p className="mt-1 text-sm text-error-600">{errors.roleId.message}</p>
+                <p className="mt-1 text-sm text-red-600">{errors.roleId.message}</p>
               )}
             </div>
 
             {/* Role Details & Permissions */}
             {selectedRole && (
-              <div className="bg-blue-50 rounded-lg p-4">
-                <h4 className="font-medium text-blue-900 mb-2">{selectedRole.display_name}</h4>
-                <p className="text-sm text-blue-700 mb-3">{selectedRole.description}</p>
+              <div className="bg-orange-50 rounded-lg p-4">
+                <h4 className="font-medium text-orange-900 mb-2">{selectedRole.display_name}</h4>
+                <p className="text-sm text-orange-700 mb-3">{selectedRole.description}</p>
                 
                 {selectedRole.permissions.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-blue-800 mb-2">Permissions included:</p>
+                    <p className="text-xs font-medium text-orange-800 mb-2">Permissions included:</p>
                     <div className="grid grid-cols-2 gap-2">
                       {selectedRole.permissions.slice(0, 6).map((permission) => (
                         <div key={permission.id} className="flex items-center space-x-1">
-                          <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
-                          <span className="text-xs text-blue-700">{permission.display_name}</span>
+                          <div className="w-1.5 h-1.5 bg-orange-400 rounded-full"></div>
+                          <span className="text-xs text-orange-700">{permission.display_name}</span>
                         </div>
                       ))}
                       {selectedRole.permissions.length > 6 && (
-                        <div className="text-xs text-blue-600 col-span-2">
+                        <div className="text-xs text-orange-600 col-span-2">
                           +{selectedRole.permissions.length - 6} more permissions
                         </div>
                       )}
@@ -296,31 +255,36 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           {/* Work Details Section */}
           <div className="space-y-4">
             <div className="flex items-center space-x-2">
-              <Users className="h-5 w-5 text-gray-400" />
+              <Users className="h-5 w-5 text-orange-500" />
               <h3 className="text-lg font-medium text-gray-900">Work Details</h3>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Department
                 </label>
-                <select
-                  {...register('department')}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
-                >
-                  <option value="">Select department</option>
-                  {DEPARTMENTS.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    {...register('department')}
+                    className="block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md appearance-none"
+                  >
+                    <option value="">Select department</option>
+                    {DEPARTMENTS.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
+                    <ChevronDown className="h-4 w-4" />
+                  </div>
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  <Clock className="inline h-4 w-4 mr-1" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <Clock className="inline h-4 w-4 mr-1 text-orange-500" />
                   Weekly Capacity (hours)
                 </label>
                 <input
@@ -330,16 +294,16 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
                     min: { value: 1, message: 'Capacity must be at least 1 hour' },
                     max: { value: 168, message: 'Capacity cannot exceed 168 hours' },
                   })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
                 />
                 {errors.weeklyCapacity && (
-                  <p className="mt-1 text-sm text-error-600">{errors.weeklyCapacity.message}</p>
+                  <p className="mt-1 text-sm text-red-600">{errors.weeklyCapacity.message}</p>
                 )}
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700">
-                  <DollarSign className="inline h-4 w-4 mr-1" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <DollarSign className="inline h-4 w-4 mr-1 text-orange-500" />
                   Hourly Rate (CAD)
                 </label>
                 <input
@@ -348,11 +312,11 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
                   {...register('hourlyRate', {
                     min: { value: 0, message: 'Rate must be positive' },
                   })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
                   placeholder="50.00"
                 />
                 {errors.hourlyRate && (
-                  <p className="mt-1 text-sm text-error-600">{errors.hourlyRate.message}</p>
+                  <p className="mt-1 text-sm text-red-600">{errors.hourlyRate.message}</p>
                 )}
               </div>
             </div>
@@ -362,18 +326,18 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           {!isEditing && (
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
-                <User className="h-5 w-5 text-gray-400" />
+                <User className="h-5 w-5 text-orange-500" />
                 <h3 className="text-lg font-medium text-gray-900">Invitation Message</h3>
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Personal Message (Optional)
                 </label>
                 <textarea
                   {...register('message')}
                   rows={3}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
                   placeholder="Add a personal message to your invitation..."
                 />
                 <p className="mt-1 text-xs text-gray-500">
@@ -384,24 +348,24 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           )}
           
           <div className="flex justify-end space-x-3 pt-6 border-t">
-            <Button
+            <button
               type="button"
-              variant="outline"
               onClick={onClose}
               disabled={isLoading}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
             >
               Cancel
-            </Button>
-            <Button
+            </button>
+            <button
               type="submit"
-              variant="default"
               disabled={isLoading}
+              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
             >
               {isLoading 
                 ? (isEditing ? 'Updating...' : 'Sending Invitation...') 
                 : (isEditing ? 'Update Member' : 'Send Invitation')
               }
-            </Button>
+            </button>
           </div>
         </form>
       </div>

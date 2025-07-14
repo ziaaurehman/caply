@@ -5,24 +5,32 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { useEmployeeStore } from '@/lib/stores/employeeStore';
 import { useProjectStore } from '@/lib/stores/projectStore';
 import { cn } from '@/lib/utils';
-import dynamic from 'next/dynamic';
-
-// Dynamically import Recharts to avoid SSR issues
-const PieChart = dynamic(() => import('recharts').then((mod) => mod.PieChart), { ssr: false });
-const Pie = dynamic(() => import('recharts').then((mod) => mod.Pie), { ssr: false });
-const Cell = dynamic(() => import('recharts').then((mod) => mod.Cell), { ssr: false });
-const ResponsiveContainer = dynamic(() => import('recharts').then((mod) => mod.ResponsiveContainer), { ssr: false });
-const Tooltip = dynamic(() => import('recharts').then((mod) => mod.Tooltip), { ssr: false });
-const Legend = dynamic(() => import('recharts').then((mod) => mod.Legend), { ssr: false });
+// import dynamic from 'next/dynamic';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  Legend
+} from 'recharts';
 
 const ResourceAllocation: React.FC = () => {
   const { employees } = useEmployeeStore();
-  const { projects, assignments } = useProjectStore();
+  const { projects } = useProjectStore();
+  
+  // Mock assignments data for now
+  const mockAssignments = [
+    { projectId: '1', employeeId: '1', totalHours: 120, hoursPerDay: 8 },
+    { projectId: '1', employeeId: '2', totalHours: 80, hoursPerDay: 6 },
+    { projectId: '2', employeeId: '3', totalHours: 200, hoursPerDay: 7 },
+    { projectId: '2', employeeId: '1', totalHours: 60, hoursPerDay: 4 },
+  ];
   
   // Calculate project allocation data
-  const projectAllocation = projects.map(project => {
-    const projectAssignments = assignments.filter(a => a.projectId === project.id);
-    const totalHours = projectAssignments.reduce((sum, a) => sum + a.totalHours, 0);
+  const projectAllocation = projects.map((project: any) => {
+    const projectAssignments = mockAssignments.filter((a: any) => a.projectId === project.id);
+    const totalHours = projectAssignments.reduce((sum: number, a: any) => sum + a.totalHours, 0);
     
     return {
       name: project.name,
@@ -32,11 +40,11 @@ const ResourceAllocation: React.FC = () => {
   });
   
   // Calculate skill distribution
-  const skillDistribution = employees.reduce((acc, employee) => {
-    const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
-    const hours = employeeAssignments.reduce((sum, a) => sum + a.totalHours, 0);
+  const skillDistribution = employees.reduce((acc: any[], employee: any) => {
+    const employeeAssignments = mockAssignments.filter((a: any) => a.employeeId === employee.id);
+    const hours = employeeAssignments.reduce((sum: number, a: any) => sum + a.totalHours, 0);
     
-    const existingSkill = acc.find(s => s.name === employee.position);
+    const existingSkill = acc.find((s: any) => s.name === employee.position);
     if (existingSkill) {
       existingSkill.value += hours;
       existingSkill.count += 1;
@@ -49,33 +57,33 @@ const ResourceAllocation: React.FC = () => {
     }
     
     return acc;
-  }, [] as { name: string; value: number; count: number }[]);
+  }, []);
   
   // Calculate workload distribution
   const workloadDistribution = [
     {
       name: 'Overallocated',
-      value: employees.filter(employee => {
-        const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
-        const allocatedHours = employeeAssignments.reduce((sum, a) => sum + a.hoursPerDay, 0);
+      value: employees.filter((employee: any) => {
+        const employeeAssignments = mockAssignments.filter((a: any) => a.employeeId === employee.id);
+        const allocatedHours = employeeAssignments.reduce((sum: number, a: any) => sum + a.hoursPerDay, 0);
         return allocatedHours > employee.capacityHours;
       }).length,
       color: '#EF4444', // error-500
     },
     {
       name: 'Optimal',
-      value: employees.filter(employee => {
-        const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
-        const allocatedHours = employeeAssignments.reduce((sum, a) => sum + a.hoursPerDay, 0);
+      value: employees.filter((employee: any) => {
+        const employeeAssignments = mockAssignments.filter((a: any) => a.employeeId === employee.id);
+        const allocatedHours = employeeAssignments.reduce((sum: number, a: any) => sum + a.hoursPerDay, 0);
         return allocatedHours >= employee.capacityHours * 0.7 && allocatedHours <= employee.capacityHours;
       }).length,
       color: '#22C55E', // success-500
     },
     {
       name: 'Available',
-      value: employees.filter(employee => {
-        const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
-        const allocatedHours = employeeAssignments.reduce((sum, a) => sum + a.hoursPerDay, 0);
+      value: employees.filter((employee: any) => {
+        const employeeAssignments = mockAssignments.filter((a: any) => a.employeeId === employee.id);
+        const allocatedHours = employeeAssignments.reduce((sum: number, a: any) => sum + a.hoursPerDay, 0);
         return allocatedHours < employee.capacityHours * 0.7;
       }).length,
       color: '#3B82F6', // primary-500
@@ -123,13 +131,13 @@ const ResourceAllocation: React.FC = () => {
                     paddingAngle={2}
                     dataKey="value"
                   >
-                    {projectAllocation.map((entry, index) => (
+                    {projectAllocation.map((entry: any, index: number) => (
                       <Cell 
                         key={`cell-${index}`}
                         fill={
-                          entry.status === 'in-progress' ? '#3B82F6' :
+                          entry.status === 'active' ? '#3B82F6' :
                           entry.status === 'completed' ? '#22C55E' :
-                          entry.status === 'planned' ? '#F59E0B' :
+                          entry.status === 'on_hold' ? '#F59E0B' :
                           '#6B7280'
                         }
                       />
@@ -161,16 +169,18 @@ const ResourceAllocation: React.FC = () => {
                     paddingAngle={2}
                     dataKey="value"
                   >
-                    {skillDistribution.map((entry, index) => (
+                    {skillDistribution.map((entry: any, index: number) => (
                       <Cell 
                         key={`cell-${index}`}
-                        fill={[
-                          '#3B82F6', // primary-500
-                          '#14B8A6', // secondary-500
-                          '#F59E0B', // warning-500
-                          '#EC4899', // pink-500
-                          '#8B5CF6', // purple-500
-                        ][index % 5]}
+                        fill={
+                          [
+                            '#3B82F6', // primary-500
+                            '#14B8A6', // secondary-500
+                            '#F59E0B', // warning-500
+                            '#EC4899', // pink-500
+                            '#8B5CF6', // purple-500
+                          ][index % 5]
+                        }
                       />
                     ))}
                   </Pie>
@@ -223,7 +233,7 @@ const ResourceAllocation: React.FC = () => {
         <div className="grid grid-cols-3 gap-4 mt-8 pt-6 border-t border-gray-200">
           <div className="text-center">
             <div className="text-2xl font-semibold text-gray-900">
-              {projects.filter(p => p.status === 'in-progress').length}
+              {projects.filter((p: any) => p.status === 'active').length}
             </div>
             <div className="text-sm text-gray-500">Active Projects</div>
           </div>

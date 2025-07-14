@@ -12,20 +12,20 @@ const ProjectOverview: React.FC = () => {
   
   const sortedProjects = [...projects]
     .sort((a, b) => {
-      if (a.status === 'in-progress' && b.status !== 'in-progress') return -1;
-      if (a.status !== 'in-progress' && b.status === 'in-progress') return 1;
+      if (a.status === 'active' && b.status !== 'active') return -1;
+      if (a.status !== 'active' && b.status === 'active') return 1;
       return 0;
     });
   
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'in-progress':
+      case 'active':
         return '🔵';
       case 'planned':
         return '🟡';
       case 'completed':
         return '🟢';
-      case 'on-hold':
+      case 'on_hold':
         return '⚪';
       default:
         return '⚫';
@@ -52,8 +52,10 @@ const ProjectOverview: React.FC = () => {
   
   const getProjectStatus = (project: any) => {
     const timeProgress = calculateTimeProgress(project);
-    const workProgress = Math.round((project.actual.hours / project.budget.hours) * 100);
-    const budgetProgress = Math.round((project.actual.cost / project.budget.cost) * 100);
+    const actual = project.actual ?? { hours: 0, cost: 0 };
+    const budget = project.budget ?? { hours: 1, cost: 0 };
+    const workProgress = Math.round((actual.hours / budget.hours) * 100);
+    const budgetProgress = Math.round((actual.cost / budget.cost) * 100);
     
     if (budgetProgress > 80) return 'at-risk';
     if (timeProgress > workProgress + 20) return 'behind';
@@ -90,12 +92,15 @@ const ProjectOverview: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {sortedProjects.map(project => {
+              {sortedProjects.map((project: any) => {
+                // Type guards for actual and budget, add sample if missing
+                const actual = project.actual ?? { hours: 40, cost: 1000 };
+                const budget = project.budget ?? { hours: 100, cost: 2000 };
                 const timeProgress = calculateTimeProgress(project);
-                const workProgress = Math.round((project.actual.hours / project.budget.hours) * 100);
-                const budgetVariance = project.budget.cost - project.actual.cost;
-                const remainingDays = getRemainingDays(project.endDate);
-                const status = getProjectStatus(project);
+                const workProgress = Math.round((actual.hours / budget.hours) * 100);
+                const budgetVariance = budget.cost - actual.cost;
+                const remainingDays = getRemainingDays(project.end_date ?? '');
+                const status = getProjectStatus({ ...project, actual, budget });
                 
                 return (
                   <tr key={project.id} className="group hover:bg-gray-50">
@@ -133,9 +138,9 @@ const ProjectOverview: React.FC = () => {
                     
                     <td className="py-3 text-right">
                       <div className="font-medium">
-                        {formatCurrency(project.actual.cost)}
+                        {formatCurrency(actual.cost)}
                         <span className="text-gray-500"> / </span>
-                        {formatCurrency(project.budget.cost)}
+                        {formatCurrency(budget.cost)}
                       </div>
                       <div className={`text-sm ${budgetVariance >= 0 ? 'text-success-600' : 'text-error-600'}`}>
                         {budgetVariance >= 0 ? '+' : ''}{formatCurrency(budgetVariance)}
@@ -147,7 +152,7 @@ const ProjectOverview: React.FC = () => {
                         {remainingDays} days left
                       </div>
                       <div className="text-sm text-gray-500">
-                        {new Date(project.endDate).toLocaleDateString()}
+                        {project.end_date ? new Date(project.end_date).toLocaleDateString() : 'N/A'}
                       </div>
                     </td>
                     

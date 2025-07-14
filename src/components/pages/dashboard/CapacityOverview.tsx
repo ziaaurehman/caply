@@ -8,12 +8,19 @@ import { cn } from '@/lib/utils';
 
 const CapacityOverview: React.FC = () => {
   const { employees } = useEmployeeStore();
-  const { assignments } = useProjectStore();
+  // const { assignments } = useProjectStore();
+  // Use mock assignments for demo/view
+  const mockAssignments = [
+    { employeeId: '1', hoursPerDay: 8 },
+    { employeeId: '2', hoursPerDay: 6 },
+    { employeeId: '3', hoursPerDay: 7 },
+  ];
+  const assignments = mockAssignments;
   
   // Calculate capacity data for each employee
-  const capacityData = employees.map(employee => {
-    const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
-    const allocatedHours = employeeAssignments.reduce((sum, a) => sum + a.hoursPerDay, 0);
+  const capacityData = employees.map((employee: any) => {
+    const employeeAssignments = assignments.filter((a: any) => a.employeeId === employee.id);
+    const allocatedHours = employeeAssignments.reduce((sum: number, a: any) => sum + a.hoursPerDay, 0);
     const utilizationRate = Math.round((allocatedHours / employee.capacityHours) * 100);
     
     return {

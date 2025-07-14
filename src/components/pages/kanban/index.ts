@@ -1,0 +1,5 @@
+export { default as KanbanBoard } from './kanbanPage'
+export { default as KanbanColumn } from './KanbanColumn'
+export { default as KanbanCard } from './KanbanCard'
+export { default as AddTaskModal } from './AddTaskModal'
+export * from './types' 

@@ -3,9 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import Button from '@/components/ui/Button';
-import { useProjectStore } from '@/lib/stores/projectStore';
-import { useTaskStore } from '@/lib/stores/taskStore';
 import { useEmployeeStore } from '@/lib/stores/employeeStore';
+import { projectAPI, taskAPI, type Project, type Task } from '@/utils/api';
 import { 
   DndContext, 
   DragEndEvent, 
@@ -34,8 +33,8 @@ const dropAnimation = {
 };
 
 export default function ProjectManagementPage() {
-  const { projects } = useProjectStore();
-  const { tasks, fetchTasks, updateTask } = useTaskStore();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const { employees, fetchEmployees } = useEmployeeStore();
   
   const [selectedProject, setSelectedProject] = useState<string>('1');
@@ -60,10 +59,30 @@ export default function ProjectManagementPage() {
     useSensor(KeyboardSensor)
   );
   
+  // Fetch projects and tasks
+  const fetchProjects = async () => {
+    try {
+      const data = await projectAPI.getProjects();
+      setProjects(data.projects);
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+    }
+  };
+
+  const fetchTasks = async () => {
+    try {
+      const data = await taskAPI.getTasks();
+      setTasks(data.tasks);
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    }
+  };
+
   useEffect(() => {
+    fetchProjects();
     fetchTasks();
     fetchEmployees();
-  }, [fetchTasks, fetchEmployees]);
+  }, [fetchEmployees]);
   
   const columns = [
     { id: 'todo', title: 'To Do' },
@@ -72,28 +91,28 @@ export default function ProjectManagementPage() {
   ];
   
   const filteredTasks = tasks
-    .filter(task => task.project_id === selectedProject)
-    .filter(task => showCompleted || task.status !== 'completed')
-    .filter(task => assigneeFilter === 'all' || task.assigned_to.includes(assigneeFilter));
+    .filter((task: Task) => task.project_id === selectedProject)
+    .filter((task: Task) => showCompleted || task.status !== 'completed')
+    .filter((task: Task) => assigneeFilter === 'all' || (task.assigned_to && task.assigned_to.includes(assigneeFilter)));
   
   const tasksByStatus = columns.reduce((acc, column) => {
-    acc[column.id] = filteredTasks.filter(task => task.status === column.id);
+    acc[column.id] = filteredTasks.filter((task: Task) => task.status === column.id);
     return acc;
-  }, {} as Record<string, typeof tasks>);
+  }, {} as Record<string, Task[]>);
   
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     
     if (!over) return;
     
-    const task = tasks.find(t => t.id === active.id);
+    const task = tasks.find((t: Task) => t.id === active.id);
     if (!task) return;
     
     const oldStatus = task.status;
     const newStatus = over.id as string;
     
     if (oldStatus !== newStatus) {
-      await updateTask(task.id, { status: newStatus as 'todo' | 'in_progress' | 'completed' });
+      await taskAPI.updateTask(task.id, { status: newStatus as 'todo' | 'in_progress' | 'completed' });
     }
     
     setActiveId(null);
@@ -117,7 +136,7 @@ export default function ProjectManagementPage() {
               onChange={(e) => setSelectedProject(e.target.value)}
               className="text-sm border-gray-300 rounded-md shadow-sm focus:border-primary-500 focus:ring-primary-500"
             >
-              {projects.map(project => (
+              {projects.map((project: Project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
                 </option>
@@ -202,7 +221,7 @@ export default function ProjectManagementPage() {
             {activeId ? (
               <div className="transform rotate-3 cursor-grabbing">
                 <KanbanCard
-                  task={tasks.find(t => t.id === activeId)!}
+                  task={tasks.find((t: Task) => t.id === activeId)!}
                   isDragging
                 />
               </div>

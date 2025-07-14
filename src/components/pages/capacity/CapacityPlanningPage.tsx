@@ -83,7 +83,7 @@ export default function CapacityPlanningPage() {
         projects: [],
       };
       
-      const employeeAssignments = assignments.filter(a => a.employeeId === employee.id);
+      const employeeAssignments = assignments?.filter(a => a.employeeId === employee.id);
       employeeAssignments.forEach(assignment => {
         const project = projects.find(p => p.id === assignment.projectId);
         if (project) {

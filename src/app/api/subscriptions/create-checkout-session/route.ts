@@ -116,8 +116,8 @@ export async function POST(request: NextRequest) {
       customerId,
       priceId: plan.stripe_price_id,
       organizationId,
-      successUrl: `http://localhost:3000/dashboard/settings?success=true`,
-      cancelUrl: `http://localhost:3000/dashboard/settings?canceled=true`,
+      successUrl: `https://caply.vercel.app/dashboard?success=true`,
+      cancelUrl: `https://caply.vercel.app/dashboard?canceled=true`,
       trialPeriodDays: plan.trial_period_days,
     })
 
