@@ -2,7 +2,7 @@
 
 import { ArrowRight, Menu, X } from "lucide-react"
 import Link from "next/link"
-import { PieChart, UserCircle, LogOut } from "lucide-react"
+import { PieChart, UserCircle, LogOut, LayoutDashboard } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
@@ -59,6 +59,11 @@ export default function LandingHeader({
     setDropdownOpen(false) // Close dropdown before logout
     await signOut({ redirect: false })
     router.push("/login")
+  }
+
+  const handleDashboardClick = () => {
+    setDropdownOpen(false)
+    router.push("/dashboard")
   }
 
   const navItems = [
@@ -147,6 +152,13 @@ export default function LandingHeader({
                     <p className="text-sm font-medium text-gray-900">{session.user?.name}</p>
                     <p className="text-xs text-gray-500 truncate">{session.user?.email}</p>
                   </div>
+                  <button 
+                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700"
+                    onClick={handleDashboardClick}
+                  >
+                    <LayoutDashboard className="h-4 w-4 mr-2 text-primary-500" />
+                    <span>Dashboard</span>
+                  </button>
                   <button 
                     className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700"
                     onClick={handleLogout}

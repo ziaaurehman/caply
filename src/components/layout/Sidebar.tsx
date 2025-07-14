@@ -209,7 +209,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
       label: "Projects",
     },
     {
-      href: "/projects/management",
+      href: "/kanban",
       icon: <GanttChart size={18} />,
       label: "Kanban",
     },
