@@ -1,360 +1,570 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { ChevronDown, Plus } from "lucide-react"
+import { useState, useEffect, useRef, useCallback } from "react"
+import Image from "next/image"
+import { ChevronDown, Plus, Settings, Users, Filter, Search, Bell } from "lucide-react"
+import { kanbanAPI } from "@/utils/api/kanban"
+import { projectAPI } from "@/utils/api/project"
 import KanbanColumn from "./KanbanColumn"
 import AddTaskModal from "./AddTaskModal"
-import { Task, Column } from "./types"
+import { 
+  Board, 
+  List, 
+  Card, 
+  KanbanBoardProps, 
+  ProjectMember, 
+  KanbanState, 
+  DragState,
+  CardModalState,
+  KanbanFilters,
+  BackgroundOption
+} from "./types"
 
-export default function KanbanBoard() {
-  const [columns, setColumns] = useState<Column[]>([
-    {
-      id: "todo",
-      title: "To Do",
-      tasks: [
-        {
-          id: "1",
-          title: "Design Review",
-          description: "Design review milestone",
-          hours: 4,
-          dueDate: "2/16/2025",
-          assigneeName: "John Doe",
-          assigneeAvatar: "",
-          progress: 0,
-        },
-        {
-          id: "2",
-          title: "Integration Testing",
-          description: "Test frontend and backend integration",
-          hours: 40,
-          dueDate: "3/25/2025",
-          assigneeName: "Jane Smith",
-          assigneeAvatar: "",
-          progress: 0,
-        },
-      ],
-    },
-    {
-      id: "in-progress",
-      title: "In Progress",
-      tasks: [
-        {
-          id: "3",
-          title: "Frontend Development",
-          description: "Implement frontend components and features",
-          hours: 120,
-          dueDate: "3/15/2025",
-          assigneeName: "Alice Johnson",
-          assigneeAvatar: "",
-          progress: 65,
-        },
-        {
-          id: "4",
-          title: "Backend Development",
-          description: "Implement backend services and APIs",
-          hours: 100,
-          dueDate: "3/15/2025",
-          assigneeName: "Bob Williams",
-          assigneeAvatar: "",
-          progress: 60,
-        },
-      ],
-    },
-    {
-      id: "done",
-      title: "Done",
-      tasks: [
-        {
-          id: "5",
-          title: "Design Phase",
-          description: "UI/UX design and prototyping",
-          hours: 80,
-          dueDate: "2/15/2025",
-          assigneeName: "Charlie Brown",
-          assigneeAvatar: "",
-          progress: 100,
-        },
-        {
-          id: "6",
-          title: "ZZ",
-          description: "ZZ",
-          hours: 233,
-          dueDate: "7/24/2025",
-          assigneeName: "Diana Prince",
-          assigneeAvatar: "",
-          progress: 0,
-        },
-      ],
-    },
-  ])
+// Temporarily remove problematic imports for now
+// import CardDetailModal from "./CardDetailModal"
+// import BoardSettingsModal from "./BoardSettingsModal"
 
-  const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false)
-  const [selectedColumnId, setSelectedColumnId] = useState<string | null>(null)
-  const [background, setBackground] = useState<string>("");
-  const [backgroundType, setBackgroundType] = useState<'image' | 'color'>("image");
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+interface KanbanPageProps {
+  projectId: string;
+}
+
+export default function KanbanBoard({ projectId }: KanbanPageProps) {
+  // Main state
+  const [kanbanState, setKanbanState] = useState<KanbanState>({
+    boards: [],
+    currentBoard: null,
+    lists: [],
+    isLoading: true,
+    error: null
+  });
+
+  // Project data
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  const [projectName, setProjectName] = useState<string>("");
+
+  // UI state
+  const [dragState, setDragState] = useState<DragState>({
+    isDragging: false,
+    draggedCard: null,
+    sourceListId: null,
+    targetListId: null
+  });
+
+  const [cardModal, setCardModal] = useState<CardModalState>({
+    isOpen: false,
+    card: null,
+    mode: 'view'
+  });
+
+  const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
+  const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
+  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+
+  // Filters and search
+  const [filters, setFilters] = useState<KanbanFilters>({});
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedAssignee, setSelectedAssignee] = useState("all");
+
+  // Background customization
+  const [backgroundDropdownOpen, setBackgroundDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'images' | 'colors'>("images");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // List of available backgrounds
-  const backgrounds = [
-    { name: "Blue", src: "/kanban/blue-preview.jpg" },
-    { name: "Dark", src: "/kanban/dark-preview.jpg" },
-    { name: "Landscape", src: "/kanban/landscape-preview.jpg" },
-    { name: "Nature", src: "/kanban/nature-preview.jpg" },
+  // Background options
+  const backgroundImages: BackgroundOption[] = [
+    { type: "image", value: "/kanban/blue-preview.jpg", name: "Blue", preview: "/kanban/blue-preview.jpg" },
+    { type: "image", value: "/kanban/dark-preview.jpg", name: "Dark", preview: "/kanban/dark-preview.jpg" },
+    { type: "image", value: "/kanban/landscape-preview.jpg", name: "Landscape", preview: "/kanban/landscape-preview.jpg" },
+    { type: "image", value: "/kanban/nature-preview.jpg", name: "Nature", preview: "/kanban/nature-preview.jpg" },
   ];
 
-  // List of available colors
-  const colors = [
-    { name: "White", value: "#ffffff" },
-    { name: "Light Gray", value: "#f3f4f6" },
-    { name: "Orange", value: "#ffedd5" },
-    { name: "Sky Blue", value: "#e0f2fe" },
-    { name: "Emerald", value: "#d1fae5" },
-    { name: "Purple", value: "#ede9fe" },
-    { name: "Slate", value: "#e2e8f0" },
-    { name: "Dark Gray", value: "#1e293b" },
+  const backgroundColors: BackgroundOption[] = [
+    { type: "color", value: "#ffffff", name: "White" },
+    { type: "color", value: "#f3f4f6", name: "Light Gray" },
+    { type: "color", value: "#ffedd5", name: "Orange" },
+    { type: "color", value: "#e0f2fe", name: "Sky Blue" },
+    { type: "color", value: "#d1fae5", name: "Emerald" },
+    { type: "color", value: "#ede9fe", name: "Purple" },
+    { type: "color", value: "#e2e8f0", name: "Slate" },
+    { type: "color", value: "#1e293b", name: "Dark Gray" },
   ];
 
-  // Load from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("kanbanBackground");
-    const savedType = localStorage.getItem("kanbanBackgroundType");
-    if (saved) setBackground(saved);
-    if (savedType === "color" || savedType === "image") setBackgroundType(savedType);
-  }, []);
+  // Initialize data
+  const initializeKanbanData = useCallback(async () => {
+    try {
+      setKanbanState(prev => ({ ...prev, isLoading: true, error: null }));
 
-  // Save to localStorage
+      // Fetch project details and members
+      const projectResponse = await projectAPI.getProject(projectId);
+      const project = projectResponse.project;
+      setProjectName(project.name);
+      
+      // Map project members to the format expected by Kanban components
+      const members = project.project_members?.map(pm => ({
+        user_id: pm.organization_members.user_id,
+        users: pm.organization_members.users,
+        role: pm.role,
+        joined_at: pm.joined_at
+      })) || [];
+      setProjectMembers(members);
+
+      // Check if Kanban is enabled for this project
+      if (!project.kanban_enabled) {
+        setKanbanState(prev => ({ 
+          ...prev, 
+          isLoading: false, 
+          error: "Kanban board is not enabled for this project" 
+        }));
+        return;
+      }
+
+      // Fetch boards for the project
+      const boardsResponse = await kanbanAPI.getBoards(projectId);
+      const boards = boardsResponse.boards;
+
+      if (boards.length === 0) {
+        // Create default board if none exists
+        const newBoard = await kanbanAPI.createBoard({
+          project_id: projectId,
+          name: `${project.name} Board`,
+          description: `Kanban board for ${project.name}`,
+          background_color: "#0079bf"
+        });
+        setKanbanState(prev => ({
+          ...prev,
+          boards: [newBoard.board],
+          currentBoard: newBoard.board,
+          isLoading: false
+        }));
+        await loadBoardData(newBoard.board.id);
+      } else {
+        // Use the first board
+        const currentBoard = boards[0];
+        setKanbanState(prev => ({
+          ...prev,
+          boards,
+          currentBoard,
+          isLoading: false
+        }));
+        await loadBoardData(currentBoard.id);
+      }
+    } catch (error) {
+      console.error("Error initializing Kanban data:", error);
+      setKanbanState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: error instanceof Error ? error.message : "Failed to load Kanban board"
+      }));
+    }
+  }, [projectId]);
+
   useEffect(() => {
-    if (background) localStorage.setItem("kanbanBackground", background);
-    localStorage.setItem("kanbanBackgroundType", backgroundType);
-  }, [background, backgroundType]);
+    initializeKanbanData();
+  }, [initializeKanbanData]);
 
   // Close dropdown on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false);
+        setBackgroundDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleDragStart = (e: React.DragEvent, task: Task) => {
-    e.dataTransfer.setData("taskId", task.id)
-    const columnElement = e.currentTarget.closest("[data-column-id]") as HTMLElement
-    if (columnElement) {
-      e.dataTransfer.setData("sourceColumnId", columnElement.dataset.columnId || "")
+  const loadBoardData = async (boardId: string) => {
+    try {
+      const listsResponse = await kanbanAPI.getLists(boardId);
+      setKanbanState(prev => ({
+        ...prev,
+        lists: listsResponse.lists
+      }));
+    } catch (error) {
+      console.error("Error loading board data:", error);
+      setKanbanState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : "Failed to load board data"
+      }));
     }
-  }
+  };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault() // Necessary to allow dropping
-  }
+  // Drag and Drop handlers
+  const handleDragStart = useCallback((e: React.DragEvent, card: Card) => {
+    setDragState({
+      isDragging: true,
+      draggedCard: card,
+      sourceListId: card.list_id,
+      targetListId: null
+    });
+    e.dataTransfer.setData("cardId", card.id);
+    e.dataTransfer.setData("sourceListId", card.list_id);
+  }, []);
 
-  const handleDrop = (e: React.DragEvent, targetColumnId: string) => {
-    e.preventDefault()
-    const taskId = e.dataTransfer.getData("taskId")
-    const sourceColumnId = e.dataTransfer.getData("sourceColumnId")
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+  }, []);
 
-    if (taskId && sourceColumnId) {
-      setColumns((prevColumns) => {
-        let draggedTask: Task | null = null
-        const newColumns = prevColumns.map((column) => {
-          if (column.id === sourceColumnId) {
-            const taskIndex = column.tasks.findIndex((t) => t.id === taskId)
-            if (taskIndex > -1) {
-              draggedTask = column.tasks[taskIndex]
-              return {
-                ...column,
-                tasks: column.tasks.filter((t) => t.id !== taskId),
-              }
-            }
-          }
-          return column
-        })
+  const handleDrop = useCallback(async (e: React.DragEvent, targetListId: string) => {
+    e.preventDefault();
+    
+    const cardId = e.dataTransfer.getData("cardId");
+    const sourceListId = e.dataTransfer.getData("sourceListId");
 
-        if (draggedTask) {
-          return newColumns.map((column) => {
-            if (column.id === targetColumnId) {
-              return {
-                ...column,
-                tasks: [...column.tasks, draggedTask!],
-              }
-            }
-            return column
-          })
+    if (cardId && sourceListId && sourceListId !== targetListId) {
+      try {
+        // Update card's list
+        await kanbanAPI.updateCard(cardId, { list_id: targetListId });
+        
+        // Refresh board data
+        if (kanbanState.currentBoard) {
+          await loadBoardData(kanbanState.currentBoard.id);
         }
-        return prevColumns
-      })
+      } catch (error) {
+        console.error("Error moving card:", error);
+      }
     }
-  }
 
-  const handleAddTask = (columnId: string) => {
-    setSelectedColumnId(columnId)
-    setIsAddTaskModalOpen(true)
-  }
+    setDragState({
+      isDragging: false,
+      draggedCard: null,
+      sourceListId: null,
+      targetListId: null
+    });
+  }, [kanbanState.currentBoard]);
 
-  const handleSaveTask = (columnId: string, newTask: Task) => {
-    setColumns((prevColumns) =>
-      prevColumns.map((column) => (column.id === columnId ? { ...column, tasks: [...column.tasks, newTask] } : column)),
-    )
-  }
+  // Board management
+  const updateBoardBackground = async (backgroundType: 'image' | 'color', value: string) => {
+    if (!kanbanState.currentBoard) return;
 
-  const handleAddColumn = () => {
-    const newColumnTitle = prompt("Enter new list title:")
-    if (newColumnTitle) {
-      const newColumnId = newColumnTitle.toLowerCase().replace(/\s/g, "-")
-      setColumns((prevColumns) => [...prevColumns, { id: newColumnId, title: newColumnTitle, tasks: [] }])
+    try {
+      const updateData = backgroundType === 'image' 
+        ? { background_image: value, background_color: undefined }
+        : { background_color: value, background_image: undefined };
+
+      const updatedBoard = await kanbanAPI.updateBoard(kanbanState.currentBoard.id, updateData);
+      
+      setKanbanState(prev => ({
+        ...prev,
+        currentBoard: updatedBoard.board,
+        boards: prev.boards.map(board => 
+          board.id === updatedBoard.board.id ? updatedBoard.board : board
+        )
+      }));
+      
+      setBackgroundDropdownOpen(false);
+    } catch (error) {
+      console.error("Error updating board background:", error);
     }
+  };
+
+  // List management
+  const handleAddList = async () => {
+    if (!kanbanState.currentBoard) return;
+
+    const listName = prompt("Enter list name:");
+    if (!listName) return;
+
+    try {
+      await kanbanAPI.createList({
+        board_id: kanbanState.currentBoard.id,
+        name: listName
+      });
+      
+      // Refresh board data
+      await loadBoardData(kanbanState.currentBoard.id);
+    } catch (error) {
+      console.error("Error creating list:", error);
+    }
+  };
+
+  // Card management
+  const handleAddCard = (listId: string) => {
+    setSelectedListId(listId);
+    setIsAddTaskModalOpen(true);
+  };
+
+  const handleSaveCard = async (listId: string, cardData: any) => {
+    try {
+      const newCard = await kanbanAPI.createCard({
+        list_id: listId,
+        title: cardData.title,
+        description: cardData.description,
+        due_date: cardData.due_date,
+        cover_color: cardData.cover_color
+      });
+      
+      // Assign members to the card if any were selected
+      if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
+        for (const userId of cardData.assignee_ids) {
+          await kanbanAPI.assignCardMember(newCard.card.id, userId);
+        }
+      }
+      
+      // Refresh board data
+      if (kanbanState.currentBoard) {
+        await loadBoardData(kanbanState.currentBoard.id);
+      }
+      
+      setIsAddTaskModalOpen(false);
+    } catch (error) {
+      console.error("Error creating card:", error);
+    }
+  };
+
+  const handleCardClick = (card: Card) => {
+    setCardModal({
+      isOpen: true,
+      card,
+      mode: 'view'
+    });
+  };
+
+  // Filter cards based on current filters
+  const getFilteredCards = (cards: Card[]): Card[] => {
+    return cards.filter(card => {
+      // Search filter
+      if (searchTerm && !card.title.toLowerCase().includes(searchTerm.toLowerCase()) && 
+          !card.description?.toLowerCase().includes(searchTerm.toLowerCase())) {
+        return false;
+      }
+
+      // Assignee filter
+      if (selectedAssignee !== "all") {
+        const isAssigned = card.card_members?.some(member => member.user_id === selectedAssignee);
+        if (!isAssigned) return false;
+      }
+
+      return true;
+    });
+  };
+
+  // Get background style
+  const getBoardStyle = () => {
+    if (!kanbanState.currentBoard) return {};
+    
+    if (kanbanState.currentBoard.background_image) {
+      return {
+        backgroundImage: `url(${kanbanState.currentBoard.background_image})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center'
+      };
+    } else if (kanbanState.currentBoard.background_color) {
+      return { backgroundColor: kanbanState.currentBoard.background_color };
+    }
+    
+    return { backgroundColor: '#f3f4f6' };
+  };
+
+  if (kanbanState.isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-orange-500 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading Kanban board...</p>
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 ">
-      <div className="max-w-full mx-auto">
-       <div className="p-4"> {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-800">Project Management</h1>
-            <p className="text-sm text-gray-500">Manage tasks with Kanban board</p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className="relative">
-              <select className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md appearance-none pr-8 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200">
-                <option>Website Redesign</option>
-                <option>Mobile App Development</option>
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
-                <ChevronDown className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="relative">
-              <select className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md appearance-none pr-8 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200">
-                <option>All Assignees</option>
-                <option>John Doe</option>
-                <option>Jane Smith</option>
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
-                <ChevronDown className="h-4 w-4" />
-              </div>
-            </div>
-            {/* Kanban Background Dropdown */}
-            <div className="relative" ref={dropdownRef}>
-              <button
-                type="button"
-                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-                onClick={() => setDropdownOpen((open) => !open)}
-              >
-                <span className="mr-2">Board Background</span>
-                <ChevronDown className="h-4 w-4" />
-              </button>
-              {dropdownOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-0">
-                  {/* Tabs */}
-                  <div className="flex border-b border-gray-200">
-                    <button
-                      className={`flex-1 py-2 text-sm font-medium rounded-tl-lg focus:outline-none transition-colors duration-150 ${activeTab === 'images' ? 'bg-orange-50 text-orange-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                      onClick={() => setActiveTab('images')}
-                    >
-                      Images
-                    </button>
-                    <button
-                      className={`flex-1 py-2 text-sm font-medium rounded-tr-lg focus:outline-none transition-colors duration-150 ${activeTab === 'colors' ? 'bg-orange-50 text-orange-600' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                      onClick={() => setActiveTab('colors')}
-                    >
-                      Colors
-                    </button>
-                  </div>
-                  {/* Tab Content */}
-                  <div className="p-4">
-                    {activeTab === 'images' && (
-                      <div className="grid grid-cols-2 gap-4">
-                        {backgrounds.map((bg) => (
-                          <button
-                            key={bg.src}
-                            className={`group relative rounded-lg overflow-hidden border-2 transition-all duration-200 focus:outline-none ${backgroundType === 'image' && background === bg.src ? "border-orange-500 ring-2 ring-orange-200" : "border-transparent"}`}
-                            onClick={() => {
-                              setBackground(bg.src);
-                              setBackgroundType('image');
-                              setDropdownOpen(false);
-                            }}
-                          >
-                            <img
-                              src={bg.src}
-                              alt={bg.name}
-                              className="w-full h-24 object-cover group-hover:opacity-80 transition-opacity"
-                            />
-                            <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs py-1 px-2 text-center">{bg.name}</span>
-                            {backgroundType === 'image' && background === bg.src && (
-                              <span className="absolute top-2 right-2 bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full shadow">Selected</span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {activeTab === 'colors' && (
-                      <div className="grid grid-cols-4 gap-4">
-                        {colors.map((color) => (
-                          <button
-                            key={color.value}
-                            className={`relative w-14 h-14 rounded-lg border-2 transition-all duration-200 focus:outline-none ${backgroundType === 'color' && background === color.value ? "border-orange-500 ring-2 ring-orange-200" : "border-transparent"}`}
-                            style={{ background: color.value }}
-                            title={color.name}
-                            onClick={() => {
-                              setBackground(color.value);
-                              setBackgroundType('color');
-                              setDropdownOpen(false);
-                            }}
-                          >
-                            {backgroundType === 'color' && background === color.value && (
-                              <span className="absolute top-2 right-2 bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full shadow">Selected</span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-            <button className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Task
+  if (kanbanState.error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-red-800 mb-2">Error Loading Board</h3>
+            <p className="text-red-600 mb-4">{kanbanState.error}</p>
+            <button 
+              onClick={() => initializeKanbanData()}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Try Again
             </button>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-full mx-auto">
+        <div className="p-4">
+          {/* Header */}
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-800">
+                {kanbanState.currentBoard?.name || projectName}
+              </h1>
+              <p className="text-sm text-gray-500">
+                {kanbanState.currentBoard?.description || "Manage tasks with Kanban board"}
+              </p>
+            </div>
+            
+            <div className="flex items-center space-x-3">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search cards..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+
+              {/* Assignee Filter */}
+              <div className="relative">
+                <select 
+                  value={selectedAssignee}
+                  onChange={(e) => setSelectedAssignee(e.target.value)}
+                  className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md appearance-none pr-8 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="all">All Assignees</option>
+                  {projectMembers.map((member) => (
+                    <option key={member.user_id} value={member.user_id}>
+                      {member.users.full_name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 h-4 w-4 text-gray-700" />
+              </div>
+
+              {/* Board Background Dropdown */}
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  type="button"
+                  className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  onClick={() => setBackgroundDropdownOpen(!backgroundDropdownOpen)}
+                >
+                  <span className="mr-2">Background</span>
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+                
+                {backgroundDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50">
+                    {/* Tabs */}
+                    <div className="flex border-b border-gray-200">
+                      <button
+                        className={`flex-1 py-2 text-sm font-medium rounded-tl-lg focus:outline-none transition-colors duration-150 ${
+                          activeTab === 'images' ? 'bg-orange-50 text-orange-600' : 'bg-white text-gray-600 hover:bg-gray-50'
+                        }`}
+                        onClick={() => setActiveTab('images')}
+                      >
+                        Images
+                      </button>
+                      <button
+                        className={`flex-1 py-2 text-sm font-medium rounded-tr-lg focus:outline-none transition-colors duration-150 ${
+                          activeTab === 'colors' ? 'bg-orange-50 text-orange-600' : 'bg-white text-gray-600 hover:bg-gray-50'
+                        }`}
+                        onClick={() => setActiveTab('colors')}
+                      >
+                        Colors
+                      </button>
+                    </div>
+                    
+                    {/* Tab Content */}
+                    <div className="p-4">
+                      {activeTab === 'images' && (
+                        <div className="grid grid-cols-2 gap-4">
+                          {backgroundImages.map((bg) => (
+                            <button
+                              key={bg.value}
+                              className={`group relative rounded-lg overflow-hidden border-2 transition-all duration-200 focus:outline-none ${
+                                kanbanState.currentBoard?.background_image === bg.value
+                                  ? "border-orange-500 ring-2 ring-orange-200"
+                                  : "border-transparent"
+                              }`}
+                              onClick={() => updateBoardBackground('image', bg.value)}
+                            >
+                              <Image
+                                src={bg.preview || bg.value}
+                                alt={bg.name}
+                                width={160}
+                                height={96}
+                                className="w-full h-24 object-cover group-hover:opacity-80 transition-opacity"
+                              />
+                              <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs py-1 px-2 text-center">
+                                {bg.name}
+                              </span>
+                              {kanbanState.currentBoard?.background_image === bg.value && (
+                                <span className="absolute top-2 right-2 bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full shadow">
+                                  Selected
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {activeTab === 'colors' && (
+                        <div className="grid grid-cols-4 gap-4">
+                          {backgroundColors.map((color) => (
+                            <button
+                              key={color.value}
+                              className={`relative w-14 h-14 rounded-lg border-2 transition-all duration-200 focus:outline-none ${
+                                kanbanState.currentBoard?.background_color === color.value
+                                  ? "border-orange-500 ring-2 ring-orange-200"
+                                  : "border-transparent"
+                              }`}
+                              style={{ backgroundColor: color.value }}
+                              title={color.name}
+                              onClick={() => updateBoardBackground('color', color.value)}
+                            >
+                              {kanbanState.currentBoard?.background_color === color.value && (
+                                <span className="absolute -top-2 -right-2 bg-orange-500 text-white text-xs px-1 py-0.5 rounded-full shadow">
+                                  ✓
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Board Settings */}
+              <button
+                onClick={() => setBoardSettingsOpen(true)}
+                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </div>
+
         {/* Kanban Board */}
         <div
           className="relative py-12 rounded-lg"
-          style={
-            backgroundType === 'image' && background
-              ? { backgroundImage: `url(${background})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-              : backgroundType === 'color' && background
-              ? { background: background }
-              : {}
-          }
+          style={getBoardStyle()}
         >
-          {/* Mirror blur background for horizontal scroll */}
-          <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-gray-300 via-gray-200 to-gray-10 backdrop-blur-lg py-12" style={{ opacity: background ? 0.7 : 1 }}></div>
+          {/* Backdrop overlay */}
+          <div className="absolute inset-0 rounded-lg bg-black/10 backdrop-blur-sm"></div>
+          
           <div className="flex overflow-x-auto pb-4 gap-6 px-4 relative z-10 min-h-[500px] items-start">
-            {columns.map((column) => (
-              <div key={column.id} data-column-id={column.id} className="flex-shrink-0">
+            {kanbanState.lists.map((list) => (
+              <div key={list.id} data-list-id={list.id} className="flex-shrink-0">
                 <KanbanColumn
-                  column={column}
-                  tasks={column.tasks}
+                  list={list}
+                  cards={getFilteredCards(list.cards || [])}
+                  projectMembers={projectMembers}
                   onDragStart={handleDragStart}
                   onDragOver={handleDragOver}
                   onDrop={handleDrop}
-                  onAddTask={handleAddTask}
+                  onAddCard={handleAddCard}
+                  onCardClick={handleCardClick}
                 />
               </div>
             ))}
-            {/* Add another list button */}
+            
+            {/* Add List Button */}
             <button
-              onClick={handleAddColumn}
-              className="flex-shrink-0 w-80 bg-gray-200 rounded-lg p-4 flex items-center justify-center text-gray-700 hover:bg-gray-300 transition-colors duration-200"
+              onClick={handleAddList}
+              className="flex-shrink-0 w-80 bg-gray-200/80 backdrop-blur-sm rounded-lg p-4 flex items-center justify-center text-gray-700 hover:bg-gray-300/80 transition-colors duration-200"
             >
               <Plus className="h-5 w-5 mr-2" />
               Add another list
@@ -362,12 +572,49 @@ export default function KanbanBoard() {
           </div>
         </div>
       </div>
+
+      {/* Modals */}
       <AddTaskModal
         isOpen={isAddTaskModalOpen}
         onClose={() => setIsAddTaskModalOpen(false)}
-        onSave={handleSaveTask}
-        columnId={selectedColumnId}
+        onSave={handleSaveCard}
+        listId={selectedListId}
+        projectMembers={projectMembers}
       />
+
+      {/* TODO: Implement detailed modals
+      {cardModal.isOpen && cardModal.card && (
+        <CardDetailModal
+          card={cardModal.card}
+          isOpen={cardModal.isOpen}
+          onClose={() => setCardModal({ isOpen: false, card: null, mode: 'view' })}
+          projectMembers={projectMembers}
+          boardId={kanbanState.currentBoard?.id}
+          onCardUpdate={() => {
+            if (kanbanState.currentBoard) {
+              loadBoardData(kanbanState.currentBoard.id);
+            }
+          }}
+        />
+      )}
+
+      {boardSettingsOpen && kanbanState.currentBoard && (
+        <BoardSettingsModal
+          board={kanbanState.currentBoard}
+          isOpen={boardSettingsOpen}
+          onClose={() => setBoardSettingsOpen(false)}
+          onBoardUpdate={(updatedBoard: Board) => {
+            setKanbanState(prev => ({
+              ...prev,
+              currentBoard: updatedBoard,
+              boards: prev.boards.map(board => 
+                board.id === updatedBoard.id ? updatedBoard : board
+              )
+            }));
+          }}
+        />
+      )}
+      */}
     </div>
-  )
+  );
 }

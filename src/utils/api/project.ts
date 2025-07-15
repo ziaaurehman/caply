@@ -13,10 +13,30 @@ interface Project {
   end_date?: string;
   status: 'active' | 'on_hold' | 'completed' | 'cancelled';
   time_tracking_enabled: boolean;
+  kanban_enabled?: boolean;
+  timesheet_enabled?: boolean;
+  team_availability_enabled?: boolean;
+  capacity_planning_enabled?: boolean;
   visibility: 'admin_only' | 'team' | 'organization';
   created_by?: string;
   created_at: string;
   updated_at: string;
+  project_members?: Array<{
+    id: string;
+    organization_member_id: string;
+    role: string;
+    joined_at: string;
+    organization_members: {
+      id: string;
+      user_id: string;
+      users: {
+        id: string;
+        full_name: string;
+        email: string;
+        avatar_url?: string;
+      };
+    };
+  }>;
 }
 
 interface CreateProjectData {
