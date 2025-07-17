@@ -5,7 +5,7 @@ import { authConfig } from '@/auth';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authConfig);
   if (!session?.user?.id) {
@@ -13,7 +13,19 @@ export async function GET(
   }
 
   const supabase = await createClient();
-  const cardId = params.id;
+  const { id: cardId } = await params;
+
+  // Check user access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
 
   // Check if user has access to the card
   const { data: card, error } = await supabase
@@ -23,15 +35,15 @@ export async function GET(
       lists!inner (
         id,
         name,
+        board_id,
         boards!inner (
           id,
           name,
+          project_id,
           projects!inner (
             id,
             name,
-            organization_members!inner (
-              user_id
-            )
+            organization_id
           )
         )
       ),
@@ -105,8 +117,7 @@ export async function GET(
       )
     `)
     .eq('id', cardId)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (error || !card) {
@@ -118,7 +129,7 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authConfig);
   if (!session?.user?.id) {
@@ -126,7 +137,7 @@ export async function PATCH(
   }
 
   const supabase = await createClient();
-  const cardId = params.id;
+  const { id: cardId } = await params;
   const body = await req.json();
   const { 
     title, 
@@ -141,25 +152,37 @@ export async function PATCH(
   } = body;
 
   // Check if user has access to the card
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
+  // Verify card exists and user has access through project organization
   const { data: existingCard, error: cardError } = await supabase
     .from('cards')
     .select(`
       *,
       lists!inner (
         id,
+        board_id,
         boards!inner (
           id,
+          project_id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       )
     `)
     .eq('id', cardId)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (cardError || !existingCard) {
@@ -172,17 +195,18 @@ export async function PATCH(
       .from('lists')
       .select(`
         id,
+        board_id,
         boards!inner (
+          id,
+          project_id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       `)
       .eq('id', list_id)
-      .eq('boards.projects.organization_members.user_id', session.user.id)
-      .eq('boards.projects.organization_members.status', 'active')
+      .eq('boards.projects.organization_id', userOrg.organization_id)
       .single();
 
     if (listError || !targetList) {
@@ -218,9 +242,25 @@ export async function PATCH(
 
   if (list_id && list_id !== existingCard.list_id) {
     actionType = 'move';
+    
+    // Get list names for better activity description
+    const { data: fromList } = await supabase
+      .from('lists')
+      .select('name')
+      .eq('id', existingCard.list_id)
+      .single();
+      
+    const { data: toList } = await supabase
+      .from('lists')
+      .select('name')
+      .eq('id', list_id)
+      .single();
+    
     details = { 
-      from_list_id: existingCard.list_id, 
+      from_list_id: existingCard.list_id,
+      from_list_name: fromList?.name || 'Unknown List',
       to_list_id: list_id,
+      to_list_name: toList?.name || 'Unknown List',
       card_title: title || existingCard.title
     };
   }
@@ -229,7 +269,7 @@ export async function PATCH(
     .from('activities')
     .insert([{
       user_id: session.user.id,
-      board_id: (existingCard.lists as any).boards.id,
+      board_id: (existingCard.lists as any).board_id,
       card_id: cardId,
       action_type: actionType,
       entity_type: 'card',
@@ -242,7 +282,7 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authConfig);
   if (!session?.user?.id) {
@@ -250,7 +290,19 @@ export async function DELETE(
   }
 
   const supabase = await createClient();
-  const cardId = params.id;
+  const { id: cardId } = await params;
+
+  // Check user access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
 
   // Check if user has access to the card
   const { data: existingCard, error: cardError } = await supabase
@@ -259,19 +311,19 @@ export async function DELETE(
       *,
       lists!inner (
         id,
+        board_id,
         boards!inner (
           id,
+          project_id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       )
     `)
     .eq('id', cardId)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (cardError || !existingCard) {
@@ -293,7 +345,7 @@ export async function DELETE(
     .from('activities')
     .insert([{
       user_id: session.user.id,
-      board_id: (existingCard.lists as any).boards.id,
+      board_id: (existingCard.lists as any).board_id,
       card_id: cardId,
       action_type: 'delete',
       entity_type: 'card',

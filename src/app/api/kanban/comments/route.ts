@@ -17,26 +17,39 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Card ID is required' }, { status: 400 });
   }
 
-  // Check if user has access to the card
+  // Verify user has access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
+  // Verify card exists and user has access through project organization
   const { data: card, error: cardError } = await supabase
     .from('cards')
     .select(`
       id,
+      list_id,
       lists!inner (
         id,
+        board_id,
         boards!inner (
           id,
+          project_id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       )
     `)
     .eq('id', cardId)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (cardError || !card) {
@@ -79,27 +92,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Card ID and content are required' }, { status: 400 });
   }
 
-  // Check if user has access to the card
+  // Verify user has access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
+  // Verify card exists and user has access through project organization
   const { data: card, error: cardError } = await supabase
     .from('cards')
     .select(`
       id,
       title,
+      list_id,
       lists!inner (
         id,
+        board_id,
         boards!inner (
           id,
+          project_id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       )
     `)
     .eq('id', card_id)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (cardError || !card) {
@@ -134,7 +160,7 @@ export async function POST(req: NextRequest) {
     .from('activities')
     .insert([{
       user_id: session.user.id,
-      board_id: (card.lists as any).boards.id,
+      board_id: (card.lists as any).board_id,
       card_id: card_id,
       action_type: 'create',
       entity_type: 'comment',

@@ -1,9 +1,14 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSession } from "next-auth/react"
 import Sidebar from "./Sidebar"
 import Header from "./Header"
+import SubscriptionModal from "../modals/SubscriptionModal"
+import { useSubscriptionStore } from "@/lib/stores/subscriptionStore"
+import { useAuthStore } from "@/lib/stores/authStore"
+import { useSubscriptionModal } from "@/lib/hooks/useSubscriptionModal"
 
 interface DashboardLayoutProps {
   children: React.ReactNode
@@ -12,6 +17,32 @@ interface DashboardLayoutProps {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  
+  const { data: session } = useSession()
+  const { organization } = useAuthStore()
+  const { 
+    showSubscriptionModal, 
+    setShowSubscriptionModal, 
+    currentSubscription, 
+    fetchCurrentSubscription 
+  } = useSubscriptionStore()
+  const { closeSubscriptionModal } = useSubscriptionModal()
+
+  // Show subscription modal when user first accesses dashboard
+  useEffect(() => {
+    if (session && organization) {
+      // Check if user has a subscription
+      fetchCurrentSubscription(organization.id)
+      
+      // Check if we should show the modal (you can add localStorage logic here)
+      const hasSeenModal = localStorage.getItem(`subscription-modal-seen-${organization.id}`)
+      
+      // Show modal if user hasn't seen it and doesn't have an active subscription
+      if (!hasSeenModal && !currentSubscription) {
+        setShowSubscriptionModal(true)
+      }
+    }
+  }, [session, organization, fetchCurrentSubscription, setShowSubscriptionModal, currentSubscription])
 
   return (
     <div className="h-screen bg-gray-50">
@@ -54,6 +85,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="absolute inset-0 bg-gray-600 opacity-75" />
         </div>
       )}
+      
+      {/* Subscription Modal */}
+      <SubscriptionModal 
+        isOpen={showSubscriptionModal} 
+        onClose={closeSubscriptionModal} 
+      />
     </div>
   )
 }

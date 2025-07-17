@@ -173,14 +173,14 @@ export default function Pricing() {
             // Show skeleton cards instead of a single loading spinner
             <>
               {[...Array(4)].map((_, index) => (
-                <div key={index} className="h-full flex flex-col">
+                <div key={index} className="h-full">
                   <SkeletonCard />
                 </div>
               ))}
             </>
           ) : (
             tiers.map((tier, index) => (
-              <div key={(tier as any).planId || tier.name || index} className="h-full flex flex-col">
+              <div key={(tier as any).planId || tier.name || index} className="h-full">
                 <PricingCard {...tier} />
               </div>
             ))

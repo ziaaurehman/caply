@@ -75,6 +75,7 @@ interface SubscriptionState {
   loading: boolean
   checkoutLoading: boolean
   error: string | null
+  showSubscriptionModal: boolean
 
   // Actions
   setPlans: (plans: SubscriptionPlan[]) => void
@@ -84,6 +85,7 @@ interface SubscriptionState {
   setLoading: (loading: boolean) => void
   setCheckoutLoading: (loading: boolean) => void
   setError: (error: string | null) => void
+  setShowSubscriptionModal: (show: boolean) => void
 
   // API Actions
   fetchPlans: () => Promise<void>
@@ -112,6 +114,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   loading: false,
   checkoutLoading: false,
   error: null,
+  showSubscriptionModal: false,
 
   // Basic setters
   setPlans: (plans) => set({ plans }),
@@ -121,6 +124,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   setLoading: (loading) => set({ loading }),
   setCheckoutLoading: (loading) => set({ checkoutLoading: loading }),
   setError: (error) => set({ error }),
+  setShowSubscriptionModal: (show) => set({ showSubscriptionModal: show }),
 
   // API Actions
   fetchPlans: async () => {

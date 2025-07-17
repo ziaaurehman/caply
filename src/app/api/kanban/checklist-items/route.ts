@@ -17,7 +17,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Checklist ID and content are required' }, { status: 400 });
   }
 
-  // Check if user has access to the checklist
+  // Verify user has access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
+  // Verify checklist exists and user has access through project organization
   const { data: checklist, error: checklistError } = await supabase
     .from('checklists')
     .select(`
@@ -27,23 +39,23 @@ export async function POST(req: NextRequest) {
       cards!inner (
         id,
         title,
+        list_id,
         lists!inner (
           id,
+          board_id,
           boards!inner (
             id,
+            project_id,
             projects!inner (
-              organization_id,
-              organization_members!inner (
-                user_id
-              )
+              id,
+              organization_id
             )
           )
         )
       )
     `)
     .eq('id', checklist_id)
-    .eq('cards.lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('cards.lists.boards.projects.organization_members.status', 'active')
+    .eq('cards.lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (checklistError || !checklist) {
@@ -107,7 +119,7 @@ export async function POST(req: NextRequest) {
     .from('activities')
     .insert([{
       user_id: session.user.id,
-      board_id: (checklist.cards as any).lists.boards.id,
+      board_id: (checklist.cards as any).lists.board_id,
       card_id: checklist.card_id,
       action_type: 'create',
       entity_type: 'checklist_item',

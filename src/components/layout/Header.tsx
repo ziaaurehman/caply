@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, Dispatch, SetStateAction } from "react"
-import { Bell, Search, Menu, ChevronDown, User, Settings, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { Bell, Search, Menu, ChevronDown, User, Settings, LogOut, PanelLeftClose, PanelLeftOpen, CreditCard } from "lucide-react"
 import { useSession, signOut } from "next-auth/react"
 import { getInitials } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
+import { useSubscriptionModal } from "@/lib/hooks/useSubscriptionModal"
 
 interface HeaderProps {
   setSidebarOpen: Dispatch<SetStateAction<boolean>>
@@ -17,6 +18,7 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
   const { data: session } = useSession()
   const router = useRouter()
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+  const { openSubscriptionModal } = useSubscriptionModal()
 
   const handleLogout = async () => {
     setShowProfileMenu(false)
@@ -133,6 +135,16 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
                     >
                       <Settings size={16} className="mr-3 text-gray-400" />
                       Settings
+                    </button>
+                    <button 
+                      onClick={() => {
+                        openSubscriptionModal()
+                        setShowProfileMenu(false)
+                      }}
+                      className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <CreditCard size={16} className="mr-3 text-gray-400" />
+                      Subscription
                     </button>
                   </div>
                   

@@ -18,6 +18,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'List ID or Board ID is required' }, { status: 400 });
   }
 
+  // Check user access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
   let query = supabase
     .from('cards')
     .select(`
@@ -27,10 +39,10 @@ export async function GET(req: NextRequest) {
         name,
         boards!inner (
           id,
+          project_id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       ),
@@ -99,8 +111,7 @@ export async function GET(req: NextRequest) {
         )
       )
     `)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .eq('is_archived', false);
 
   if (listId) {
@@ -133,22 +144,34 @@ export async function POST(req: NextRequest) {
   }
 
   // Check if user has access to the list
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
+  // Verify list exists and user has access through project organization
   const { data: list, error: listError } = await supabase
     .from('lists')
     .select(`
       id,
+      board_id,
       boards!inner (
         id,
+        project_id,
         projects!inner (
-          organization_members!inner (
-            user_id
-          )
+          id,
+          organization_id
         )
       )
     `)
     .eq('id', list_id)
-    .eq('boards.projects.organization_members.user_id', session.user.id)
-    .eq('boards.projects.organization_members.status', 'active')
+    .eq('boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (listError || !list) {
@@ -191,7 +214,7 @@ export async function POST(req: NextRequest) {
     .from('activities')
     .insert([{
       user_id: session.user.id,
-      board_id: (list.boards as any).id,
+      board_id: list.board_id,
       card_id: card.id,
       action_type: 'create',
       entity_type: 'card',

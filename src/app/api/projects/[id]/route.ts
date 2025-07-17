@@ -5,7 +5,7 @@ import { authConfig } from '@/auth';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authConfig);
@@ -14,7 +14,7 @@ export async function GET(
     }
 
     const supabase = await createClient();
-    const projectId = params.id;
+    const { id: projectId } = await params;
 
     // Get user's organization membership details
     const { data: userOrgMembership, error: orgError } = await supabase
@@ -97,7 +97,7 @@ export async function GET(
 
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authConfig);
@@ -106,7 +106,7 @@ export async function PUT(
     }
 
     const supabase = await createClient();
-    const projectId = params.id;
+    const { id: projectId } = await params;
     const updateData = await req.json();
 
     // Get user's organization membership details
@@ -181,7 +181,7 @@ export async function PUT(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authConfig);
@@ -190,7 +190,7 @@ export async function DELETE(
     }
 
     const supabase = await createClient();
-    const projectId = params.id;
+    const { id: projectId } = await params;
 
     // Get user's organization membership details
     const { data: userOrgMembership, error: orgError } = await supabase

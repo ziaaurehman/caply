@@ -18,27 +18,39 @@ export async function POST(req: NextRequest) {
   }
 
   // Check if user has access to the card
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
+  // Verify card exists and user has access through project organization
   const { data: card, error: cardError } = await supabase
     .from('cards')
     .select(`
       id,
       title,
+      list_id,
       lists!inner (
         id,
+        board_id,
         boards!inner (
           id,
+          project_id,
           projects!inner (
-            organization_id,
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       )
     `)
     .eq('id', card_id)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (cardError || !card) {
@@ -46,11 +58,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify the user to be assigned is a member of the organization
-  const organizationId = (card.lists as any).boards.projects.organization_id;
   const { data: targetUser, error: userError } = await supabase
     .from('organization_members')
     .select('id, user_id, users!inner(id, full_name, email, avatar_url)')
-    .eq('organization_id', organizationId)
+    .eq('organization_id', userOrg.organization_id)
     .eq('user_id', user_id)
     .eq('status', 'active')
     .single();
@@ -98,7 +109,7 @@ export async function POST(req: NextRequest) {
     .from('activities')
     .insert([{
       user_id: session.user.id,
-      board_id: (card.lists as any).boards.id,
+      board_id: (card.lists as any).board_id,
       card_id: card_id,
       action_type: 'create',
       entity_type: 'member',
@@ -129,26 +140,39 @@ export async function DELETE(req: NextRequest) {
   }
 
   // Check if user has access to the card
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
+  // Verify card exists and user has access through project organization
   const { data: card, error: cardError } = await supabase
     .from('cards')
     .select(`
       id,
       title,
+      list_id,
       lists!inner (
         id,
+        board_id,
         boards!inner (
           id,
+          project_id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            id,
+            organization_id
           )
         )
       )
     `)
     .eq('id', cardId)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
     .single();
 
   if (cardError || !card) {
@@ -190,7 +214,7 @@ export async function DELETE(req: NextRequest) {
     .from('activities')
     .insert([{
       user_id: session.user.id,
-      board_id: (card.lists as any).boards.id,
+      board_id: (card.lists as any).board_id,
       card_id: cardId,
       action_type: 'delete',
       entity_type: 'member',

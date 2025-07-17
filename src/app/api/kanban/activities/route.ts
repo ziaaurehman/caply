@@ -20,6 +20,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Board ID or Card ID is required' }, { status: 400 });
   }
 
+  // Verify user has access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
+
   // Build query based on parameters
   let query = supabase
     .from('activities')
@@ -34,20 +46,19 @@ export async function GET(req: NextRequest) {
     `);
 
   if (boardId) {
-    // Check if user has access to the board
+    // Verify board exists and user has access through project organization
     const { data: board, error: boardError } = await supabase
       .from('boards')
       .select(`
         id,
+        project_id,
         projects!inner (
-          organization_members!inner (
-            user_id
-          )
+          id,
+          organization_id
         )
       `)
       .eq('id', boardId)
-      .eq('projects.organization_members.user_id', session.user.id)
-      .eq('projects.organization_members.status', 'active')
+      .eq('projects.organization_id', userOrg.organization_id)
       .single();
 
     if (boardError || !board) {
@@ -58,26 +69,27 @@ export async function GET(req: NextRequest) {
   }
 
   if (cardId) {
-    // Check if user has access to the card
+    // Verify card exists and user has access through project organization
     const { data: card, error: cardError } = await supabase
       .from('cards')
       .select(`
         id,
+        list_id,
         lists!inner (
           id,
+          board_id,
           boards!inner (
             id,
+            project_id,
             projects!inner (
-              organization_members!inner (
-                user_id
-              )
+              id,
+              organization_id
             )
           )
         )
       `)
       .eq('id', cardId)
-      .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-      .eq('lists.boards.projects.organization_members.status', 'active')
+      .eq('lists.boards.projects.organization_id', userOrg.organization_id)
       .single();
 
     if (cardError || !card) {

@@ -21,7 +21,7 @@ import {
 } from "./types"
 
 // Temporarily remove problematic imports for now
-// import CardDetailModal from "./CardDetailModal"
+import CardDetailModal from "./CardDetailModal"
 // import BoardSettingsModal from "./BoardSettingsModal"
 
 interface KanbanPageProps {
@@ -582,7 +582,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         projectMembers={projectMembers}
       />
 
-      {/* TODO: Implement detailed modals
       {cardModal.isOpen && cardModal.card && (
         <CardDetailModal
           card={cardModal.card}
@@ -598,6 +597,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         />
       )}
 
+      {/* TODO: Implement board settings modal
       {boardSettingsOpen && kanbanState.currentBoard && (
         <BoardSettingsModal
           board={kanbanState.currentBoard}

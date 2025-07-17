@@ -5,7 +5,7 @@ import { authConfig } from '@/auth';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authConfig);
   if (!session?.user?.id) {
@@ -13,7 +13,19 @@ export async function GET(
   }
 
   const supabase = await createClient();
-  const boardId = params.id;
+  const { id: boardId } = await params;
+
+  // Check user access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
 
   // Check if user has access to the board
   const { data: board, error } = await supabase
@@ -23,15 +35,11 @@ export async function GET(
       projects!inner (
         id,
         organization_id,
-        kanban_enabled,
-        organization_members!inner (
-          user_id
-        )
+        kanban_enabled
       )
     `)
     .eq('id', boardId)
-    .eq('projects.organization_members.user_id', session.user.id)
-    .eq('projects.organization_members.status', 'active')
+    .eq('projects.organization_id', userOrg.organization_id)
     .single();
 
   if (error || !board) {
@@ -47,7 +55,7 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authConfig);
   if (!session?.user?.id) {
@@ -55,9 +63,21 @@ export async function PATCH(
   }
 
   const supabase = await createClient();
-  const boardId = params.id;
+  const { id: boardId } = await params;
   const body = await req.json();
   const { name, description, background_color, background_image, visibility, is_closed } = body;
+
+  // Check user access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
 
   // Check if user has access to the board
   const { data: existingBoard, error: boardError } = await supabase
@@ -67,15 +87,11 @@ export async function PATCH(
       projects!inner (
         id,
         organization_id,
-        kanban_enabled,
-        organization_members!inner (
-          user_id
-        )
+        kanban_enabled
       )
     `)
     .eq('id', boardId)
-    .eq('projects.organization_members.user_id', session.user.id)
-    .eq('projects.organization_members.status', 'active')
+    .eq('projects.organization_id', userOrg.organization_id)
     .single();
 
   if (boardError || !existingBoard) {
@@ -118,7 +134,7 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authConfig);
   if (!session?.user?.id) {
@@ -126,7 +142,19 @@ export async function DELETE(
   }
 
   const supabase = await createClient();
-  const boardId = params.id;
+  const { id: boardId } = await params;
+
+  // Check user access to organization
+  const { data: userOrg, error: orgError } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', session.user.id)
+    .eq('status', 'active')
+    .single();
+
+  if (orgError || !userOrg) {
+    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  }
 
   // Check if user has access to the board
   const { data: existingBoard, error: boardError } = await supabase
@@ -136,15 +164,11 @@ export async function DELETE(
       projects!inner (
         id,
         organization_id,
-        kanban_enabled,
-        organization_members!inner (
-          user_id
-        )
+        kanban_enabled
       )
     `)
     .eq('id', boardId)
-    .eq('projects.organization_members.user_id', session.user.id)
-    .eq('projects.organization_members.status', 'active')
+    .eq('projects.organization_id', userOrg.organization_id)
     .single();
 
   if (boardError || !existingBoard) {

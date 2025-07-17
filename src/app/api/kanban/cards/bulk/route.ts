@@ -98,6 +98,20 @@ export async function POST(req: NextRequest) {
 
           // Create activity log for each moved card
           const originalCard = cards.find(c => c.id === cardId);
+          
+          // Get list names for better activity description
+          const { data: fromList } = await supabase
+            .from('lists')
+            .select('name')
+            .eq('id', originalCard?.list_id)
+            .single();
+            
+          const { data: toList } = await supabase
+            .from('lists')
+            .select('name')
+            .eq('id', target_list_id)
+            .single();
+          
           await supabase
             .from('activities')
             .insert([{
@@ -109,7 +123,9 @@ export async function POST(req: NextRequest) {
               entity_id: cardId,
               details: {
                 from_list_id: originalCard?.list_id,
+                from_list_name: fromList?.name || 'Unknown List',
                 to_list_id: target_list_id,
+                to_list_name: toList?.name || 'Unknown List',
                 card_title: originalCard?.title,
                 bulk_operation: true
               }
