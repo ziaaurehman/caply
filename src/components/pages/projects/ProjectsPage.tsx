@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { projectAPI, type Project } from '@/utils/api';
 import { formatCurrency, cn } from '@/lib/utils';
 import { useConfirmation } from '@/lib/hooks/useConfirmation';
-import { createDeleteConfirmation } from '@/lib/utils/confirmations';
+import { createDeleteConfirmation } from '@/utils/confirmations';
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import ProjectModal from './ProjectModal';
 import ProjectsSkeleton from "./ProjectsSkeleton"
