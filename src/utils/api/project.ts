@@ -83,8 +83,15 @@ interface ProjectResponse {
 // Projects API
 export const projectAPI = {
   // Get all projects
-  getProjects: async (): Promise<ProjectsResponse> => {
-    const response = await fetch('/api/projects');
+  getProjects: async (filters?: { capacity_planning_enabled?: boolean }): Promise<ProjectsResponse> => {
+    let url = '/api/projects';
+    
+    // Use the capacity-specific endpoint if filtering by capacity planning
+    if (filters?.capacity_planning_enabled) {
+      url = '/api/capacity/projects';
+    }
+    
+    const response = await fetch(url);
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch projects');

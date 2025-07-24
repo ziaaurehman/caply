@@ -154,6 +154,25 @@ export async function DELETE(
       return NextResponse.json({ error: 'Cannot remove yourself from the organization' }, { status: 400 })
     }
 
+    // Check if the user is an organization owner
+    const { data: organization, error: ownerError } = await supabase
+      .from('organizations')
+      .select('owner_id')
+      .eq('id', userOrg.organization_id)
+      .single()
+
+    if (ownerError) {
+      console.error('Error checking organization owner:', ownerError)
+      return NextResponse.json({ error: 'Failed to verify organization ownership' }, { status: 500 })
+    }
+
+    // Prevent deleting organization owner
+    if (organization.owner_id === member.user_id) {
+      return NextResponse.json({ 
+        error: 'Cannot remove organization owner. Transfer ownership first before removing this member.' 
+      }, { status: 400 })
+    }
+
     // Delete the member
     const { error: deleteError } = await supabase
       .from('organization_members')

@@ -226,16 +226,16 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
       icon: <Calendar size={18} />,
       label: "Capacity",
     },
-    {
-      href: "/timesheets",
-      icon: <Clock size={18} />,
-      label: "Timesheets",
-    },
-    {
-      href: "/leave",
-      icon: <Palmtree size={18} />,
-      label: "Leave",
-    },
+    // {
+    //   href: "/timesheets",
+    //   icon: <Clock size={18} />,
+    //   label: "Timesheets",
+    // },
+    // {
+    //   href: "/leave",
+    //   icon: <Palmtree size={18} />,
+    //   label: "Leave",
+    // },
   ]
 
   const financeMenuItems = [
@@ -322,8 +322,21 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
               ))}
             </NavSection>
 
+            {/* Administration */}
+            {isAdmin && (
+              <NavSection title="Administration" isCollapsed={sidebarCollapsed}>
+                <NavItem
+                  href="/roles"
+                  icon={<Shield size={18} />}
+                  label="Roles & Permissions"
+                  active={pathname === '/roles'}
+                  isCollapsed={sidebarCollapsed}
+                />
+              </NavSection>
+            )}
+
             {/* Finance */}
-            <NavSection title="Finance" isCollapsed={sidebarCollapsed}>
+            {/* <NavSection title="Finance" isCollapsed={sidebarCollapsed}>
               {financeMenuItems.map((item) => (
                 <NavItem
                   key={item.href}
@@ -334,10 +347,10 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
                   isCollapsed={sidebarCollapsed}
                 />
               ))}
-            </NavSection>
+            </NavSection> */}
 
             {/* Resources */}
-            <NavSection title="Resources" isCollapsed={sidebarCollapsed}>
+            {/* <NavSection title="Resources" isCollapsed={sidebarCollapsed}>
               {resourceMenuItems.map((item) => (
                 <NavItem
                   key={item.href}
@@ -348,10 +361,21 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
                   isCollapsed={sidebarCollapsed}
                 />
               ))}
+            </NavSection> */}
+            
+            {/* Settings */}
+            <NavSection title="Management" isCollapsed={sidebarCollapsed}>
+              <NavItem
+                href="/roles"
+                icon={<Shield size={18} />}
+                label="Roles & Permissions"
+                active={pathname === '/roles'}
+                isCollapsed={sidebarCollapsed}
+              />
             </NavSection>
             
             {/* Settings */}
-            <NavSection title="Settings" isCollapsed={sidebarCollapsed}>
+            {/* <NavSection title="Settings" isCollapsed={sidebarCollapsed}>
               <NavItem
                 href="/settings"
                 icon={<Settings size={18} />}
@@ -383,7 +407,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
                   </>
                 )}
               </NavItem>
-            </NavSection>
+            </NavSection> */}
           </nav>
         </div>
       </div>

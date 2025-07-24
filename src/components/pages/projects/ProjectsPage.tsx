@@ -3,9 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Pencil, Trash2, Filter, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { projectAPI, type Project } from '@/utils/api';
 import { formatCurrency, cn } from '@/lib/utils';
+import { useConfirmation } from '@/lib/hooks/useConfirmation';
+import { createDeleteConfirmation } from '@/lib/utils/confirmations';
+import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import ProjectModal from './ProjectModal';
+import ProjectsSkeleton from "./ProjectsSkeleton"
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -15,6 +20,8 @@ export default function ProjectsPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   
+  const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation();
+  
   const fetchProjects = async () => {
     setLoading(true);
     setError(null);
@@ -23,7 +30,9 @@ export default function ProjectsPage() {
       setProjects(data.projects);
     } catch (err: any) {
       console.error('Error fetching projects:', err);
-      setError(err.message || 'Failed to load projects');
+      const errorMessage = err.message || 'Failed to load projects';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -39,12 +48,22 @@ export default function ProjectsPage() {
   };
   
   const handleDelete = async (id: string) => {
-    if (confirm('Are you sure you want to delete this project?')) {
-      // TODO: Implement delete API endpoint
-      console.log('Delete project:', id);
-      // For now, just refresh the list
-      fetchProjects();
-    }
+    const project = projects.find(p => p.id === id);
+    const projectName = project?.name || 'this project';
+    
+    const confirmation = createDeleteConfirmation({
+      itemName: projectName,
+      itemType: 'Project',
+      additionalMessage: 'will remove all associated tasks, time entries, and other data',
+      onDelete: async () => {
+        // TODO: Implement delete API endpoint
+        console.log('Delete project:', id);
+        // For now, just refresh the list
+        await fetchProjects();
+      }
+    });
+    
+    confirm(confirmation.action, confirmation);
   };
   
   const handleAddNew = () => {
@@ -127,6 +146,10 @@ export default function ProjectsPage() {
         </div>
       </div>
     );
+  }
+
+  if (loading) {
+    return <ProjectsSkeleton />;
   }
 
   return (
@@ -311,6 +334,18 @@ export default function ProjectsPage() {
           project={selectedProject}
         />
       )}
+      
+      <ConfirmationModal
+        isOpen={confirmation.isOpen}
+        onClose={handleClose}
+        onConfirm={handleConfirm}
+        title={confirmation.title}
+        message={confirmation.message}
+        confirmText={confirmation.confirmText}
+        cancelText={confirmation.cancelText}
+        type={confirmation.type}
+        isLoading={confirmation.isLoading}
+      />
     </div>
   );
 }

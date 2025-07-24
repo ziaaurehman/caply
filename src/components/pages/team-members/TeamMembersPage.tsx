@@ -2,11 +2,17 @@
 
 import React, { useState, useEffect } from "react"
 import { Plus, Pencil, Trash2, Mail, Clock, Shield, AlertCircle } from "lucide-react"
+import Image from "next/image"
+import { toast } from "sonner"
 import Button from "@/components/ui/Button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
+import ConfirmationModal from "@/components/ui/ConfirmationModal"
 import { formatCurrency } from "@/lib/utils"
+import { useConfirmation } from "@/lib/hooks/useConfirmation"
+import { createDeleteConfirmation } from "@/lib/utils/confirmations"
 import { teamAPI, type TeamMember, type PendingInvitation, type CreateTeamMemberData, type UpdateTeamMemberData } from "@/utils/api"
 import TeamMemberModal from "./TeamMemberModal"
+import TeamMembersSkeleton from "./TeamMembersSkeleton"
 
 const TeamMembersPage: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([])
@@ -15,6 +21,8 @@ const TeamMembersPage: React.FC = () => {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation()
 
   useEffect(() => {
     fetchTeamMembers()
@@ -29,7 +37,9 @@ const TeamMembersPage: React.FC = () => {
       setInvitations(data.invitations)
     } catch (error: any) {
       console.error('Error fetching team members:', error)
-      setError(error.message || 'Failed to connect to server')
+      const errorMessage = error.message || 'Failed to connect to server'
+      setError(errorMessage)
+      toast.error(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -41,17 +51,30 @@ const TeamMembersPage: React.FC = () => {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this team member?')) {
-      return
-    }
-
-    try {
-      await teamAPI.deleteTeamMember(id)
-      await fetchTeamMembers() // Refresh the list
-    } catch (error: any) {
-      console.error('Error deleting member:', error)
-      alert(error.message || 'Failed to remove member')
-    }
+    const member = members.find(m => m.id === id)
+    const memberName = member?.users?.full_name || 'this team member'
+    
+    const confirmation = createDeleteConfirmation({
+      itemName: memberName,
+      itemType: 'Team Member',
+      additionalMessage: 'will remove all associated data',
+      onDelete: async () => {
+        try {
+          await teamAPI.deleteTeamMember(id)
+          await fetchTeamMembers() // Refresh the list
+        } catch (error: any) {
+          // Handle specific error messages
+          if (error.message.includes('organization owner')) {
+            throw new Error('Cannot remove organization owner. Please transfer ownership first.')
+          } else if (error.message.includes('Cannot remove yourself')) {
+            throw new Error('You cannot remove yourself from the organization.')
+          }
+          throw error
+        }
+      }
+    })
+    
+    confirm(confirmation.action, confirmation)
   }
 
   const handleAddNew = () => {
@@ -70,6 +93,7 @@ const TeamMembersPage: React.FC = () => {
           weeklyCapacity: data.weeklyCapacity
         }
         await teamAPI.updateTeamMember(data.id, updateData)
+        toast.success('Team member updated successfully')
       } else {
         // Create new invitation
         const createData: CreateTeamMemberData = {
@@ -81,11 +105,13 @@ const TeamMembersPage: React.FC = () => {
           message: data.message
         }
         await teamAPI.createTeamMember(createData)
+        toast.success('Team member invitation sent successfully')
       }
 
       await fetchTeamMembers() // Refresh the list
     } catch (error: any) {
       console.error('Error saving member:', error)
+      toast.error(error.message || 'Failed to save team member')
       throw error // Re-throw so modal can handle it
     }
   }
@@ -156,13 +182,17 @@ const TeamMembersPage: React.FC = () => {
     )
   }
 
+  if (isLoading) {
+    return <TeamMembersSkeleton />;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex justify-between items-center">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Team Members</h1>
-            <p className="mt-1 text-sm text-gray-500">Manage your team members and their permissions</p>
+            <h1 className="text-2xl font-semibold text-gray-800">Team Members</h1>
+            <p className="text-sm text-gray-500">Manage your team members and their permissions</p>
           </div>
           <button
             onClick={handleAddNew}
@@ -175,128 +205,144 @@ const TeamMembersPage: React.FC = () => {
 
         {/* Pending Invitations */}
         {invitations.length > 0 && (
-          <div className="bg-white rounded-lg shadow-md">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="flex items-center text-lg font-medium text-gray-800">
-                <Mail className="h-5 w-5 mr-2" />
-                Pending Invitations ({invitations.length})
-              </h2>
-            </div>
-            <div className="p-6">
-              <div className="space-y-3">
-                {invitations.map((invitation) => (
-                  <div
-                    key={invitation.id}
-                    className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200"
-                  >
-                    <div className="flex items-center space-x-3 mb-2 sm:mb-0">
-                      <div className="flex-shrink-0">
-                        <div className="h-8 w-8 rounded-full bg-yellow-100 flex items-center justify-center">
-                          <Mail className="h-4 w-4 text-yellow-600" />
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
-                        <div className="flex items-center space-x-2">
-                          {getRoleBadge(invitation.roles)}
-                          <span className="text-xs text-gray-500">
-                            Invited {new Date(invitation.created_at).toLocaleDateString()}
-                          </span>
-                        </div>
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 className="flex items-center text-lg font-medium text-gray-800 mb-4">
+              <Mail className="h-5 w-5 mr-2" />
+              Pending Invitations ({invitations.length})
+            </h2>
+            <div className="space-y-3">
+              {invitations.map((invitation) => (
+                <div
+                  key={invitation.id}
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200"
+                >
+                  <div className="flex items-center space-x-3 mb-2 sm:mb-0">
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-yellow-100 flex items-center justify-center">
+                        <Mail className="h-4 w-4 text-yellow-600" />
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <Clock className="h-4 w-4 text-yellow-500" />
-                      <span className="text-xs text-yellow-600">
-                        Expires {new Date(invitation.expires_at).toLocaleDateString()}
-                      </span>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
+                      <div className="flex items-center space-x-2">
+                        {getRoleBadge(invitation.roles)}
+                        <span className="text-xs text-gray-500">
+                          Invited {new Date(invitation.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                  <div className="flex items-center space-x-2">
+                    <Clock className="h-4 w-4 text-yellow-500" />
+                    <span className="text-xs text-yellow-600">
+                      Expires {new Date(invitation.expires_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
         {/* Team Members */}
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-800">Team Overview ({members.length} members)</h2>
-          </div>
-          <div className="p-6">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
-                <span className="ml-2 text-gray-600">Loading team members...</span>
+        <div className="bg-white rounded-lg shadow-md p-6">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+              <span className="ml-2 text-gray-600">Loading team members...</span>
+            </div>
+          ) : members.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                <Plus className="h-6 w-6 text-gray-400" />
               </div>
-            ) : members.length === 0 ? (
-              <div className="text-center py-8">
-                <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                  <Plus className="h-6 w-6 text-gray-400" />
-                </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No team members yet</h3>
-                <p className="text-gray-500 mb-4">Start building your team by inviting your first member.</p>
-                <button
-                  onClick={handleAddNew}
-                  className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-                >
-                  Invite Your First Member
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead>
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Team Member
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Role & Department
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Weekly Capacity
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Hourly Rate
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Joined
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {members.map((member) => (
-                      <tr key={member.id} className="hover:bg-gray-50">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No team members yet</h3>
+              <p className="text-gray-500 mb-4">Start building your team by inviting your first member.</p>
+              <button
+                onClick={handleAddNew}
+                className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+              >
+                Invite Your First Member
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Team Member
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Role & Department
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Capacity & Rate
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Status
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Joined
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {members.map((member) => {
+                    const isActive = member.users?.is_active || false;
+                    const statusIcon = isActive ? 'border-green-500' : 'border-gray-500';
+                    
+                    return (
+                      <tr key={member.id}>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            {member?.users?.avatar_url ? (
-                              <img
-                                className="h-10 w-10 rounded-full object-cover"
-                                src={member.users.avatar_url || "/placeholder.svg"}
-                                alt={member.users?.full_name || "User"}
-                              />
-                            ) : (
-                              <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
-                                <span className="text-orange-700 font-medium text-lg">
-                                  {member.users?.full_name ? member.users.full_name.charAt(0).toUpperCase() : "?"}
-                                </span>
-                              </div>
-                            )}
-                            <div className="ml-4">
-                              <div className="text-sm font-medium text-gray-900">
-                                {member.users?.full_name || "Unknown User"}
-                              </div>
-                              <div className="text-sm text-gray-500">{member.users?.email || "No email"}</div>
-                              {member.users?.position && (
-                                <div className="text-xs text-gray-400">{member.users.position}</div>
+                            <div className={`h-3 w-3 rounded-full border-2 ${statusIcon} mr-3`}></div>
+                            <div className="flex items-center">
+                              {member?.users?.avatar_url ? (
+                                <Image
+                                  className="h-10 w-10 rounded-full object-cover"
+                                  src={member.users.avatar_url || "/placeholder.svg"}
+                                  alt={member.users?.full_name || "User"}
+                                  width={40}
+                                  height={40}
+                                />
+                              ) : (
+                                <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-orange-700 font-medium text-lg">
+                                    {member.users?.full_name ? member.users.full_name.charAt(0).toUpperCase() : "?"}
+                                  </span>
+                                </div>
                               )}
+                              <div className="ml-4">
+                                <div className="text-sm font-medium text-gray-900">
+                                  {member.users?.full_name || "Unknown User"}
+                                </div>
+                                <div className="text-sm text-gray-500">{member.users?.email || "No email"}</div>
+                                {member.users?.position && (
+                                  <div className="text-xs text-gray-400">{member.users.position}</div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -307,40 +353,42 @@ const TeamMembersPage: React.FC = () => {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          {getStatusBadge(member.status, member.users?.is_active || false)}
+                          <div className="text-sm text-gray-900">
+                            {member.weekly_capacity || 0}h / week
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {member.hourly_rate ? formatCurrency(member.hourly_rate) + "/h" : "Rate not set"}
+                          </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {member.weekly_capacity || 0}h
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {getStatusBadge(member.status, isActive)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {member.hourly_rate ? formatCurrency(member.hourly_rate) + "/h" : "Not set"}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {member.joined_at ? new Date(member.joined_at).toLocaleDateString() : "N/A"}
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {member.joined_at ? new Date(member.joined_at).toLocaleDateString() : "N/A"}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <button
                             onClick={() => handleEdit(member)}
-                            className="text-gray-600 hover:text-gray-900 mr-4"
-                            title="Edit member"
+                            className="text-gray-600 hover:text-gray-900 mr-3"
                           >
-                            <Pencil size={16} />
+                            <Pencil className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => handleDelete(member.id)}
                             className="text-red-600 hover:text-red-900"
-                            title="Remove member"
                           >
-                            <Trash2 size={16} />
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <TeamMemberModal
@@ -348,6 +396,18 @@ const TeamMembersPage: React.FC = () => {
           onClose={() => setIsModalOpen(false)}
           member={selectedMember}
           onSave={handleSave}
+        />
+
+        <ConfirmationModal
+          isOpen={confirmation.isOpen}
+          onClose={handleClose}
+          onConfirm={handleConfirm}
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmText={confirmation.confirmText}
+          cancelText={confirmation.cancelText}
+          type={confirmation.type}
+          isLoading={confirmation.isLoading}
         />
       </div>
     </div>

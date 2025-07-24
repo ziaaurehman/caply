@@ -105,7 +105,7 @@ export default function SignUpForm() {
         }
 
         // Use window.location instead of router.push for a clean page reload
-        window.location.href = "/workspace"
+        window.location.href = "/dashboard"
       } else {
         // Email confirmation is required
         console.log("Email confirmation required")

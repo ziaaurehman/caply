@@ -84,7 +84,7 @@ export async function loginWithGoogle(redirectUrl?: string) {
  * Sign out the current user
  */
 export async function logoutUser() {
-  await signOut({ redirectTo: "/login" })
+  await signOut({ redirectTo: "/" })
 }
 
 /**

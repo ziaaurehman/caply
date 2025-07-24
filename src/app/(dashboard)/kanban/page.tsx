@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { ChevronDown } from "lucide-react"
 import KanbanBoard from "@/components/pages/kanban/kanbanPage"
 import { projectAPI } from "@/utils/api/project"
+import KanbanSkeleton from "@/components/pages/kanban/KanbanSkeleton"
 
 interface Project {
   id: string
@@ -41,11 +42,11 @@ export default function Kanban() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-orange-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading projects...</p>
-        </div>
+      <div className="min-h-screen  ">
+       {/* make skeleton bar  like navbar */}
+       <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+       <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+       <KanbanSkeleton />
       </div>
     )
   }

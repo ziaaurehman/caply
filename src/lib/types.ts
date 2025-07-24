@@ -83,6 +83,7 @@ export interface Role {
   display_name: string;
   description: string;
   is_system_role: boolean;
+  organization_id?: string; // NULL for system roles, UUID for organization-specific roles
   permissions: Permission[];
   created_at: string;
   updated_at: string;
@@ -95,6 +96,20 @@ export interface RolePermission {
   created_at: string;
   role?: Role;
   permission?: Permission;
+}
+
+// Role creation and update types
+export interface CreateRoleRequest {
+  name: string;
+  display_name: string;
+  description?: string;
+  permission_ids: string[];
+}
+
+export interface UpdateRoleRequest {
+  display_name?: string;
+  description?: string;
+  permission_ids?: string[];
 }
 
 // =====================================================

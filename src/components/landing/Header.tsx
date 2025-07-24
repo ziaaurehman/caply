@@ -170,7 +170,7 @@ export default function LandingHeader({
               )}
             </div>
           ) :(
-          <button onClick={() => router.push("/signup")} className="hidden lg:flex bg-primary-600 hover:bg-primary-700 transition-colors text-white px-6 py-3 rounded-full font-medium text-sm transition-all duration-300 hover:shadow-lg hover:scale-105 items-center">
+          <button onClick={() => router.push("/login")} className="hidden lg:flex bg-primary-600 hover:bg-primary-700 transition-colors text-white px-6 py-3 rounded-full font-medium text-sm transition-all duration-300 hover:shadow-lg hover:scale-105 items-center">
             START FREE TRIAL
             <ArrowRight className="ml-2 w-4 h-4" />
           </button>
@@ -198,7 +198,7 @@ export default function LandingHeader({
               </button>
             ))}
             <div className="pt-2 border-t border-gray-700">
-              <button onClick={() => router.push("/signup")} className="w-full bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-3 rounded-xl font-medium text-sm transition-colors flex items-center justify-center">
+              <button onClick={() => router.push("/login")} className="w-full bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-3 rounded-xl font-medium text-sm transition-colors flex items-center justify-center">
                 START FREE TRIAL
                 <ArrowRight className="ml-2 w-4 h-4" />
               </button>

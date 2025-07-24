@@ -264,6 +264,45 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Create default capacity allocations if capacity planning is enabled and team members are assigned
+  if (capacity_planning_enabled && team_member_ids && Array.isArray(team_member_ids) && team_member_ids.length > 0) {
+    console.log('Creating default capacity allocations for project:', project.id);
+    
+    // Get the project members that were just created
+    const { data: projectMembers, error: projectMembersError } = await supabase
+      .from('project_members')
+      .select('id')
+      .eq('project_id', project.id);
+      
+    if (!projectMembersError && projectMembers && projectMembers.length > 0) {
+      // Create default capacity allocations (e.g., 20 hours per week per member)
+      const defaultHoursPerWeek = 20; // Can be made configurable later
+      const startDate = start_date || new Date().toISOString().split('T')[0];
+      
+      const allocationsData = projectMembers.map(member => ({
+        project_id: project.id,
+        project_member_id: member.id,
+        organization_id: userOrg.organization_id,
+        allocated_hours_per_week: defaultHoursPerWeek,
+        start_date: startDate,
+        end_date: end_date || null,
+        notes: 'Default allocation created with project',
+        created_by: session.user.id
+      }));
+      
+      const { error: allocationsError } = await supabase
+        .from('resource_allocations')
+        .insert(allocationsData);
+        
+      if (allocationsError) {
+        console.error('Error creating default capacity allocations:', allocationsError);
+        // Continue without failing - project is created, just allocations weren't created
+      } else {
+        console.log(`Successfully created default capacity allocations for ${projectMembers.length} members`);
+      }
+    }
+  }
+
   return NextResponse.json({ project });
 }
 
