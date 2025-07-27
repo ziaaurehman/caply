@@ -1,12 +1,9 @@
 'use client';
-
+import DashboardPage from "@/components/pages/dashboard/dashboard";
 export default function Dashboard() {
   return (
     <div>
-      <h1>Dashboard</h1>
-      <p>Welcome to the dashboard!</p>
-      {/* Additional dashboard components can be added here */}
-      <p>More features coming soon!</p>
+      <DashboardPage />
     </div>
   );
 }
