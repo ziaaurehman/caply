@@ -236,9 +236,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     const sourceListId = e.dataTransfer.getData("sourceListId");
 
     if (cardId && sourceListId && sourceListId !== targetListId) {
+      if (!currentOrganization?.id) return;
+
       try {
         // Update card's list
-        await kanbanAPI.updateCard(cardId, { list_id: targetListId });
+        await kanbanAPI.updateCard(cardId, { list_id: targetListId, organizationId: currentOrganization.id });
         
         // Refresh board data
         if (kanbanState.currentBoard) {
@@ -310,19 +312,22 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   };
 
   const handleSaveCard = async (listId: string, cardData: any) => {
+    if (!currentOrganization?.id) return;
+
     try {
       const newCard = await kanbanAPI.createCard({
         list_id: listId,
         title: cardData.title,
         description: cardData.description,
         due_date: cardData.due_date,
-        cover_color: cardData.cover_color
+        cover_color: cardData.cover_color,
+        organizationId: currentOrganization.id
       });
       
       // Assign members to the card if any were selected
       if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
         for (const userId of cardData.assignee_ids) {
-          await kanbanAPI.assignCardMember(newCard.card.id, userId);
+          await kanbanAPI.assignCardMember(newCard.card.id, userId, currentOrganization.id);
         }
       }
       
@@ -549,13 +554,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                 )}
               </div>
 
-              {/* Board Settings */}
+              {/* Board Settings
               <button
                 onClick={() => setBoardSettingsOpen(true)}
                 className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
               >
                 <Settings className="h-4 w-4" />
-              </button>
+              </button> */}
             </div>
           </div>
         </div>
@@ -612,6 +617,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           onClose={() => setCardModal({ isOpen: false, card: null, mode: 'view' })}
           projectMembers={projectMembers}
           boardId={kanbanState.currentBoard?.id}
+          organizationId={currentOrganization?.id || ''}
           onCardUpdate={() => {
             if (kanbanState.currentBoard) {
               loadBoardData(kanbanState.currentBoard.id);

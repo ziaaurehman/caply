@@ -24,6 +24,7 @@ interface CardDetailModalProps {
   onClose: () => void
   projectMembers: ProjectMember[]
   boardId?: string
+  organizationId: string
   onCardUpdate: () => void
 }
 
@@ -36,6 +37,7 @@ export default function CardDetailModal({
   onClose,
   projectMembers,
   boardId,
+  organizationId,
   onCardUpdate
 }: CardDetailModalProps) {
   const { data: session } = useSession()
@@ -54,19 +56,19 @@ export default function CardDetailModal({
       setIsLoading(true)
       
       // Load full card details
-      const cardResponse = await kanbanAPI.getCard(card.id)
+      const cardResponse = await kanbanAPI.getCard(card.id, organizationId)
       setCardData(cardResponse.card)
       
       // Load activities for this specific card
-      const activitiesResponse = await kanbanAPI.getActivitiesByCard(card.id)
+      const activitiesResponse = await kanbanAPI.getActivitiesByCard(card.id, 50, 0, organizationId)
       setActivities(activitiesResponse.activities)
 
       // Load comments
-      const commentsResponse = await kanbanAPI.getComments(card.id)
+      const commentsResponse = await kanbanAPI.getComments(card.id, organizationId)
       setComments(commentsResponse.comments)
 
       // Load checklists
-      const checklistsResponse = await kanbanAPI.getChecklists(card.id)
+      const checklistsResponse = await kanbanAPI.getChecklists(card.id, organizationId)
       setChecklists(checklistsResponse.checklists)
 
     } catch (error) {
@@ -87,7 +89,7 @@ export default function CardDetailModal({
     const fetchListNames = async () => {
       try {
         if (!boardId) return;
-        const response = await kanbanAPI.getLists(boardId);
+        const response = await kanbanAPI.getLists(boardId, organizationId);
         // Handle the response structure properly
         const lists = Array.isArray(response) ? response : (response as any)?.data || [];
         const nameMap = lists.reduce((acc: Record<string, string>, list: any) => {
@@ -163,7 +165,7 @@ export default function CardDetailModal({
 
   const handleSaveDescription = async () => {
     try {
-      await kanbanAPI.updateCard(card.id, { description: editedDescription })
+      await kanbanAPI.updateCard(card.id, { description: editedDescription, organizationId })
       setCardData(prev => ({ ...prev, description: editedDescription }))
       setIsEditingDescription(false)
       onCardUpdate()
@@ -189,7 +191,7 @@ export default function CardDetailModal({
 
   const handleAssignMember = async (userId: string) => {
     try {
-      await kanbanAPI.assignCardMember(card.id, userId)
+      await kanbanAPI.assignCardMember(card.id, userId, organizationId)
       loadCardDetails()
       onCardUpdate()
     } catch (error) {
@@ -199,7 +201,7 @@ export default function CardDetailModal({
 
   const handleRemoveMember = async (userId: string) => {
     try {
-      await kanbanAPI.removeCardMember(card.id, userId)
+      await kanbanAPI.removeCardMember(card.id, userId, organizationId)
       loadCardDetails()
       onCardUpdate()
     } catch (error) {
@@ -461,7 +463,7 @@ export default function CardDetailModal({
           </div>
 
           {/* Sidebar */}
-          <div className="w-80 bg-gradient-to-br from-orange-50/80 to-amber-50/80 border-l border-orange-100 p-6 space-y-8">
+          {/* <div className="w-80 bg-gradient-to-br from-orange-50/80 to-amber-50/80 border-l border-orange-100 p-6 space-y-8">
             <div>
               <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Add to card</h4>
               <div className="space-y-3">
@@ -521,7 +523,7 @@ export default function CardDetailModal({
                 </button>
               </div>
             </div>
-          </div>
+          </div> */}
         </div>
       </div>
     </div>

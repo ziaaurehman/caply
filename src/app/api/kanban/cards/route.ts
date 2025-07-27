@@ -1,34 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  try {
+    const { searchParams } = new URL(req.url);
+    const listId = searchParams.get('list_id');
+    const boardId = searchParams.get('board_id');
+    const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
-  const supabase = await createClient();
-  const { searchParams } = new URL(req.url);
-  const listId = searchParams.get('list_id');
-  const boardId = searchParams.get('board_id');
+    if (!listId && !boardId) {
+      return NextResponse.json({ error: 'List ID or Board ID is required' }, { status: 400 });
+    }
 
-  if (!listId && !boardId) {
-    return NextResponse.json({ error: 'List ID or Board ID is required' }, { status: 400 });
-  }
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
 
-  // Check user access to organization
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'projects', action: 'read' }
+    );
 
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-  }
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status });
+    }
+
+    const { context: userContext } = validation;
+    const supabase = await createClient();
 
   let query = supabase
     .from('cards')
@@ -111,7 +113,7 @@ export async function GET(req: NextRequest) {
         )
       )
     `)
-    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
+    .eq('lists.boards.projects.organization_id', organizationId)
     .eq('is_archived', false);
 
   if (listId) {
@@ -126,34 +128,43 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ cards: cards || [] });
+    return NextResponse.json({ cards: cards || [] });
+  } catch (error: any) {
+    console.error('Error in GET /api/kanban/cards:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error' 
+    }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  try {
+    const body = await req.json();
+    const { list_id, title, description, due_date, cover_color, cover_image } = body;
+    const organizationId = body.organizationId || body.organization_id || req.headers.get('x-organization-id');
 
-  const supabase = await createClient();
-  const body = await req.json();
-  const { list_id, title, description, due_date, cover_color, cover_image } = body;
+    if (!list_id || !title) {
+      return NextResponse.json({ error: 'List ID and title are required' }, { status: 400 });
+    }
 
-  if (!list_id || !title) {
-    return NextResponse.json({ error: 'List ID and title are required' }, { status: 400 });
-  }
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
 
-  // Check if user has access to the list
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'projects', action: 'update' }
+    );
 
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-  }
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status });
+    }
+
+    const { context: userContext } = validation;
+    const supabase = await createClient();
 
   // Verify list exists and user has access through project organization
   const { data: list, error: listError } = await supabase
@@ -171,7 +182,7 @@ export async function POST(req: NextRequest) {
       )
     `)
     .eq('id', list_id)
-    .eq('boards.projects.organization_id', userOrg.organization_id)
+    .eq('boards.projects.organization_id', organizationId)
     .single();
 
   if (listError || !list) {
@@ -200,7 +211,7 @@ export async function POST(req: NextRequest) {
       due_date,
       cover_color,
       cover_image,
-      created_by: session.user.id
+      created_by: userContext!.userId
     }])
     .select()
     .single();
@@ -213,7 +224,7 @@ export async function POST(req: NextRequest) {
   await supabase
     .from('activities')
     .insert([{
-      user_id: session.user.id,
+      user_id: userContext!.userId,
       board_id: list.board_id,
       card_id: card.id,
       action_type: 'create',
@@ -222,5 +233,11 @@ export async function POST(req: NextRequest) {
       details: { card_title: title, list_id }
     }]);
 
-  return NextResponse.json({ card });
+    return NextResponse.json({ card });
+  } catch (error: any) {
+    console.error('Error in POST /api/kanban/cards:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error' 
+    }, { status: 500 });
+  }
 }

@@ -1,91 +1,97 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  try {
+    const { searchParams } = new URL(req.url);
+    const cardId = searchParams.get('card_id');
+    const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
-  const supabase = await createClient();
-  const { searchParams } = new URL(req.url);
-  const cardId = searchParams.get('card_id');
+    if (!cardId) {
+      return NextResponse.json({ error: 'Card ID is required' }, { status: 400 });
+    }
 
-  if (!cardId) {
-    return NextResponse.json({ error: 'Card ID is required' }, { status: 400 });
-  }
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
 
-  // Verify user has access to organization
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'projects', action: 'read' }
+    );
 
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-  }
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status });
+    }
 
-  // Verify card exists and user has access through project organization
-  const { data: card, error: cardError } = await supabase
-    .from('cards')
-    .select(`
-      id,
-      list_id,
-      lists!inner (
+    const supabase = await createClient();
+
+    // Verify card exists and user has access through project organization
+    const { data: card, error: cardError } = await supabase
+      .from('cards')
+      .select(`
         id,
-        board_id,
-        boards!inner (
+        title,
+        list_id,
+        lists!inner (
           id,
-          project_id,
-          projects!inner (
+          board_id,
+          boards!inner (
             id,
-            organization_id
+            project_id,
+            projects!inner (
+              id,
+              organization_id
+            )
           )
         )
-      )
-    `)
-    .eq('id', cardId)
-    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
-    .single();
+      `)
+      .eq('id', cardId)
+      .eq('lists.boards.projects.organization_id', organizationId)
+      .single();
 
-  if (cardError || !card) {
-    return NextResponse.json({ error: 'Card not found' }, { status: 404 });
-  }
+    if (cardError || !card) {
+      return NextResponse.json({ error: 'Card not found' }, { status: 404 });
+    }
 
-  // Get checklists for the card
-  const { data: checklists, error } = await supabase
-    .from('checklists')
-    .select(`
-      *,
-      checklist_items (
-        id,
-        content,
-        is_completed,
-        position,
-        due_date,
-        assigned_to,
-        created_at,
-        updated_at,
-        users (
+    // Get checklists for the card
+    const { data: checklists, error } = await supabase
+      .from('checklists')
+      .select(`
+        *,
+        checklist_items (
           id,
-          full_name,
-          email,
-          avatar_url
+          content,
+          is_completed,
+          position,
+          due_date,
+          assigned_to,
+          created_at,
+          updated_at,
+          users (
+            id,
+            full_name,
+            email,
+            avatar_url
+          )
         )
-      )
-    `)
-    .eq('card_id', cardId)
-    .order('position', { ascending: true });
+      `)
+      .eq('card_id', cardId)
+      .order('position', { ascending: true });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ checklists: checklists || [] });
+  } catch (error) {
+    console.error('Error fetching checklists:', error);
+    return NextResponse.json({ error: 'Failed to fetch checklists' }, { status: 500 });
   }
-
-  return NextResponse.json({ checklists: checklists || [] });
 }
 
 export async function POST(req: NextRequest) {
