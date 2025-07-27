@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { CalendarIcon, UploadCloud, Plus, ChevronDown, X } from "lucide-react"
 import { projectAPI, clientAPI, teamAPI, type CreateProjectData, type CreateClientData } from "@/utils/api"
 import ClientModal from "@/components/pages/clients/ClientModal"
+import { useOrganizationStore } from "@/lib/stores/organizationStore"
 
 interface ProjectFormData {
   name: string
@@ -67,6 +68,8 @@ export default function ProjectCreationPage() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [isClientModalOpen, setIsClientModalOpen] = useState(false)
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false)
+  
+  const { currentOrganization } = useOrganizationStore()
   const [taskCategories, setTaskCategories] = useState<string[]>([
     "Business Development",
     "Design",
@@ -120,9 +123,11 @@ export default function ProjectCreationPage() {
 
   // Fetch clients from API
   const fetchClients = async () => {
+    if (!currentOrganization?.id) return
+    
     setLoadingClients(true)
     try {
-      const data = await clientAPI.getClients()
+      const data = await clientAPI.getClients(currentOrganization.id)
       setClients(data.clients)
     } catch (e) {
       console.error('Error fetching clients:', e)
@@ -133,9 +138,11 @@ export default function ProjectCreationPage() {
 
   // Fetch team members from API
   const fetchTeamMembers = async () => {
+    if (!currentOrganization?.id) return
+    
     setLoadingTeamMembers(true)
     try {
-      const data = await teamAPI.getTeamMembers()
+      const data = await teamAPI.getTeamMembers(currentOrganization.id)
       setTeamMembers(data.members)
     } catch (e) {
       console.error('Error fetching team members:', e)
@@ -145,14 +152,24 @@ export default function ProjectCreationPage() {
   }
 
   useEffect(() => {
-    fetchClients()
-    fetchTeamMembers()
-  }, [])
+    if (currentOrganization?.id) {
+      fetchClients()
+      fetchTeamMembers()
+    }
+  }, [currentOrganization?.id])
 
   const handleCreateClient = async (data: CreateClientData) => {
+    if (!currentOrganization?.id) {
+      console.error('No current organization selected');
+      return;
+    }
+
     try {
       // Call API to create client
-      const result = await clientAPI.createClient(data)
+      const result = await clientAPI.createClient({
+        ...data,
+        organizationId: currentOrganization.id
+      })
       setValue('client_id', result.client.id)
       setIsClientModalOpen(false)
       fetchClients()
@@ -162,10 +179,15 @@ export default function ProjectCreationPage() {
   }
 
   const onSubmit = async (data: ProjectFormData) => {
+    if (!currentOrganization?.id) {
+      console.error('No current organization selected');
+      return;
+    }
+
     try {
       // Prepare payload for API
       const payload = {
-        organization_id: "1",
+        organization_id: currentOrganization.id,
         name: data.name,
         client_id: data.client_id || null,
         code: data.code,

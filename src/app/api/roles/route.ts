@@ -2,32 +2,24 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
+import { validateOrganizationAccess } from '@/utils/organizationUtils'
 
 // GET /api/roles - Get organization-specific roles
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authConfig)
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Validate organization access
+    const validation = await validateOrganizationAccess()
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
     }
 
     const supabase = await createClient()
+    const organizationId = validation.context!.organizationId
 
-    // Get user's organization
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id, user_id')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrgMembership) {
-      console.error('Organization membership error:', orgError)
-      console.error('User ID:', session.user.id)
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    console.log('User organization:', userOrgMembership.organization_id)
+    console.log('User organization:', organizationId)
 
     // Get organization-specific roles only (exclude system roles)
     const { data: roles, error } = await supabase
@@ -52,7 +44,7 @@ export async function GET(request: NextRequest) {
           )
         )
       `)
-      .eq('organization_id', userOrgMembership.organization_id)
+      .eq('organization_id', organizationId)
       .eq('is_system_role', false)
       .order('name')
 
@@ -61,7 +53,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch roles' }, { status: 500 })
     }
 
-    console.log(`Found ${roles?.length || 0} roles for organization ${userOrgMembership.organization_id}`)
+    console.log(`Found ${roles?.length || 0} roles for organization ${organizationId}`)
 
     // Transform the data to flatten permissions
     const transformedRoles = roles?.map((role: any) => ({
@@ -78,7 +70,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ 
       roles: transformedRoles,
-      organization_id: userOrgMembership.organization_id,
+      organization_id: organizationId,
       count: transformedRoles.length 
     })
 
@@ -91,36 +83,26 @@ export async function GET(request: NextRequest) {
 // POST /api/roles - Create a new organization-specific role
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authConfig)
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Validate organization access with admin role requirement
+    const validation = await validateOrganizationAccess(
+      undefined, // no specific permission needed
+      'admin' // require admin role
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
     }
 
     const supabase = await createClient()
-
-    // Get user's organization and check admin permissions
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        roles!inner(name)
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    // Check if user is admin
-    const userRole = (userOrgMembership.roles as any)?.name
-    if (userRole !== 'admin') {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
+    const organizationId = validation.context!.organizationId
+    const userId = validation.context!.userId
 
     const body = await request.json()
     const { name, display_name, description, permission_ids } = body
+
+    console.log('Creating role with data:', { name, display_name, description, permission_ids, organizationId })
 
     if (!name || !display_name || !permission_ids || !Array.isArray(permission_ids)) {
       return NextResponse.json({ 
@@ -128,21 +110,70 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // Call the database function to create the role
-    const { data, error } = await supabase.rpc('create_organization_role', {
-      org_id: userOrgMembership.organization_id,
-      role_name: name,
-      role_display_name: display_name,
-      role_description: description || null,
-      permission_ids: permission_ids
-    })
+    // Check if role name already exists in this organization
+    const { data: existingRole, error: checkError } = await supabase
+      .from('roles')
+      .select('id')
+      .eq('name', name)
+      .eq('organization_id', organizationId)
+      .single()
 
-    if (error) {
-      console.error('Error creating role:', error)
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Error checking existing role:', checkError)
+      return NextResponse.json({ error: 'Failed to validate role name' }, { status: 500 })
+    }
+
+    if (existingRole) {
+      return NextResponse.json({ 
+        error: 'Role name already exists in this organization' 
+      }, { status: 400 })
+    }
+
+    // Create the role
+    const { data: newRole, error: roleError } = await supabase
+      .from('roles')
+      .insert({
+        name: name,
+        display_name: display_name,
+        description: description || null,
+        organization_id: organizationId,
+        is_system_role: false
+      })
+      .select()
+      .single()
+
+    if (roleError) {
+      console.error('Error creating role:', roleError)
       return NextResponse.json({ error: 'Failed to create role' }, { status: 500 })
     }
 
-    return NextResponse.json({ role_id: data, message: 'Role created successfully' })
+    console.log('Role created:', newRole)
+
+    // Create role-permission relationships
+    if (permission_ids.length > 0) {
+      const rolePermissions = permission_ids.map((permissionId: string) => ({
+        role_id: newRole.id,
+        permission_id: permissionId
+      }))
+
+      const { error: permissionsError } = await supabase
+        .from('role_permissions')
+        .insert(rolePermissions)
+
+      if (permissionsError) {
+        console.error('Error creating role permissions:', permissionsError)
+        // Try to clean up the created role
+        await supabase.from('roles').delete().eq('id', newRole.id)
+        return NextResponse.json({ error: 'Failed to assign permissions to role' }, { status: 500 })
+      }
+
+      console.log('Role permissions created:', rolePermissions.length)
+    }
+
+    return NextResponse.json({ 
+      role: newRole,
+      message: 'Role created successfully' 
+    })
 
   } catch (error) {
     console.error('Error in POST roles API:', error)

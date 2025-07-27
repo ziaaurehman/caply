@@ -89,8 +89,8 @@ interface EmailProviderResponse {
 // Team Members API
 export const teamAPI = {
   // Get all team members and pending invitations
-  getTeamMembers: async (): Promise<TeamMembersResponse> => {
-    const response = await fetch('/api/team-members');
+  getTeamMembers: async (organizationId: string): Promise<TeamMembersResponse> => {
+    const response = await fetch(`/api/team-members?organizationId=${encodeURIComponent(organizationId)}`);
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch team members');
@@ -103,7 +103,7 @@ export const teamAPI = {
   },
 
   // Create new team member invitation
-  createTeamMember: async (data: CreateTeamMemberData): Promise<void> => {
+  createTeamMember: async (data: CreateTeamMemberData & { organizationId: string }): Promise<void> => {
     const response = await fetch('/api/team-members', {
       method: 'POST',
       headers: {
@@ -115,7 +115,8 @@ export const teamAPI = {
         department: data.department,
         hourlyRate: data.hourlyRate,
         weeklyCapacity: data.weeklyCapacity,
-        message: data.message
+        message: data.message,
+        organizationId: data.organizationId
       })
     });
 
@@ -159,8 +160,12 @@ export const teamAPI = {
   },
 
   // Get all roles
-  getRoles: async (): Promise<RolesResponse> => {
-    const response = await fetch('/api/roles');
+  getRoles: async (organizationId: string): Promise<RolesResponse> => {
+    const response = await fetch('/api/roles', {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       throw new Error('Failed to fetch roles');
     }

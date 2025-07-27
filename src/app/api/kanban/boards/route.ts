@@ -1,40 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const supabase = await createClient();
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get('project_id');
+  const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
   if (!projectId) {
     return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
   }
 
-  // Check if user has access to the project
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
-
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  if (!organizationId) {
+    return NextResponse.json({ 
+      error: 'Organization ID is required' 
+    }, { status: 400 })
   }
 
-  // Verify project exists and user has access
+  // Validate organization access and permissions
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'projects', action: 'read' }
+  )
+
+  if (!validation.success) {
+    return NextResponse.json({ 
+      error: validation.error 
+    }, { status: validation.status })
+  }
+
+  const supabase = await createClient()
+  const userContext = validation.context!
+
+  // Verify project exists and belongs to the organization
   const { data: project, error: projectError } = await supabase
     .from('projects')
     .select('id, organization_id, kanban_enabled')
     .eq('id', projectId)
-    .eq('organization_id', userOrg.organization_id)
+    .eq('organization_id', organizationId)
     .single();
 
   if (projectError || !project) {
@@ -96,37 +99,40 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const supabase = await createClient();
   const body = await req.json();
-  const { project_id, name, description, background_color, background_image, visibility } = body;
+  const { project_id, organizationId, name, description, background_color, background_image, visibility } = body;
 
   if (!project_id || !name) {
     return NextResponse.json({ error: 'Project ID and name are required' }, { status: 400 });
   }
 
-  // Check if user has access to the project
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
-
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  if (!organizationId) {
+    return NextResponse.json({ 
+      error: 'Organization ID is required' 
+    }, { status: 400 })
   }
 
-  // Verify project exists and user has access
+  // Validate organization access and permissions
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'projects', action: 'update' }
+  )
+
+  if (!validation.success) {
+    return NextResponse.json({ 
+      error: validation.error 
+    }, { status: validation.status })
+  }
+
+  const supabase = await createClient()
+  const userContext = validation.context!
+
+  // Verify project exists and belongs to the organization
   const { data: project, error: projectError } = await supabase
     .from('projects')
     .select('id, organization_id, kanban_enabled')
     .eq('id', project_id)
-    .eq('organization_id', userOrg.organization_id)
+    .eq('organization_id', organizationId)
     .single();
 
   if (projectError || !project) {
@@ -159,7 +165,7 @@ export async function POST(req: NextRequest) {
       background_image,
       visibility: visibility || 'project',
       position,
-      created_by: session.user.id
+      created_by: userContext.userId
     }])
     .select()
     .single();
@@ -172,7 +178,7 @@ export async function POST(req: NextRequest) {
   await supabase
     .from('activities')
     .insert([{
-      user_id: session.user.id,
+      user_id: userContext.userId,
       board_id: board.id,
       action_type: 'create',
       entity_type: 'board',

@@ -1,31 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const supabase = await createClient();
   const { searchParams } = new URL(req.url);
   const startDate = searchParams.get('start_date');
   const endDate = searchParams.get('end_date');
   const projectId = searchParams.get('project_id');
+  const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
-  // Get user's organization membership
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
-
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+  if (!organizationId) {
+    return NextResponse.json({ 
+      error: 'Organization ID is required' 
+    }, { status: 400 })
   }
+
+  // Validate organization access and permissions
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'capacity', action: 'read' }
+  )
+
+  if (!validation.success) {
+    return NextResponse.json({ 
+      error: validation.error 
+    }, { status: validation.status })
+  }
+
+  const supabase = await createClient()
+  const userContext = validation.context!
 
   try {
     // Get all project members with their capacity info for the organization
@@ -55,7 +58,7 @@ export async function GET(req: NextRequest) {
           is_active
         )
       `)
-      .eq('projects.organization_id', userOrg.organization_id)
+      .eq('projects.organization_id', organizationId)
       .eq('projects.capacity_planning_enabled', true)
       .eq('organization_members.status', 'active');
 

@@ -39,8 +39,12 @@ interface ClientResponse {
 // Clients API
 export const clientAPI = {
   // Get all clients
-  getClients: async (): Promise<ClientsResponse> => {
-    const response = await fetch('/api/clients');
+  getClients: async (organizationId: string): Promise<ClientsResponse> => {
+    const response = await fetch(`/api/clients?organizationId=${organizationId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch clients');
@@ -61,11 +65,12 @@ export const clientAPI = {
   },
 
   // Create new client
-  createClient: async (data: CreateClientData): Promise<ClientResponse> => {
+  createClient: async (data: CreateClientData & { organizationId: string }): Promise<ClientResponse> => {
     const response = await fetch('/api/clients', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
       },
       body: JSON.stringify(data)
     });

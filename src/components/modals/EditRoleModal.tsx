@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { X, Check } from 'lucide-react'
 import { rolesApi } from '@/utils/api/roles'
 import { Permission, UpdateRoleRequest, Role } from '@/lib/types'
+import { useOrganizationStore } from '@/lib/stores/organizationStore'
 
 interface EditRoleModalProps {
   isOpen: boolean
@@ -27,6 +28,8 @@ export default function EditRoleModal({
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  const { currentOrganization } = useOrganizationStore()
 
   // Initialize form data when role changes
   useEffect(() => {
@@ -45,12 +48,17 @@ export default function EditRoleModal({
     setError(null)
 
     try {
+      if (!currentOrganization?.id) {
+        setError('No organization selected')
+        return
+      }
+
       const updateData: UpdateRoleRequest = {
         ...formData,
         permission_ids: selectedPermissions,
       }
       
-      await rolesApi.update(role.id, updateData)
+      await rolesApi.update(role.id, { ...updateData, organizationId: currentOrganization.id })
       onSuccess()
       handleClose()
     } catch (err: any) {

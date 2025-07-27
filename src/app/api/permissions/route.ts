@@ -1,38 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
-import { getServerSession } from 'next-auth'
-import { authConfig } from '@/auth'
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 
 // GET /api/permissions - Get all available permissions
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authConfig)
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Get organization ID from headers
+    const organizationId = request.headers.get('x-organization-id')
+    
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
     }
+
+    // // Validate organization access and permissions (admin only)
+    // const validation = await validateOrganizationAccessWithId(
+    //   organizationId,
+    //   { resource: 'roles', action: 'manage' }
+    // )
+
+    // if (!validation.success) {
+    //   return NextResponse.json({ 
+    //     error: validation.error 
+    //   }, { status: validation.status })
+    // }
 
     const supabase = await createClient()
-
-    // Get user's organization and check admin permissions
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        roles!inner(name)
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    // Check if user is admin (only admins can view permissions for role management)
-    const userRole = (userOrgMembership.roles as any)?.name
-    if (userRole !== 'admin') {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
 
     // Get all permissions grouped by module
     const { data: permissions, error } = await supabase

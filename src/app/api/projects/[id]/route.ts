@@ -1,41 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authConfig);
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const supabase = await createClient();
     const { id: projectId } = await params;
-
-    // Get user's organization membership details
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        id,
-        organizations!inner (
-          id,
-          owner_id
-        )
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single();
-      
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    
+    // Get organization ID from query params or headers
+    const url = new URL(req.url)
+    const organizationId = url.searchParams.get('organizationId') || req.headers.get('x-organization-id')
+    
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
     }
 
-    const isOwner = (userOrgMembership.organizations as any)?.owner_id === session.user.id;
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'projects', action: 'read' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
+
+    const supabase = await createClient()
+    const userContext = validation.context!
+
+    // Check if user has admin/manager role or projects.manage permission for full access
+    const hasFullAccess = userContext.membership.role.name === 'admin' || 
+                         userContext.membership.role.name === 'manager' ||
+                         userContext.membership.role.permissions.some(p => 
+                           p.resource === 'projects' && p.action === 'manage'
+                         )
 
     // Fetch the specific project
     let query = supabase
@@ -60,38 +64,38 @@ export async function GET(
         )
       `)
       .eq('id', projectId)
-      .eq('organization_id', userOrgMembership.organization_id)
-      .single();
+      .eq('organization_id', organizationId);
 
-    // If not owner, check if user is a member of this project
-    if (!isOwner) {
-      const { data: membership } = await supabase
+    // If user doesn't have full access, check if they're a member of this project
+    if (!hasFullAccess) {
+      const { data: memberCheck } = await supabase
         .from('project_members')
-        .select('project_id')
-        .eq('organization_member_id', userOrgMembership.id)
+        .select('id')
         .eq('project_id', projectId)
+        .eq('organization_member_id', userContext.membership.id)
         .single();
 
-      if (!membership) {
+      if (!memberCheck) {
         return NextResponse.json({ error: 'Project not found or access denied' }, { status: 404 });
       }
     }
 
-    const { data: project, error } = await query;
+    const { data: project, error } = await query.single();
 
-    if (error) {
-      console.error('Error fetching project:', error);
-      return NextResponse.json({ error: 'Failed to fetch project' }, { status: 500 });
-    }
-
-    if (!project) {
+    if (error || !project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ project });
+    return NextResponse.json({ 
+      project,
+      user_access: hasFullAccess ? 'full' : 'member'
+    });
+
   } catch (error) {
-    console.error('Error in GET /api/projects/[id]:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error fetching project:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error' 
+    }, { status: 500 });
   }
 }
 
@@ -100,82 +104,66 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authConfig);
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const supabase = await createClient();
     const { id: projectId } = await params;
-    const updateData = await req.json();
+    const body = await req.json();
+    const { organizationId, ...updateData } = body;
 
-    // Get user's organization membership details
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        id,
-        organizations!inner (
-          id,
-          owner_id
-        )
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single();
-      
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
     }
 
-    const isOwner = (userOrgMembership.organizations as any)?.owner_id === session.user.id;
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'projects', action: 'update' }
+    )
 
-    // Check if project exists and user has access
-    const { data: existingProject, error: fetchError } = await supabase
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
+
+    const supabase = await createClient()
+    const userContext = validation.context!
+
+    // Check if project exists and belongs to the organization
+    const { data: existingProject, error: projectError } = await supabase
       .from('projects')
       .select('id, organization_id')
       .eq('id', projectId)
-      .eq('organization_id', userOrgMembership.organization_id)
+      .eq('organization_id', organizationId)
       .single();
-
-    if (fetchError || !existingProject) {
+      
+    if (projectError || !existingProject) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // If not owner, check if user is a member of this project
-    if (!isOwner) {
-      const { data: membership } = await supabase
-        .from('project_members')
-        .select('project_id, role')
-        .eq('organization_member_id', userOrgMembership.id)
-        .eq('project_id', projectId)
-        .single();
-
-      if (!membership) {
-        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-      }
-    }
-
-    // Update the project
+    // Update project
     const { data: updatedProject, error: updateError } = await supabase
       .from('projects')
-      .update({
-        ...updateData,
-        updated_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('id', projectId)
       .select()
       .single();
-
+      
     if (updateError) {
       console.error('Error updating project:', updateError);
-      return NextResponse.json({ error: 'Failed to update project' }, { status: 500 });
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
+    
+    return NextResponse.json({ 
+      success: true,
+      project: updatedProject
+    });
 
-    return NextResponse.json({ project: updatedProject });
   } catch (error) {
-    console.error('Error in PUT /api/projects/[id]:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error updating project:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error' 
+    }, { status: 500 });
   }
 }
 
@@ -184,66 +172,64 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authConfig);
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { id: projectId } = await params;
+    
+    // Get organization ID from query params or headers
+    const url = new URL(req.url)
+    const organizationId = url.searchParams.get('organizationId') || req.headers.get('x-organization-id')
+    
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
     }
 
-    const supabase = await createClient();
-    const { id: projectId } = await params;
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'projects', action: 'delete' }
+    )
 
-    // Get user's organization membership details
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        id,
-        organizations!inner (
-          id,
-          owner_id
-        )
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
+
+    const supabase = await createClient()
+
+    // Check if project exists and belongs to the organization
+    const { data: existingProject, error: projectError } = await supabase
+      .from('projects')
+      .select('id, organization_id')
+      .eq('id', projectId)
+      .eq('organization_id', organizationId)
       .single();
       
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
-
-    const isOwner = (userOrgMembership.organizations as any)?.owner_id === session.user.id;
-
-    // Only owners can delete projects
-    if (!isOwner) {
-      return NextResponse.json({ error: 'Only organization owners can delete projects' }, { status: 403 });
-    }
-
-    // Check if project exists
-    const { data: existingProject, error: fetchError } = await supabase
-      .from('projects')
-      .select('id')
-      .eq('id', projectId)
-      .eq('organization_id', userOrgMembership.organization_id)
-      .single();
-
-    if (fetchError || !existingProject) {
+    if (projectError || !existingProject) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // Delete the project (this will cascade to related tables)
+    // Delete project (cascading deletes should handle related records)
     const { error: deleteError } = await supabase
       .from('projects')
       .delete()
       .eq('id', projectId);
-
+      
     if (deleteError) {
       console.error('Error deleting project:', deleteError);
-      return NextResponse.json({ error: 'Failed to delete project' }, { status: 500 });
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
     }
+    
+    return NextResponse.json({ 
+      success: true,
+      message: 'Project deleted successfully'
+    });
 
-    return NextResponse.json({ message: 'Project deleted successfully' });
   } catch (error) {
-    console.error('Error in DELETE /api/projects/[id]:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error deleting project:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error' 
+    }, { status: 500 });
   }
 }

@@ -13,12 +13,20 @@ export async function GET(request: NextRequest) {
 
     const supabase = await createClient()
 
-    // Get user's organizations
+    // Get user's organizations with complete membership and role data
     const { data: organizations, error } = await supabase
       .from('organization_members')
       .select(`
+        id,
         organization_id,
+        user_id,
+        role_id,
         status,
+        hourly_rate,
+        weekly_capacity,
+        department,
+        hire_date,
+        joined_at,
         organizations!inner(
           id,
           name,
@@ -27,6 +35,18 @@ export async function GET(request: NextRequest) {
           logo_url,
           owner_id,
           created_at
+        ),
+        roles!inner(
+          id,
+          name,
+          display_name,
+          description,
+          role_permissions!inner(
+            permissions!inner(
+              module,
+              action
+            )
+          )
         )
       `)
       .eq('user_id', session.user.id)
@@ -45,7 +65,29 @@ export async function GET(request: NextRequest) {
       logo_url: org.organizations.logo_url,
       is_owner: org.organizations.owner_id === session.user.id,
       created_at: org.organizations.created_at,
-      membership_status: org.status
+      membership_status: org.status,
+      membership: {
+        id: org.id,
+        organization_id: org.organization_id,
+        user_id: org.user_id,
+        role_id: org.role_id,
+        status: org.status,
+        hourly_rate: org.hourly_rate,
+        weekly_capacity: org.weekly_capacity,
+        department: org.department,
+        hire_date: org.hire_date,
+        joined_at: org.joined_at,
+        role: {
+          id: org.roles.id,
+          name: org.roles.name,
+          display_name: org.roles.display_name,
+          description: org.roles.description,
+          permissions: org.roles.role_permissions?.map((rp: any) => ({
+            resource: rp.permissions.module,
+            action: rp.permissions.action
+          })) || []
+        }
+      }
     }))
 
     return NextResponse.json({ organizations: transformedOrganizations })

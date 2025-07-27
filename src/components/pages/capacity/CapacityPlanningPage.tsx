@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronDown, Settings, Users, Plus } from 'lucide-react';
 import { projectAPI } from "@/utils/api/project"
 import { capacityAPI, CapacityOverview, ResourceAllocation } from '@/utils/api/capacity';
+import { useOrganizationStore } from '@/lib/stores/organizationStore';
 import CapacitySettingsModal from './CapacitySettingsModal';
 import WeeklyCapacityTable from './WeeklyCapacityTable';
 import CapacitySkeleton from "./CapacitySkeleton"
@@ -17,6 +18,13 @@ interface Project {
 }
 
 export default function CapacityPlanningPage() {
+  const { 
+    currentOrganization, 
+    loading: organizationLoading, 
+    fetchUserOrganizations,
+    userOrganizations 
+  } = useOrganizationStore();
+  
   const [selectedProject, setSelectedProject] = useState<string>('');
   const [capacityOverview, setCapacityOverview] = useState<CapacityOverview[]>([]);
   const [summary, setSummary] = useState({
@@ -35,15 +43,26 @@ export default function CapacityPlanningPage() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
 
+  // Initialize organization store if needed
+  useEffect(() => {
+    if (!organizationLoading && userOrganizations.length === 0) {
+      fetchUserOrganizations();
+    }
+  }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
+
   // Fetch projects on component mount
   useEffect(() => {
-    fetchProjects();
-  }, []);
+    if (currentOrganization?.id) {
+      fetchProjects();
+    }
+  }, [currentOrganization?.id]);
 
   // Fetch projects from API
   const fetchProjects = async () => {
+    if (!currentOrganization?.id) return;
+    
     try {
-      const response = await projectAPI.getProjects({ capacity_planning_enabled: true });
+      const response = await projectAPI.getProjects(currentOrganization.id, { capacity_planning_enabled: true });
       const fetchedProjects = response.projects;
       setProjects(fetchedProjects);
       
@@ -69,7 +88,7 @@ export default function CapacityPlanningPage() {
 
     try {
       // Fetch capacity overview
-      const overviewResponse = await capacityAPI.getOverview({
+      const overviewResponse = await capacityAPI.getOverview(currentOrganization!.id, {
         project_id: selectedProject
       });
 
@@ -77,7 +96,7 @@ export default function CapacityPlanningPage() {
       setSummary(overviewResponse.summary);
 
       // Fetch allocations
-      const allocationsResponse = await capacityAPI.getAllocations({
+      const allocationsResponse = await capacityAPI.getAllocations(currentOrganization!.id, {
         project_id: selectedProject
       });
 
@@ -118,6 +137,11 @@ export default function CapacityPlanningPage() {
         return 'Unknown';
     }
   };
+
+  // Show loading while organization is loading or not loaded
+  if (organizationLoading || !currentOrganization?.id) {
+    return <CapacitySkeleton />;
+  }
 
   if (error) {
     return (

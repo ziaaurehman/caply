@@ -28,6 +28,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { hasRole, hasAnyRole } from "@/utils/rbac"
+import { useOrganizationStore } from "@/lib/stores/organizationStore"
 import { useState } from "react"
 
 interface SidebarProps {
@@ -163,39 +164,11 @@ const NavSection: React.FC<{ title: string; children: React.ReactNode; isCollaps
 export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed, setSidebarCollapsed }: SidebarProps) {
   const pathname = usePathname()
   const { data: session } = useSession()
+  const { hasRole: hasOrgRole, hasPermission } = useOrganizationStore()
   
-  // Mock user profile for RBAC checks - in production, this would come from your RBAC store
-  const currentUser = session?.user ? {
-    id: session.user.id,
-    name: session.user.name || '',
-    email: session.user.email || '',
-    roleId: session.user.role || 'employee',
-    role: {
-      id: session.user.role || 'employee',
-      name: session.user.role || 'employee',
-      description: '',
-      permissions: [],
-      createdAt: '',
-      updatedAt: ''
-    },
-    organizationId: 'demo-org',
-    organization: {
-      id: 'demo-org',
-      name: 'Demo Organization',
-      settings: {
-        allowSelfRegistration: false,
-        defaultRole: 'employee'
-      },
-      createdAt: '',
-      updatedAt: ''
-    },
-    isActive: true,
-    createdAt: '',
-    updatedAt: ''
-  } : null
-
-  const isAdmin = hasRole(currentUser, 'admin')
-  const isManagerOrAbove = hasAnyRole(currentUser, ['admin', 'manager'])
+  // Check admin access using organization store
+  const isAdmin = hasOrgRole('admin') || hasPermission('roles', 'manage')
+  const isManagerOrAbove = hasOrgRole('admin') || hasOrgRole('manager')
 
   const coreMenuItems = [
     {
@@ -363,16 +336,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
               ))}
             </NavSection> */}
             
-            {/* Settings */}
-            <NavSection title="Management" isCollapsed={sidebarCollapsed}>
-              <NavItem
-                href="/roles"
-                icon={<Shield size={18} />}
-                label="Roles & Permissions"
-                active={pathname === '/roles'}
-                isCollapsed={sidebarCollapsed}
-              />
-            </NavSection>
+            {/* Management section removed - Roles & Permissions moved to Administration section with proper admin checks */}
             
             {/* Settings */}
             {/* <NavSection title="Settings" isCollapsed={sidebarCollapsed}>

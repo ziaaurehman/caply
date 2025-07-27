@@ -7,6 +7,7 @@ import { Role, Permission } from '@/lib/types'
 import CreateRoleModal from '@/components/modals/CreateRoleModal'
 import EditRoleModal from '@/components/modals/EditRoleModal'
 import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal'
+import { useOrganizationStore } from '@/lib/stores/organizationStore'
 
 export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([])
@@ -21,20 +22,29 @@ export default function RolesPage() {
   const [selectedRole, setSelectedRole] = useState<Role | null>(null)
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null)
 
-  // Load data
+  const { currentOrganization, hasPermission, hasRole } = useOrganizationStore()
+
+  // Check if user has admin access
+  const hasAdminAccess = hasRole('admin') || hasPermission('roles', 'manage')
+
+  // Load data when organization changes
   useEffect(() => {
-    loadData()
-  }, [])
+    if (currentOrganization?.id && hasAdminAccess) {
+      loadData()
+    }
+  }, [currentOrganization?.id, hasAdminAccess])
 
   const loadData = async () => {
+    if (!currentOrganization?.id) return
+
     try {
       setLoading(true)
       setError(null)
 
       // Load roles and permissions in parallel
       const [rolesResponse, permissionsResponse] = await Promise.all([
-        rolesApi.getAll(),
-        permissionsApi.getAll()
+        rolesApi.getAll(currentOrganization.id),
+        permissionsApi.getAll(currentOrganization.id)
       ])
 
       setRoles(rolesResponse.data || rolesResponse.roles || [])
@@ -48,8 +58,10 @@ export default function RolesPage() {
   }
 
   const handleCreateRole = async (roleData: any) => {
+    if (!currentOrganization?.id) return
+
     try {
-      await rolesApi.create(roleData)
+      await rolesApi.create({ ...roleData, organizationId: currentOrganization.id })
       setCreateModalOpen(false)
       await loadData() // Refresh data
     } catch (err) {
@@ -58,10 +70,10 @@ export default function RolesPage() {
   }
 
   const handleEditRole = async (roleData: any) => {
-    if (!selectedRole) return
+    if (!selectedRole || !currentOrganization?.id) return
     
     try {
-      await rolesApi.update(selectedRole.id, roleData)
+      await rolesApi.update(selectedRole.id, { ...roleData, organizationId: currentOrganization.id })
       setEditModalOpen(false)
       setSelectedRole(null)
       await loadData() // Refresh data
@@ -71,10 +83,10 @@ export default function RolesPage() {
   }
 
   const handleDeleteRole = async () => {
-    if (!roleToDelete) return
+    if (!roleToDelete || !currentOrganization?.id) return
 
     try {
-      await rolesApi.delete(roleToDelete.id)
+      await rolesApi.delete(roleToDelete.id, currentOrganization.id)
       setDeleteModalOpen(false)
       setRoleToDelete(null)
       await loadData() // Refresh data
@@ -106,6 +118,15 @@ export default function RolesPage() {
     }
   }
 
+  const getRoleBadge = (role: Role) => {
+    const badgeColor = getRoleBadgeColor(role.name)
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${badgeColor}`}>
+        {role.display_name || role.name}
+      </span>
+    )
+  }
+
   const getRoleBadgeColor = (roleName: string) => {
     switch (roleName.toLowerCase()) {
       case 'admin':
@@ -115,7 +136,7 @@ export default function RolesPage() {
       case 'member':
         return 'bg-gray-100 text-gray-800 border-gray-200'
       default:
-        return 'bg-purple-100 text-purple-800 border-purple-200'
+        return 'bg-orange-100 text-orange-800 border-orange-200'
     }
   }
 
@@ -134,15 +155,19 @@ export default function RolesPage() {
     await loadData() // Refresh data
   }
 
-  if (loading) {
+  // Check if user has admin access
+  if (!hasAdminAccess) {
     return (
       <div className="p-8">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-64 mb-6"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-gray-200 rounded"></div>
-            ))}
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+              <Shield className="w-4 h-4 text-yellow-600" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-yellow-900">Access Restricted</h3>
+              <p className="text-yellow-700">You need administrator privileges to manage roles and permissions.</p>
+            </div>
           </div>
         </div>
       </div>
@@ -179,11 +204,11 @@ export default function RolesPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Roles & Permissions</h1>
-          <p className="text-gray-600 mt-2">Manage user roles and their permissions</p>
+          <p className="text-gray-600 mt-2">Manage user roles and their permissions for {currentOrganization?.name}</p>
         </div>
         <button
           onClick={() => setCreateModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
         >
           <Plus className="w-4 h-4" />
           Create Role
@@ -191,103 +216,117 @@ export default function RolesPage() {
       </div>
 
       {/* Roles Table */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Organization Roles</h2>
-        </div>
-
-        {roles.length === 0 ? (
-          <div className="p-12 text-center">
-            <Shield className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">No roles found</h3>
-            <p className="text-gray-600 mb-6">Create your first role to get started.</p>
+      <div className="bg-white rounded-lg shadow-md p-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+            <span className="ml-2 text-gray-600">Loading roles...</span>
+          </div>
+        ) : roles.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
+              <Shield className="h-6 w-6 text-gray-400" />
+            </div>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No roles yet</h3>
+            <p className="text-gray-500 mb-4">Create your first role to get started managing permissions.</p>
             <button
               onClick={() => setCreateModalOpen(true)}
-              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
             >
-              Create Role
+              Create Your First Role
             </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Role
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Role Name
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Description
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Permissions
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Members
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Created
                   </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {roles.map((role) => (
-                  <tr key={role.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={role.id}>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-3">
-                        {getRoleIcon(role.name)}
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-900">
+                      <div className="flex items-center">
+                        <div className="flex items-center">
+                          <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+                            {getRoleIcon(role.name)}
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-gray-900">
                               {role.display_name || role.name}
-                            </span>
-                            <span className={`px-2 py-1 text-xs rounded-full border ${getRoleBadgeColor(role.name)}`}>
-                              {role.name}
-                            </span>
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {getRoleBadge(role)}
+                            </div>
                           </div>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-sm text-gray-600">
+                      <div className="text-sm text-gray-900">
                         {role.description || 'No description provided'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-gray-900 font-medium">
-                        {getPermissionCount(role.permissions || [])} permissions
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-gray-600">
-                        {Math.floor(Math.random() * 10) + 1} members
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="text-sm text-gray-600">
-                        {role.created_at ? new Date(role.created_at).toLocaleDateString() : 'N/A'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => openEditModal(role)}
-                          className="p-2 text-gray-400 hover:text-blue-600 transition-colors"
-                          title="Edit role"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => openDeleteModal(role)}
-                          className="p-2 text-gray-400 hover:text-red-600 transition-colors"
-                          title="Delete role"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {getPermissionCount(role.permissions || [])} permissions
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {role.permissions && role.permissions.length > 0 
+                          ? `${role.permissions.slice(0, 2).map(p => p.module).join(', ')}${role.permissions.length > 2 ? '...' : ''}`
+                          : 'No permissions'
+                        }
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {role.created_at ? new Date(role.created_at).toLocaleDateString() : 'N/A'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <button
+                        onClick={() => openEditModal(role)}
+                        className="text-gray-600 hover:text-gray-900 mr-3"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(role)}
+                        className="text-red-600 hover:text-red-900"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </td>
                   </tr>
                 ))}

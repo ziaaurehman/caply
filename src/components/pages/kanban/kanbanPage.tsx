@@ -5,6 +5,7 @@ import Image from "next/image"
 import { ChevronDown, Plus, Settings, Users, Filter, Search, Bell } from "lucide-react"
 import { kanbanAPI } from "@/utils/api/kanban"
 import { projectAPI } from "@/utils/api/project"
+import { useOrganizationStore } from "@/lib/stores/organizationStore"
 import KanbanColumn from "./KanbanColumn"
 import AddTaskModal from "./AddTaskModal"
 import { 
@@ -30,6 +31,13 @@ interface KanbanPageProps {
 }
 
 export default function KanbanBoard({ projectId }: KanbanPageProps) {
+  const { 
+    currentOrganization, 
+    loading: organizationLoading, 
+    fetchUserOrganizations,
+    userOrganizations 
+  } = useOrganizationStore();
+  
   // Main state
   const [kanbanState, setKanbanState] = useState<KanbanState>({
     boards: [],
@@ -92,11 +100,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // Initialize data
   const initializeKanbanData = useCallback(async () => {
+    if (!currentOrganization?.id) return;
+    
     try {
       setKanbanState(prev => ({ ...prev, isLoading: true, error: null }));
 
       // Fetch project details and members
-      const projectResponse = await projectAPI.getProject(projectId);
+      const projectResponse = await projectAPI.getProject(projectId, currentOrganization.id);
       const project = projectResponse.project;
       setProjectName(project.name);
       
@@ -120,7 +130,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       }
 
       // Fetch boards for the project
-      const boardsResponse = await kanbanAPI.getBoards(projectId);
+      const boardsResponse = await kanbanAPI.getBoards(projectId, currentOrganization.id);
       const boards = boardsResponse.boards;
 
       if (boards.length === 0) {
@@ -129,7 +139,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           project_id: projectId,
           name: `${project.name} Board`,
           description: `Kanban board for ${project.name}`,
-          background_color: "#0079bf"
+          background_color: "#0079bf",
+          organizationId: currentOrganization.id
         });
         setKanbanState(prev => ({
           ...prev,
@@ -157,11 +168,21 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         error: error instanceof Error ? error.message : "Failed to load Kanban board"
       }));
     }
-  }, [projectId]);
+  }, [projectId, currentOrganization?.id]);
 
+  // Initialize organization store if needed
   useEffect(() => {
-    initializeKanbanData();
-  }, [initializeKanbanData]);
+    if (!organizationLoading && userOrganizations.length === 0) {
+      fetchUserOrganizations();
+    }
+  }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
+
+  // Initialize kanban data when organization is ready
+  useEffect(() => {
+    if (currentOrganization?.id) {
+      initializeKanbanData();
+    }
+  }, [initializeKanbanData, currentOrganization?.id]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -356,6 +377,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     
     return { backgroundColor: '#f3f4f6' };
   };
+
+  // Show loading while organization is loading or not loaded
+  if (organizationLoading || !currentOrganization?.id) {
+    return <KanbanSkeleton />;
+  }
 
   if (kanbanState.isLoading) {
     return <KanbanSkeleton />;

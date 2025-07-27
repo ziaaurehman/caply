@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { X, Check } from 'lucide-react'
 import { rolesApi } from '@/utils/api/roles'
 import { Permission, CreateRoleRequest } from '@/lib/types'
+import { useOrganizationStore } from '@/lib/stores/organizationStore'
 
 interface CreateRoleModalProps {
   isOpen: boolean
@@ -26,6 +27,8 @@ export default function CreateRoleModal({
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  const { currentOrganization } = useOrganizationStore()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,12 +36,17 @@ export default function CreateRoleModal({
     setError(null)
 
     try {
+      if (!currentOrganization?.id) {
+        setError('No organization selected')
+        return
+      }
+
       const createData: CreateRoleRequest = {
         ...formData,
         permission_ids: selectedPermissions,
       }
       
-      await rolesApi.create(createData)
+      await rolesApi.create({ ...createData, organizationId: currentOrganization.id })
       onSuccess()
       handleClose()
     } catch (err: any) {

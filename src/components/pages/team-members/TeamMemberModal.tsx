@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { X, Mail, Users, DollarSign, Clock, User, Shield, ChevronDown } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { teamAPI, type Role, type Permission, type TeamMember } from '@/utils/api';
+import { useOrganizationStore } from '@/lib/stores/organizationStore';
 
 interface TeamMemberModalProps {
   isOpen: boolean;
@@ -46,6 +47,8 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [loadingRoles, setLoadingRoles] = useState(false);
   const [emailProvider, setEmailProvider] = useState<string | null>(null);
+  
+  const { currentOrganization } = useOrganizationStore();
 
   const { register, handleSubmit, formState: { errors }, reset, watch, setValue } = useForm<FormData>({
     defaultValues: {
@@ -62,11 +65,11 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
 
   // Fetch roles on component mount
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && currentOrganization?.id) {
       fetchRoles();
       checkEmailProvider();
     }
-  }, [isOpen]);
+  }, [isOpen, currentOrganization?.id]);
 
   // Update form when member changes
   useEffect(() => {
@@ -98,9 +101,11 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   };
 
   const fetchRoles = async () => {
+    if (!currentOrganization?.id) return;
+    
     setLoadingRoles(true);
     try {
-      const data = await teamAPI.getRoles();
+      const data = await teamAPI.getRoles(currentOrganization.id);
       setRoles(data.roles);
     } catch (error) {
       console.error('Error fetching roles:', error);

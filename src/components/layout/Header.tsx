@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, Dispatch, SetStateAction } from "react"
-import { Bell, Search, Menu, ChevronDown, User, Settings, LogOut, PanelLeftClose, PanelLeftOpen, CreditCard } from "lucide-react"
+import { useState, Dispatch, SetStateAction, useEffect } from "react"
+import { Bell, Search, Menu, ChevronDown, User, Settings, LogOut, PanelLeftClose, PanelLeftOpen, CreditCard, Building2, Check } from "lucide-react"
 import { useSession, signOut } from "next-auth/react"
 import { getInitials } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { useSubscriptionModal } from "@/lib/hooks/useSubscriptionModal"
+import { useOrganizationStore } from "@/lib/stores/organizationStore"
 
 interface HeaderProps {
   setSidebarOpen: Dispatch<SetStateAction<boolean>>
@@ -18,17 +19,42 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
   const { data: session } = useSession()
   const router = useRouter()
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+  const [showOrgDropdown, setShowOrgDropdown] = useState(false)
   const { openSubscriptionModal } = useSubscriptionModal()
+  
+  const {
+    currentOrganization,
+    userOrganizations,
+    loading,
+    fetchUserOrganizations,
+    switchOrganization,
+    clearOrganizationData
+  } = useOrganizationStore()
+
+  // Fetch organizations when session is available
+  useEffect(() => {
+    if (session?.user?.id && userOrganizations.length === 0) {
+      fetchUserOrganizations()
+    }
+  }, [session?.user?.id, fetchUserOrganizations, userOrganizations.length])
 
   const handleLogout = async () => {
     setShowProfileMenu(false)
+    clearOrganizationData()
     await signOut({ 
       callbackUrl: '/',
       redirect: true 
     })
   }
 
+  const handleOrganizationSwitch = async (organizationId: string) => {
+    await switchOrganization(organizationId)
+    setShowOrgDropdown(false)
+  }
+
   const user = session?.user
+  const showOrgSelector = userOrganizations.length > 1
+  const showOrgDisplay = currentOrganization && userOrganizations.length >= 1
 
   return (
     <header className="bg-white border-b border-gray-200 z-30 sticky top-0 h-16">
@@ -65,7 +91,117 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
           </div>
         </div>
 
-        <div className="flex items-center space-x-3 flex-shrink-0">
+        <div className="flex items-center space-x-6 flex-shrink-0 mx-1">
+          {/* Organization Display/Selector */}
+          {showOrgDisplay && (
+            <div className="relative">
+              {showOrgSelector ? (
+                <button
+                  className="flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500 transition-colors bg-gray-50 border border-gray-200"
+                  onClick={() => setShowOrgDropdown(!showOrgDropdown)}
+                >
+                  {currentOrganization.logo_url ? (
+                    <img
+                      src={currentOrganization.logo_url}
+                      alt={currentOrganization.name}
+                      className="h-6 w-6 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-6 w-6 rounded-full bg-gradient-to-r from-orange-500 to-orange-600 text-white flex items-center justify-center text-xs font-semibold">
+                      {getInitials(currentOrganization.name)}
+                    </div>
+                  )}
+                  <span className="text-sm font-medium text-gray-900 truncate max-w-32">
+                    {currentOrganization.name}
+                  </span>
+                  <ChevronDown size={14} className="text-gray-500" />
+                </button>
+              ) : (
+                <div className="flex items-center space-x-2 px-3 py-2 rounded-md bg-gray-50 border border-gray-200">
+                  {currentOrganization.logo_url ? (
+                    <img
+                      src={currentOrganization.logo_url}
+                      alt={currentOrganization.name}
+                      className="h-6 w-6 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="h-6 w-6 rounded-full bg-gradient-to-r from-orange-500 to-orange-600 text-white flex items-center justify-center text-xs font-semibold">
+                      {getInitials(currentOrganization.name)}
+                    </div>
+                  )}
+                  <span className="text-sm font-medium text-gray-900 truncate max-w-32">
+                    {currentOrganization.name}
+                  </span>
+                </div>
+              )}
+
+              {/* Organization Dropdown */}
+              {showOrgDropdown && showOrgSelector && (
+                <>
+                  {/* Backdrop */}
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setShowOrgDropdown(false)}
+                  />
+                  
+                  {/* Dropdown Menu */}
+                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 z-50 py-1">
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                      <p className="text-sm font-semibold text-gray-900">
+                        Switch Organization
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        Select the organization you want to work with
+                      </p>
+                    </div>
+                    
+                    <div className="py-1 max-h-64 overflow-y-auto">
+                      {userOrganizations.map((org) => (
+                        <button
+                          key={org.id}
+                          onClick={() => handleOrganizationSwitch(org.id)}
+                          className={`flex items-center w-full px-4 py-3 text-sm hover:bg-orange-50 transition-colors group ${
+                            currentOrganization?.id === org.id ? 'bg-orange-50 border-r-2 border-orange-500' : ''
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3 min-w-0 flex-1">
+                            <div className="flex-shrink-0">
+                              {org.logo_url ? (
+                                <img
+                                  src={org.logo_url}
+                                  alt={org.name}
+                                  className="h-9 w-9 rounded-full object-cover"
+                                />
+                              ) : (
+                                <div className="h-9 w-9 rounded-full bg-gradient-to-r from-orange-500 to-orange-600 text-white flex items-center justify-center text-sm font-semibold">
+                                  {getInitials(org.name)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1 text-left">
+                              <p className="font-medium text-gray-900 truncate">
+                                {org.name}
+                              </p>
+                              <p className="text-xs text-gray-500 truncate">
+                                {org.membership.role.display_name}
+                                {org.is_owner && " • Owner"}
+                              </p>
+                            </div>
+                          </div>
+                          {currentOrganization?.id === org.id && (
+                            <div className="flex items-center ml-2">
+                              <div className="h-2 w-2 bg-orange-500 rounded-full"></div>
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Notifications */}
           <button className="relative p-2 rounded-lg text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-colors">
             <Bell size={20} />

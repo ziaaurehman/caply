@@ -13,6 +13,7 @@ import { createDeleteConfirmation } from "@/utils/confirmations"
 import { teamAPI, type TeamMember, type PendingInvitation, type CreateTeamMemberData, type UpdateTeamMemberData } from "@/utils/api"
 import TeamMemberModal from "./TeamMemberModal"
 import TeamMembersSkeleton from "./TeamMembersSkeleton"
+import { useOrganizationStore } from "@/lib/stores/organizationStore"
 
 const TeamMembersPage: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([])
@@ -23,16 +24,21 @@ const TeamMembersPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   
   const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation()
+  const { currentOrganization } = useOrganizationStore()
 
   useEffect(() => {
-    fetchTeamMembers()
-  }, [])
+    if (currentOrganization?.id) {
+      fetchTeamMembers()
+    }
+  }, [currentOrganization?.id])
 
   const fetchTeamMembers = async () => {
+    if (!currentOrganization?.id) return
+    
     setIsLoading(true)
     setError(null)
     try {
-      const data = await teamAPI.getTeamMembers()
+      const data = await teamAPI.getTeamMembers(currentOrganization.id)
       setMembers(data.members)
       setInvitations(data.invitations)
     } catch (error: any) {
@@ -96,13 +102,18 @@ const TeamMembersPage: React.FC = () => {
         toast.success('Team member updated successfully')
       } else {
         // Create new invitation
-        const createData: CreateTeamMemberData = {
+        if (!currentOrganization?.id) {
+          throw new Error('No organization selected')
+        }
+        
+        const createData: CreateTeamMemberData & { organizationId: string } = {
           email: data.email,
           roleId: data.roleId,
           department: data.department,
           hourlyRate: data.hourlyRate,
           weeklyCapacity: data.weeklyCapacity,
-          message: data.message
+          message: data.message,
+          organizationId: currentOrganization.id
         }
         await teamAPI.createTeamMember(createData)
         toast.success('Team member invitation sent successfully')

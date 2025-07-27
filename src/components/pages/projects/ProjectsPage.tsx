@@ -10,7 +10,8 @@ import { useConfirmation } from '@/lib/hooks/useConfirmation';
 import { createDeleteConfirmation } from '@/utils/confirmations';
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import ProjectModal from './ProjectModal';
-import ProjectsSkeleton from "./ProjectsSkeleton"
+import ProjectsSkeleton from "./ProjectsSkeleton";
+import { useOrganizationStore } from '@/lib/stores/organizationStore';
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -21,12 +22,20 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   
   const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation();
+  const { 
+    currentOrganization, 
+    loading: organizationLoading, 
+    fetchUserOrganizations,
+    userOrganizations 
+  } = useOrganizationStore();
   
   const fetchProjects = async () => {
+    if (!currentOrganization?.id) return;
+    
     setLoading(true);
     setError(null);
     try {
-      const data = await projectAPI.getProjects();
+      const data = await projectAPI.getProjects(currentOrganization.id);
       setProjects(data.projects);
     } catch (err: any) {
       console.error('Error fetching projects:', err);
@@ -38,9 +47,18 @@ export default function ProjectsPage() {
     }
   };
 
+  // Initialize organization store if needed
   useEffect(() => {
-    fetchProjects();
-  }, []);
+    if (!organizationLoading && userOrganizations.length === 0) {
+      fetchUserOrganizations();
+    }
+  }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
+
+  useEffect(() => {
+    if (currentOrganization?.id) {
+      fetchProjects();
+    }
+  }, [currentOrganization?.id]);
   
   const handleEdit = (project: Project) => {
     setSelectedProject(project);
@@ -48,6 +66,8 @@ export default function ProjectsPage() {
   };
   
   const handleDelete = async (id: string) => {
+    if (!currentOrganization?.id) return;
+    
     const project = projects.find(p => p.id === id);
     const projectName = project?.name || 'this project';
     
@@ -56,10 +76,14 @@ export default function ProjectsPage() {
       itemType: 'Project',
       additionalMessage: 'will remove all associated tasks, time entries, and other data',
       onDelete: async () => {
-        // TODO: Implement delete API endpoint
-        console.log('Delete project:', id);
-        // For now, just refresh the list
-        await fetchProjects();
+        try {
+          await projectAPI.deleteProject(id, currentOrganization.id);
+          toast.success(`Project "${projectName}" deleted successfully`);
+          await fetchProjects();
+        } catch (err: any) {
+          console.error('Error deleting project:', err);
+          toast.error(err.message || 'Failed to delete project');
+        }
       }
     });
     
@@ -148,7 +172,7 @@ export default function ProjectsPage() {
     );
   }
 
-  if (loading) {
+  if (organizationLoading || !currentOrganization?.id || loading) {
     return <ProjectsSkeleton />;
   }
 

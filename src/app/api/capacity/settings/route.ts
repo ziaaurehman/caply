@@ -1,36 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { searchParams } = new URL(req.url);
+  const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
+
+  if (!organizationId) {
+    return NextResponse.json({ 
+      error: 'Organization ID is required' 
+    }, { status: 400 })
   }
 
+  // Validate organization access and permissions
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'capacity', action: 'read' }
+  )
+
+  if (!validation.success) {
+    return NextResponse.json({ 
+      error: validation.error 
+    }, { status: validation.status })
+  }
+
+  const supabase = await createClient()
+  const userContext = validation.context!
+
   try {
-    const supabase = await createClient();
-    
-    // Get user's organization
-    const { data: userOrg, error: userOrgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        role,
-        organizations (
-          id,
-          name
-        )
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single();
-
-    if (userOrgError || !userOrg) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
-
     // Get capacity settings for projects in this organization
     const { data: settings, error } = await supabase
       .from('capacity_settings')
@@ -42,89 +39,99 @@ export async function GET(req: NextRequest) {
           organization_id
         )
       `)
-      .eq('projects.organization_id', userOrg.organization_id);
+      .eq('projects.organization_id', organizationId);
 
     if (error) {
+      console.error('Error fetching capacity settings:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // If no settings exist, return default settings
-    if (!settings || settings.length === 0) {
-      return NextResponse.json({
-        settings: [{
-          default_weekly_capacity: 40,
-          default_work_days_per_week: 5,
-          allow_overallocation: false,
-          overallocation_threshold: 100,
-          notification_settings: {
-            email_on_overallocation: true,
-            email_on_capacity_changes: false,
-            weekly_capacity_reports: false
-          }
-        }]
-      });
-    }
+    return NextResponse.json({ 
+      settings: settings || [],
+      total: settings?.length || 0
+    });
 
-    return NextResponse.json({ settings });
   } catch (error) {
-    console.error('Error fetching capacity settings:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error in capacity settings GET:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error' 
+    }, { status: 500 });
   }
 }
 
-export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { organizationId, ...settingsData } = body;
+
+  if (!organizationId) {
+    return NextResponse.json({ 
+      error: 'Organization ID is required' 
+    }, { status: 400 })
+  }
+
+  // Validate organization access and permissions (admin only for settings)
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'capacity', action: 'manage' }
+  )
+
+  if (!validation.success) {
+    return NextResponse.json({ 
+      error: validation.error 
+    }, { status: validation.status })
+  }
+
+  const supabase = await createClient()
+  const userContext = validation.context!
+
+  const {
+    project_id,
+    default_hours_per_week,
+    default_work_days_per_week,
+    overtime_threshold,
+    capacity_buffer_percentage,
+    auto_allocation_enabled
+  } = settingsData;
+
+  // Validate required fields
+  if (!project_id || !default_hours_per_week) {
+    return NextResponse.json({ 
+      error: 'Project ID and default hours per week are required' 
+    }, { status: 400 });
   }
 
   try {
-    const supabase = await createClient();
-    const body = await req.json();
-    const { project_id, default_weekly_capacity, default_work_days_per_week, allow_overallocation, overallocation_threshold, notification_settings } = body;
-
-    // Get user's organization and check permissions
-    const { data: userOrg, error: userOrgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        role,
-        organizations (
-          id,
-          name
-        )
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
+    // Verify project exists and belongs to the organization
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select('id, organization_id, capacity_planning_enabled')
+      .eq('id', project_id)
+      .eq('organization_id', organizationId)
       .single();
 
-    if (userOrgError || !userOrg) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    if (projectError || !project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
-    // Only owners and admins can update capacity settings
-    if (!['owner', 'admin'].includes(userOrg.role)) {
-      return NextResponse.json({ error: 'Only organization owners can update capacity settings' }, { status: 403 });
+    if (!project.capacity_planning_enabled) {
+      return NextResponse.json({ 
+        error: 'Capacity planning is not enabled for this project' 
+      }, { status: 403 });
     }
 
-    // Upsert capacity settings
-    const { data: settings, error } = await supabase
+    // Create or update capacity settings
+    const { data: settings, error: createError } = await supabase
       .from('capacity_settings')
-      .upsert({
+      .upsert([{
         project_id,
-        default_weekly_capacity: default_weekly_capacity || 40,
+        default_hours_per_week,
         default_work_days_per_week: default_work_days_per_week || 5,
-        allow_overallocation: allow_overallocation || false,
-        overallocation_threshold: overallocation_threshold || 100,
-        notification_settings: notification_settings || {
-          email_on_overallocation: true,
-          email_on_capacity_changes: false,
-          weekly_capacity_reports: false
-        },
+        overtime_threshold: overtime_threshold || 40,
+        capacity_buffer_percentage: capacity_buffer_percentage || 10,
+        auto_allocation_enabled: auto_allocation_enabled || false,
+        updated_by: userContext.userId,
         updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'project_id'
-      })
+      }])
       .select(`
         *,
         projects (
@@ -135,13 +142,20 @@ export async function PUT(req: NextRequest) {
       `)
       .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (createError) {
+      console.error('Error creating/updating capacity settings:', createError);
+      return NextResponse.json({ error: createError.message }, { status: 500 });
     }
 
-    return NextResponse.json({ settings });
+    return NextResponse.json({ 
+      success: true,
+      settings 
+    });
+
   } catch (error) {
-    console.error('Error updating capacity settings:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error in capacity settings POST:', error);
+    return NextResponse.json({ 
+      error: 'Internal server error' 
+    }, { status: 500 });
   }
 }

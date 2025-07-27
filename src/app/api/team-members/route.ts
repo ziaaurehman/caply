@@ -3,74 +3,40 @@ import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { sendInvitationEmail } from '@/lib/email'
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 
 // GET /api/team-members - List all team members in the organization
 export async function GET(request: NextRequest) {
   console.log('🔍 GET /api/team-members - Starting request')
   
   try {
-    const session = await getServerSession(authConfig)
-    console.log('📋 Session data:', {
-      hasSession: !!session,
-      userId: session?.user?.id,
-      userEmail: session?.user?.email,
-      userName: session?.user?.name
-    })
+    // Get organization ID from query params or headers
+    const url = new URL(request.url)
+    const organizationId = url.searchParams.get('organizationId') || request.headers.get('x-organization-id')
     
-    if (!session?.user?.id) {
-      console.log('❌ No session or user ID found')
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
+    }
+
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'users', action: 'read' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
     }
 
     const supabase = await createClient()
-    console.log('🗄️ Supabase client created')
-
-    // Get user's organization
-    console.log('🔍 Looking for user organization for user ID:', session.user.id)
-    const { data: userOrg, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id, role_id, roles:role_id(name)')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    console.log('📊 Organization query result:', {
-      userOrg,
-      orgError,
-      errorCode: orgError?.code,
-      errorMessage: orgError?.message
-    })
-
-    if (orgError || !userOrg) {
-      console.log('❌ Organization not found or error:', {
-        error: orgError,
-        userOrg,
-        userId: session.user.id
-      })
-      
-      // Let's also check all organization members for this user (for debugging)
-      const { data: allMemberships, error: debugError } = await supabase
-        .from('organization_members')
-        .select('*')
-        .eq('user_id', session.user.id)
-      
-      console.log('🔍 Debug - All memberships for user:', {
-        allMemberships,
-        debugError,
-        userId: session.user.id
-      })
-      
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    console.log('✅ Found user organization:', {
-      organizationId: userOrg.organization_id,
-      roleId: userOrg.role_id,
-      roleName: (userOrg as any).roles?.name
-    })
+    console.log('✅ Organization access validated for:', organizationId)
 
     // Get all team members with their roles and user info
-    console.log('🔍 Fetching team members for organization:', userOrg.organization_id)
+    console.log('🔍 Fetching team members for organization:', organizationId)
     const { data: members, error } = await supabase
       .from('organization_members')
       .select(`
@@ -99,7 +65,7 @@ export async function GET(request: NextRequest) {
           description
         )
       `)
-      .eq('organization_id', userOrg.organization_id)
+      .eq('organization_id', organizationId)
       .order('joined_at', { ascending: false })
 
     console.log('📊 Members query result:', {
@@ -115,7 +81,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get pending invitations
-    console.log('🔍 Fetching pending invitations for organization:', userOrg.organization_id)
+    console.log('🔍 Fetching pending invitations for organization:', organizationId)
     const { data: invitations, error: inviteError } = await supabase
       .from('organization_invitations')
       .select(`
@@ -132,7 +98,7 @@ export async function GET(request: NextRequest) {
           description
         )
       `)
-      .eq('organization_id', userOrg.organization_id)
+      .eq('organization_id', organizationId)
       .eq('status', 'pending')
       .gt('expires_at', new Date().toISOString())
 
@@ -165,63 +131,36 @@ export async function POST(request: NextRequest) {
   console.log('🔍 POST /api/team-members - Starting request')
   
   try {
-    const session = await getServerSession(authConfig)
-    console.log('📋 Session data:', {
-      hasSession: !!session,
-      userId: session?.user?.id,
-      userEmail: session?.user?.email
-    })
-    
-    if (!session?.user?.id) {
-      console.log('❌ No session or user ID found')
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     const body = await request.json()
     console.log('📝 Request body:', body)
     
-    const { email, roleId, department, hourlyRate, weeklyCapacity, message } = body
+    const { email, roleId, department, hourlyRate, weeklyCapacity, message, organizationId } = body
 
-    if (!email || !roleId) {
-      console.log('❌ Missing required fields:', { email: !!email, roleId: !!roleId })
-      return NextResponse.json({ error: 'Email and role are required' }, { status: 400 })
+    if (!email || !roleId || !organizationId) {
+      console.log('❌ Missing required fields:', { email: !!email, roleId: !!roleId, organizationId: !!organizationId })
+      return NextResponse.json({ error: 'Email, role, and organization ID are required' }, { status: 400 })
+    }
+
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'users', action: 'create' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
     }
 
     const supabase = await createClient()
+    console.log('✅ Organization access validated for:', organizationId)
 
-    // Get user's organization and inviter info
-    console.log('🔍 Looking for user organization for user ID:', session.user.id)
-    const { data: userOrg, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id, 
-        role_id, 
-        roles:role_id(name),
-        organizations:organization_id(name, logo_url),
-        users:user_id(full_name)
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    console.log('📊 Organization query result:', {
-      userOrg,
-      orgError
-    })
-
-    if (orgError || !userOrg) {
-      console.log('❌ Organization not found')
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    // Check if user has permission to invite (admin or manager)
-    const userRole = (userOrg as any).roles?.name
-    console.log('🔒 Checking permissions - User role:', userRole)
-    
-    if (!['admin', 'manager'].includes(userRole)) {
-      console.log('❌ Insufficient permissions')
-      return NextResponse.json({ error: 'Insufficient permissions to invite members' }, { status: 403 })
-    }
+    // Permission check is already done in validateOrganizationAccessWithId
+    // The validation context contains the user's role and membership info
+    const userContext = validation.context!
+    const userRole = userContext.membership.role.name
+    console.log('🔒 User role in organization:', userRole)
 
     // Check if user already exists
     console.log('🔍 Checking if user exists:', email)
@@ -238,7 +177,7 @@ export async function POST(request: NextRequest) {
       const { data: existingMember } = await supabase
         .from('organization_members')
         .select('id')
-        .eq('organization_id', userOrg.organization_id)
+        .eq('organization_id', organizationId)
         .eq('user_id', existingUser.id)
         .single()
 
@@ -253,7 +192,7 @@ export async function POST(request: NextRequest) {
     const { data: existingInvitation } = await supabase
       .from('organization_invitations')
       .select('id')
-      .eq('organization_id', userOrg.organization_id)
+      .eq('organization_id', organizationId)
       .eq('email', email)
       .eq('status', 'pending')
       .single()
@@ -281,14 +220,14 @@ export async function POST(request: NextRequest) {
       const { data: newMember, error: memberError } = await supabase
         .from('organization_members')
         .insert({
-          organization_id: userOrg.organization_id,
+          organization_id: organizationId,
           user_id: existingUser.id,
           role_id: roleId,
           department: department || null,
           hourly_rate: hourlyRate || null,
           weekly_capacity: weeklyCapacity || 40,
           status: 'active',
-          invited_by: session.user.id
+          invited_by: userContext.userId
         })
         .select(`
           id,
@@ -333,11 +272,11 @@ export async function POST(request: NextRequest) {
       const { data: invitation, error: inviteError } = await supabase
         .from('organization_invitations')
         .insert({
-          organization_id: userOrg.organization_id,
+          organization_id: organizationId,
           email,
           role_id: roleId,
           token,
-          invited_by: session.user.id,
+          invited_by: userContext.userId,
           message: message || null,
           expires_at: expiresAt
         })
@@ -368,13 +307,27 @@ export async function POST(request: NextRequest) {
       try {
         console.log('📧 Sending invitation email...')
         
+        // Get organization info for email
+        const { data: orgInfo } = await supabase
+          .from('organizations')
+          .select('name, logo_url')
+          .eq('id', organizationId)
+          .single()
+
+        // Get inviter info
+        const { data: inviterInfo } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', userContext.userId)
+          .single()
+
         const emailResult = await sendInvitationEmail({
           email,
           token,
-          organizationName: (userOrg as any).organizations?.name || 'Organization',
-          organizationLogo: (userOrg as any).organizations?.logo_url,
+          organizationName: orgInfo?.name || 'Organization',
+          organizationLogo: orgInfo?.logo_url,
           roleName: roleInfo?.display_name || 'Team Member',
-          inviterName: (userOrg as any).users?.full_name || session.user.name || 'Team Admin',
+          inviterName: inviterInfo?.full_name || 'Team Admin',
           message: message || undefined,
           expiresAt
         })

@@ -83,7 +83,7 @@ interface ProjectResponse {
 // Projects API
 export const projectAPI = {
   // Get all projects
-  getProjects: async (filters?: { capacity_planning_enabled?: boolean }): Promise<ProjectsResponse> => {
+  getProjects: async (organizationId: string, filters?: { capacity_planning_enabled?: boolean }): Promise<ProjectsResponse> => {
     let url = '/api/projects';
     
     // Use the capacity-specific endpoint if filtering by capacity planning
@@ -91,7 +91,14 @@ export const projectAPI = {
       url = '/api/capacity/projects';
     }
     
-    const response = await fetch(url);
+    // Add organization ID as query parameter
+    url += `?organizationId=${organizationId}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch projects');
@@ -101,8 +108,12 @@ export const projectAPI = {
   },
 
   // Get single project by ID
-  getProject: async (id: string): Promise<ProjectResponse> => {
-    const response = await fetch(`/api/projects/${id}`);
+  getProject: async (id: string, organizationId: string): Promise<ProjectResponse> => {
+    const response = await fetch(`/api/projects/${id}?organizationId=${organizationId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch project');
@@ -116,7 +127,8 @@ export const projectAPI = {
     const response = await fetch('/api/projects', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organization_id,
       },
       body: JSON.stringify(data)
     });
@@ -131,11 +143,12 @@ export const projectAPI = {
   },
 
   // Update existing project
-  updateProject: async (id: string, data: UpdateProjectData): Promise<ProjectResponse> => {
+  updateProject: async (id: string, data: UpdateProjectData & { organizationId: string }): Promise<ProjectResponse> => {
     const response = await fetch(`/api/projects/${id}`, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
       },
       body: JSON.stringify(data)
     });
@@ -150,9 +163,12 @@ export const projectAPI = {
   },
 
   // Delete project
-  deleteProject: async (id: string): Promise<void> => {
-    const response = await fetch(`/api/projects/${id}`, {
-      method: 'DELETE'
+  deleteProject: async (id: string, organizationId: string): Promise<void> => {
+    const response = await fetch(`/api/projects/${id}?organizationId=${organizationId}`, {
+      method: 'DELETE',
+      headers: {
+        'x-organization-id': organizationId,
+      },
     });
 
     if (!response.ok) {

@@ -4,6 +4,7 @@ import React from 'react';
 import { useForm } from 'react-hook-form';
 import { X, CalendarIcon, ChevronDown } from 'lucide-react';
 import { projectAPI, type Project, type CreateProjectData, type UpdateProjectData } from '@/utils/api';
+import { useOrganizationStore } from '@/lib/stores/organizationStore';
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   onClose,
   project,
 }) => {
+  const { currentOrganization } = useOrganizationStore();
   
   const { register, handleSubmit, formState: { errors }, reset } = useForm<FormData>({
     defaultValues: project ? {
@@ -54,13 +56,15 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   });
   
   const onSubmit = async (data: FormData) => {
+    if (!currentOrganization?.id) return;
+    
     try {
       if (project) {
-        await projectAPI.updateProject(project.id, data);
+        await projectAPI.updateProject(project.id, { ...data, organizationId: currentOrganization.id });
       } else {
         await projectAPI.createProject({
           ...data,
-          organization_id: "1", // This should come from auth context
+          organization_id: currentOrganization.id,
         });
       }
       onClose();

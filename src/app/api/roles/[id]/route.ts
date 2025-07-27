@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
+import { validateOrganizationAccess } from '@/utils/organizationUtils'
 
 interface Params {
   id: string
@@ -13,25 +14,18 @@ export async function GET(
   { params }: { params: Params }
 ) {
   try {
-    const session = await getServerSession(authConfig)
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Validate organization access
+    const validation = await validateOrganizationAccess()
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
     }
 
     const supabase = await createClient()
     const roleId = params.id
-
-    // Get user's organization
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
+    const organizationId = validation.context!.organizationId
 
     // Get role details
     const { data: role, error } = await supabase
@@ -55,7 +49,7 @@ export async function GET(
         )
       `)
       .eq('id', roleId)
-      .eq('organization_id', userOrgMembership.organization_id)
+      .eq('organization_id', organizationId)
       .single()
 
     if (error || !role) {

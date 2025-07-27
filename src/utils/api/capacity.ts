@@ -112,19 +112,24 @@ export const capacityAPI = {
   // ===== RESOURCE ALLOCATIONS =====
   
   // Get allocations
-  getAllocations: async (params?: {
+  getAllocations: async (organizationId: string, params?: {
     project_id?: string;
     project_member_id?: string;
     start_date?: string;
     end_date?: string;
   }): Promise<AllocationsResponse> => {
     const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', organizationId);
     if (params?.project_id) searchParams.set('project_id', params.project_id);
     if (params?.project_member_id) searchParams.set('project_member_id', params.project_member_id);
     if (params?.start_date) searchParams.set('start_date', params.start_date);
     if (params?.end_date) searchParams.set('end_date', params.end_date);
 
-    const response = await fetch(`/api/capacity/allocations?${searchParams.toString()}`);
+    const response = await fetch(`/api/capacity/allocations?${searchParams.toString()}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch allocations');
@@ -188,17 +193,22 @@ export const capacityAPI = {
   // ===== CAPACITY OVERVIEW =====
   
   // Get capacity overview
-  getOverview: async (params?: {
+  getOverview: async (organizationId: string, params?: {
     project_id?: string;
     start_date?: string;
     end_date?: string;
   }): Promise<OverviewResponse> => {
     const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', organizationId);
     if (params?.project_id) searchParams.set('project_id', params.project_id);
     if (params?.start_date) searchParams.set('start_date', params.start_date);
     if (params?.end_date) searchParams.set('end_date', params.end_date);
 
-    const response = await fetch(`/api/capacity/overview?${searchParams.toString()}`);
+    const response = await fetch(`/api/capacity/overview?${searchParams.toString()}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch capacity overview');

@@ -397,8 +397,12 @@ export const kanbanAPI = {
   // ===== BOARDS =====
   
   // Get boards by project
-  getBoards: async (projectId: string): Promise<BoardsResponse> => {
-    const response = await fetch(`/api/kanban/boards?project_id=${projectId}`);
+  getBoards: async (projectId: string, organizationId: string): Promise<BoardsResponse> => {
+    const response = await fetch(`/api/kanban/boards?project_id=${projectId}&organizationId=${organizationId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch boards');
@@ -419,10 +423,13 @@ export const kanbanAPI = {
   },
 
   // Create board
-  createBoard: async (data: CreateBoardData): Promise<BoardResponse> => {
+  createBoard: async (data: CreateBoardData & { organizationId: string }): Promise<BoardResponse> => {
     const response = await fetch('/api/kanban/boards', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) {
