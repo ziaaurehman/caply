@@ -71,8 +71,8 @@ export default function SignUpForm() {
       
       // Check if email confirmation is required
       if (result.user && !result.user.email_verified) {
-        setSuccess("Account created! Please check your email to verify your account before signing in.")
-        setIsLoading(false)
+        // Redirect to email verification page with email parameter
+        router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`)
         return
       }
 

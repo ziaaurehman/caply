@@ -150,11 +150,11 @@ export default function LoginForm() {
             </label>
           </div>
 
-          <div className="text-sm">
-            <a href="#" className="font-medium text-primary-600 hover:text-primary-500">
-              Forgot your password?
-            </a>
-          </div>
+          <p className="text-sm text-gray-600">
+          <Link href="/forgot-password" className="font-medium text-primary-600 hover:text-primary-500">
+            Forgot your password?
+          </Link>
+        </p>
         </div>
 
         <div>
@@ -204,7 +204,8 @@ export default function LoginForm() {
         </Button>
       </div>
 
-      <div className="text-center">
+      <div className="text-center space-y-2">
+       
         <p className="text-sm text-gray-600">
           Don't have an account?{" "}
           <Link href="/signup" className="font-medium text-primary-600 hover:text-primary-500">

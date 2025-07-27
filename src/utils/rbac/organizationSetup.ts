@@ -23,6 +23,13 @@ const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
       'users.update',
       'users.delete',
       
+      // Role management
+      'roles.create',
+      'roles.read',
+      'roles.update',
+      'roles.delete',
+      'roles.manage',
+      
       // Organization management (except create/delete org)
       'organizations.read',
       'organizations.update',
@@ -71,6 +78,13 @@ const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
       'leave_requests.read',
       'leave_requests.approve',
       
+      // Capacity planning
+      'capacity.read',
+      'capacity.manage',
+      'capacity.create',
+      'capacity.update',
+      'capacity.delete',
+      
       // Reports and settings
       'reports.read',
       'reports.export',
@@ -110,6 +124,8 @@ const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
       'expenses.approve',
       'leave_requests.read',
       'leave_requests.approve',
+      'capacity.read',
+      'capacity.manage',
       'reports.read',
       'reports.export',
       'settings.read'

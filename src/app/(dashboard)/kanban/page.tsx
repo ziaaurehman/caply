@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react"
 import KanbanBoard from "@/components/pages/kanban/kanbanPage"
 import { projectAPI } from "@/utils/api/project"
 import KanbanSkeleton from "@/components/pages/kanban/KanbanSkeleton"
+import { useOrganizationStore } from "@/lib/stores/organizationStore"
 
 interface Project {
   id: string
@@ -17,11 +18,28 @@ export default function Kanban() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  const { 
+    currentOrganization, 
+    loading: organizationLoading, 
+    fetchUserOrganizations,
+    userOrganizations 
+  } = useOrganizationStore()
+
+  // Initialize organization store if needed
+  useEffect(() => {
+    if (!organizationLoading && userOrganizations.length === 0) {
+      fetchUserOrganizations();
+    }
+  }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
 
   const loadProjects = useCallback(async () => {
+    if (!currentOrganization?.id) return;
+    
     try {
       setIsLoading(true)
-      const response = await projectAPI.getProjects()
+      setError(null)
+      const response = await projectAPI.getProjects(currentOrganization.id)
       const kanbanProjects = response.projects.filter(p => p.kanban_enabled)
       setProjects(kanbanProjects)
       
@@ -34,13 +52,16 @@ export default function Kanban() {
     } finally {
       setIsLoading(false)
     }
-  }, [selectedProjectId])
+  }, [currentOrganization?.id, selectedProjectId])
 
   useEffect(() => {
-    loadProjects()
-  }, [loadProjects])
+    if (currentOrganization?.id) {
+      loadProjects()
+    }
+  }, [loadProjects, currentOrganization?.id])
 
-  if (isLoading) {
+  // Show loading while organization is loading or not loaded
+  if (organizationLoading || !currentOrganization?.id || isLoading) {
     return (
       <div className="min-h-screen  ">
        {/* make skeleton bar  like navbar */}

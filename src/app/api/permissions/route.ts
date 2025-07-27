@@ -14,17 +14,17 @@ export async function GET(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // // Validate organization access and permissions (admin only)
-    // const validation = await validateOrganizationAccessWithId(
-    //   organizationId,
-    //   { resource: 'roles', action: 'manage' }
-    // )
+    // Validate organization access and permissions (admin only)
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'roles', action: 'read' }
+    )
 
-    // if (!validation.success) {
-    //   return NextResponse.json({ 
-    //     error: validation.error 
-    //   }, { status: validation.status })
-    // }
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
 
     const supabase = await createClient()
 

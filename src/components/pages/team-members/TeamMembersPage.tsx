@@ -328,7 +328,7 @@ const TeamMembersPage: React.FC = () => {
                       <tr key={member.id}>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className={`h-3 w-3 rounded-full border-2 ${statusIcon} mr-3`}></div>
+                          
                             <div className="flex items-center">
                               {member?.users?.avatar_url ? (
                                 <Image

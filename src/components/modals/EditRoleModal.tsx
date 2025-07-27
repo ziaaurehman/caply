@@ -156,7 +156,7 @@ export default function EditRoleModal({
                     type="text"
                     value={formData.display_name}
                     onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                     placeholder="e.g., Project Lead"
                     required
                   />
@@ -170,7 +170,7 @@ export default function EditRoleModal({
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                   rows={3}
                   placeholder="Brief description of this role's responsibilities"
                 />
@@ -196,7 +196,7 @@ export default function EditRoleModal({
                       <button
                         type="button"
                         onClick={() => handleSelectAllInModule(module)}
-                        className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                        className="text-sm text-orange-600 hover:text-orange-700 font-medium"
                       >
                         {modulePermissions.every(p => selectedPermissions.includes(p.id))
                           ? 'Deselect All'
@@ -215,7 +215,7 @@ export default function EditRoleModal({
                             type="checkbox"
                             checked={selectedPermissions.includes(permission.id)}
                             onChange={() => handlePermissionToggle(permission.id)}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                           />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-gray-900 truncate">
@@ -246,7 +246,7 @@ export default function EditRoleModal({
             <button
               type="submit"
               disabled={loading || !formData.display_name}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
             >
               {loading ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />

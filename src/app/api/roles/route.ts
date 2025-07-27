@@ -7,8 +7,10 @@ import { validateOrganizationAccess } from '@/utils/organizationUtils'
 // GET /api/roles - Get organization-specific roles
 export async function GET(request: NextRequest) {
   try {
-    // Validate organization access
-    const validation = await validateOrganizationAccess()
+    // Validate organization access with roles read permission
+    const validation = await validateOrganizationAccess(
+      { resource: 'roles', action: 'read' }
+    )
 
     if (!validation.success) {
       return NextResponse.json({ 
@@ -83,10 +85,9 @@ export async function GET(request: NextRequest) {
 // POST /api/roles - Create a new organization-specific role
 export async function POST(request: NextRequest) {
   try {
-    // Validate organization access with admin role requirement
+    // Validate organization access with role create permission
     const validation = await validateOrganizationAccess(
-      undefined, // no specific permission needed
-      'admin' // require admin role
+      { resource: 'roles', action: 'create' }
     )
 
     if (!validation.success) {

@@ -24,8 +24,11 @@ export default function RolesPage() {
 
   const { currentOrganization, hasPermission, hasRole } = useOrganizationStore()
 
-  // Check if user has admin access
-  const hasAdminAccess = hasRole('admin') || hasPermission('roles', 'manage')
+  // Check if user has admin access for role management
+  const hasAdminAccess = hasRole('admin') || hasPermission('roles', 'manage') || hasPermission('roles', 'read')
+  const canCreateRoles = hasRole('admin') || hasPermission('roles', 'create') || hasPermission('roles', 'manage')
+  const canUpdateRoles = hasRole('admin') || hasPermission('roles', 'update') || hasPermission('roles', 'manage')
+  const canDeleteRoles = hasRole('admin') || hasPermission('roles', 'delete') || hasPermission('roles', 'manage')
 
   // Load data when organization changes
   useEffect(() => {
@@ -206,13 +209,15 @@ export default function RolesPage() {
           <h1 className="text-3xl font-bold text-gray-900">Roles & Permissions</h1>
           <p className="text-gray-600 mt-2">Manage user roles and their permissions for {currentOrganization?.name}</p>
         </div>
-        <button
-          onClick={() => setCreateModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Create Role
-        </button>
+        {canCreateRoles && (
+          <button
+            onClick={() => setCreateModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Create Role
+          </button>
+        )}
       </div>
 
       {/* Roles Table */}
@@ -229,12 +234,14 @@ export default function RolesPage() {
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">No roles yet</h3>
             <p className="text-gray-500 mb-4">Create your first role to get started managing permissions.</p>
-            <button
-              onClick={() => setCreateModalOpen(true)}
-              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-            >
-              Create Your First Role
-            </button>
+            {canCreateRoles && (
+              <button
+                onClick={() => setCreateModalOpen(true)}
+                className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+              >
+                Create Your First Role
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -315,18 +322,27 @@ export default function RolesPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => openEditModal(role)}
-                        className="text-gray-600 hover:text-gray-900 mr-3"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => openDeleteModal(role)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {canUpdateRoles && (
+                        <button
+                          onClick={() => openEditModal(role)}
+                          className="text-gray-600 hover:text-gray-900 mr-3"
+                          title="Edit Role"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                      )}
+                      {canDeleteRoles && (
+                        <button
+                          onClick={() => openDeleteModal(role)}
+                          className="text-red-600 hover:text-red-900"
+                          title="Delete Role"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                      {!canUpdateRoles && !canDeleteRoles && (
+                        <span className="text-gray-400 text-sm">View Only</span>
+                      )}
                     </td>
                   </tr>
                 ))}

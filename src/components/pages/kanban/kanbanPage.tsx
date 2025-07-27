@@ -196,8 +196,10 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   }, []);
 
   const loadBoardData = async (boardId: string) => {
+    if (!currentOrganization?.id) return;
+    
     try {
-      const listsResponse = await kanbanAPI.getLists(boardId);
+      const listsResponse = await kanbanAPI.getLists(boardId, currentOrganization.id);
       setKanbanState(prev => ({
         ...prev,
         lists: listsResponse.lists
@@ -282,7 +284,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // List management
   const handleAddList = async () => {
-    if (!kanbanState.currentBoard) return;
+    if (!kanbanState.currentBoard || !currentOrganization?.id) return;
 
     const listName = prompt("Enter list name:");
     if (!listName) return;
@@ -290,7 +292,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     try {
       await kanbanAPI.createList({
         board_id: kanbanState.currentBoard.id,
-        name: listName
+        name: listName,
+        organizationId: currentOrganization.id
       });
       
       // Refresh board data

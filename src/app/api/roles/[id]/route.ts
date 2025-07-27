@@ -14,8 +14,10 @@ export async function GET(
   { params }: { params: Params }
 ) {
   try {
-    // Validate organization access
-    const validation = await validateOrganizationAccess()
+    // Validate organization access with roles read permission
+    const validation = await validateOrganizationAccess(
+      { resource: 'roles', action: 'read' }
+    )
 
     if (!validation.success) {
       return NextResponse.json({ 
@@ -81,34 +83,20 @@ export async function PUT(
   { params }: { params: Params }
 ) {
   try {
-    const session = await getServerSession(authConfig)
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Validate organization access with roles update permission
+    const validation = await validateOrganizationAccess(
+      { resource: 'roles', action: 'update' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
     }
 
     const supabase = await createClient()
     const roleId = params.id
-
-    // Get user's organization and check admin permissions
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        roles!inner(name)
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    // Check if user is admin
-    const userRole = (userOrgMembership.roles as any)?.name
-    if (userRole !== 'admin') {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
+    const organizationId = validation.context!.organizationId
 
     const body = await request.json()
     const { display_name, description, permission_ids } = body
@@ -122,7 +110,7 @@ export async function PUT(
         updated_at: new Date().toISOString()
       })
       .eq('id', roleId)
-      .eq('organization_id', userOrgMembership.organization_id)
+      .eq('organization_id', organizationId)
 
     if (updateError) {
       console.error('Error updating role:', updateError)
@@ -167,41 +155,27 @@ export async function DELETE(
   { params }: { params: Params }
 ) {
   try {
-    const session = await getServerSession(authConfig)
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Validate organization access with roles delete permission
+    const validation = await validateOrganizationAccess(
+      { resource: 'roles', action: 'delete' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
     }
 
     const supabase = await createClient()
     const roleId = params.id
-
-    // Get user's organization and check admin permissions
-    const { data: userOrgMembership, error: orgError } = await supabase
-      .from('organization_members')
-      .select(`
-        organization_id,
-        roles!inner(name)
-      `)
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrgMembership) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    // Check if user is admin
-    const userRole = (userOrgMembership.roles as any)?.name
-    if (userRole !== 'admin') {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
+    const organizationId = validation.context!.organizationId
 
     // Check if role exists and belongs to the organization
     const { data: roleToDelete, error: roleError } = await supabase
       .from('roles')
       .select('id, name')
       .eq('id', roleId)
-      .eq('organization_id', userOrgMembership.organization_id)
+      .eq('organization_id', organizationId)
       .single()
 
     if (roleError || !roleToDelete) {
@@ -220,7 +194,7 @@ export async function DELETE(
       .from('organization_members')
       .select('id')
       .eq('role_id', roleId)
-      .eq('organization_id', userOrgMembership.organization_id)
+      .eq('organization_id', organizationId)
 
     if (membersError) {
       console.error('Error checking role usage:', membersError)
@@ -238,7 +212,7 @@ export async function DELETE(
       .from('roles')
       .delete()
       .eq('id', roleId)
-      .eq('organization_id', userOrgMembership.organization_id)
+      .eq('organization_id', organizationId)
 
     if (deleteError) {
       console.error('Error deleting role:', deleteError)
