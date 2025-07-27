@@ -161,7 +161,7 @@ DECLARE
   org_id UUID;
   admin_role_id UUID;
 BEGIN
-  -- Insert user profile
+ -- Insert user profile
   INSERT INTO users (id, email, full_name, email_verified)
   VALUES (
     NEW.id,
@@ -177,6 +177,7 @@ BEGIN
     'org-' || LOWER(REPLACE(COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)), ' ', '-')) || '-' || SUBSTRING(NEW.id::TEXT, 1, 8),
     NEW.id
   ) RETURNING id INTO org_id;
+
 
   -- Create default roles for the new organization
   PERFORM create_default_organization_roles(org_id);

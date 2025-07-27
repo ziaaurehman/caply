@@ -34,15 +34,16 @@ INSERT INTO permissions (name, display_name, description, module, action) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- =====================================================
--- UPDATE ROLE PERMISSIONS
+-- UPDATE ORGANIZATION-SPECIFIC ROLE PERMISSIONS
 -- =====================================================
 
--- Add role management permissions to admin role
+-- Add role management permissions to organization admin roles
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id 
 FROM roles r, permissions p 
 WHERE r.name = 'admin' 
 AND r.is_system_role = false
+AND r.organization_id IS NOT NULL
 AND p.name IN (
   'roles.create', 'roles.read', 'roles.update', 'roles.delete',
   'permissions.read', 'permissions.manage',
@@ -52,12 +53,13 @@ AND p.name IN (
 )
 ON CONFLICT DO NOTHING;
 
--- Add limited role viewing permissions to manager role
+-- Add limited role viewing permissions to organization manager roles
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id 
 FROM roles r, permissions p 
 WHERE r.name = 'manager' 
 AND r.is_system_role = false
+AND r.organization_id IS NOT NULL
 AND p.name IN (
   'roles.read',
   'permissions.read',
@@ -67,63 +69,102 @@ AND p.name IN (
 )
 ON CONFLICT DO NOTHING;
 
--- Add basic team and capacity viewing to member role
+-- Add basic team and capacity viewing to organization member roles
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id 
 FROM roles r, permissions p 
 WHERE r.name = 'member' 
 AND r.is_system_role = false
+AND r.organization_id IS NOT NULL
 AND p.name IN (
   'teams.read',
   'capacity.read'
 )
 ON CONFLICT DO NOTHING;
 
--- Also update system roles if they exist
--- Super Admin gets all new permissions
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 'a0000000-0000-0000-0000-000000000001', id 
-FROM permissions 
-WHERE name IN (
-  'roles.create', 'roles.read', 'roles.update', 'roles.delete',
-  'permissions.read', 'permissions.manage',
-  'teams.create', 'teams.read', 'teams.update', 'teams.delete',
-  'invitations.create', 'invitations.read', 'invitations.delete',
-  'capacity.read', 'capacity.manage'
-)
-ON CONFLICT DO NOTHING;
+-- =====================================================
+-- UPDATE SYSTEM ROLES (ONLY IF THEY EXIST)
+-- =====================================================
 
--- Support Admin gets read permissions
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 'a0000000-0000-0000-0000-000000000002', id 
-FROM permissions 
-WHERE name IN (
-  'roles.read', 'permissions.read', 'teams.read', 'invitations.read', 'capacity.read'
-)
-ON CONFLICT DO NOTHING;
+-- Add permissions to system roles only if they exist
+DO $$
+DECLARE
+  superadmin_id UUID;
+  support_admin_id UUID;
+  global_admin_id UUID;
+  global_manager_id UUID;
+BEGIN
+  -- Check if system roles exist and get their IDs
+  SELECT id INTO superadmin_id FROM roles WHERE name = 'superadmin' AND is_system_role = true LIMIT 1;
+  SELECT id INTO support_admin_id FROM roles WHERE name = 'support_admin' AND is_system_role = true LIMIT 1;
+  SELECT id INTO global_admin_id FROM roles WHERE name = 'admin' AND is_system_role = true LIMIT 1;
+  SELECT id INTO global_manager_id FROM roles WHERE name = 'manager' AND is_system_role = true LIMIT 1;
 
--- Global Admin (organization admin system role) gets full access except global permissions
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 'a0000000-0000-0000-0000-000000000003', id 
-FROM permissions 
-WHERE name IN (
-  'roles.create', 'roles.read', 'roles.update', 'roles.delete',
-  'permissions.read', 'permissions.manage',
-  'teams.create', 'teams.read', 'teams.update', 'teams.delete',
-  'invitations.create', 'invitations.read', 'invitations.delete',
-  'capacity.read', 'capacity.manage'
-)
-ON CONFLICT DO NOTHING;
+  -- Super Admin gets all new permissions (if exists)
+  IF superadmin_id IS NOT NULL THEN
+    INSERT INTO role_permissions (role_id, permission_id)
+    SELECT superadmin_id, id 
+    FROM permissions 
+    WHERE name IN (
+      'roles.create', 'roles.read', 'roles.update', 'roles.delete',
+      'permissions.read', 'permissions.manage',
+      'teams.create', 'teams.read', 'teams.update', 'teams.delete',
+      'invitations.create', 'invitations.read', 'invitations.delete',
+      'capacity.read', 'capacity.manage'
+    )
+    ON CONFLICT DO NOTHING;
+    RAISE NOTICE 'Added permissions to superadmin role';
+  END IF;
 
--- Manager system role gets management permissions
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 'a0000000-0000-0000-0000-000000000004', id 
-FROM permissions 
-WHERE name IN (
-  'roles.read', 'permissions.read', 'teams.read', 'teams.update',
-  'invitations.read', 'capacity.read', 'capacity.manage'
-)
-ON CONFLICT DO NOTHING;
+  -- Support Admin gets read permissions (if exists)
+  IF support_admin_id IS NOT NULL THEN
+    INSERT INTO role_permissions (role_id, permission_id)
+    SELECT support_admin_id, id 
+    FROM permissions 
+    WHERE name IN (
+      'roles.read', 'permissions.read', 'teams.read', 'invitations.read', 'capacity.read'
+    )
+    ON CONFLICT DO NOTHING;
+    RAISE NOTICE 'Added permissions to support_admin role';
+  END IF;
+
+  -- Global Admin gets full access except global permissions (if exists)
+  IF global_admin_id IS NOT NULL THEN
+    INSERT INTO role_permissions (role_id, permission_id)
+    SELECT global_admin_id, id 
+    FROM permissions 
+    WHERE name IN (
+      'roles.create', 'roles.read', 'roles.update', 'roles.delete',
+      'permissions.read', 'permissions.manage',
+      'teams.create', 'teams.read', 'teams.update', 'teams.delete',
+      'invitations.create', 'invitations.read', 'invitations.delete',
+      'capacity.read', 'capacity.manage'
+    )
+    ON CONFLICT DO NOTHING;
+    RAISE NOTICE 'Added permissions to global admin role';
+  END IF;
+
+  -- Global Manager gets management permissions (if exists)
+  IF global_manager_id IS NOT NULL THEN
+    INSERT INTO role_permissions (role_id, permission_id)
+    SELECT global_manager_id, id 
+    FROM permissions 
+    WHERE name IN (
+      'roles.read', 'permissions.read', 'teams.read', 'teams.update',
+      'invitations.read', 'capacity.read', 'capacity.manage'
+    )
+    ON CONFLICT DO NOTHING;
+    RAISE NOTICE 'Added permissions to global manager role';
+  END IF;
+
+  -- Log what was found
+  RAISE NOTICE 'System roles status: superadmin=%, support_admin=%, global_admin=%, global_manager=%', 
+    CASE WHEN superadmin_id IS NOT NULL THEN 'EXISTS' ELSE 'NOT FOUND' END,
+    CASE WHEN support_admin_id IS NOT NULL THEN 'EXISTS' ELSE 'NOT FOUND' END,
+    CASE WHEN global_admin_id IS NOT NULL THEN 'EXISTS' ELSE 'NOT FOUND' END,
+    CASE WHEN global_manager_id IS NOT NULL THEN 'EXISTS' ELSE 'NOT FOUND' END;
+
+END $$;
 
 -- =====================================================
 -- ADD COMMENTS
@@ -141,10 +182,18 @@ DO $$
 DECLARE
   total_permissions INTEGER;
   total_modules INTEGER;
+  org_admin_roles INTEGER;
+  permissions_assigned INTEGER;
 BEGIN
   SELECT COUNT(*) INTO total_permissions FROM permissions;
   SELECT COUNT(DISTINCT module) INTO total_modules FROM permissions;
+  SELECT COUNT(*) INTO org_admin_roles FROM roles WHERE name = 'admin' AND is_system_role = false;
   
-  RAISE NOTICE 'Migration complete. Total permissions: %, Total modules: %', 
-    total_permissions, total_modules;
+  SELECT COUNT(*) INTO permissions_assigned 
+  FROM role_permissions rp 
+  JOIN roles r ON rp.role_id = r.id 
+  WHERE r.name = 'admin' AND r.is_system_role = false;
+  
+  RAISE NOTICE 'Migration complete. Total permissions: %, Total modules: %, Organization admin roles: %, Permissions assigned to org admins: %', 
+    total_permissions, total_modules, org_admin_roles, permissions_assigned;
 END $$;

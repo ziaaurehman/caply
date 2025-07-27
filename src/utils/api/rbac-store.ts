@@ -1,19 +1,75 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Role, Permission, Organization, Invitation } from '@/lib/types';
-import { frontendRBACService, UserPermissionData } from '@/utils/api/frontend-rbac';
+import { Role, Permission } from '@/lib/types';
+import { rbacService, UserPermissionData } from './rbac';
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  avatar?: string;
+  roleId: string;
+  role: Role;
+  organizationId: string;
+  isActive: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  settings: {
+    allowSelfRegistration: boolean;
+    defaultRole: string;
+    emailDomainRestriction: string[];
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  roleId: string;
+  role: Role;
+  organizationId: string;
+  invitedBy: string;
+  invitedByUser: User;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired' | 'cancelled';
+  expiresAt: string;
+  acceptedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface RBACState {
+  // Current user data
+  currentUser: UserPermissionData | null;
+  
   // Data
   roles: Role[];
   permissions: Permission[];
   organizations: Organization[];
   invitations: Invitation[];
-  users: UserProfile[];
+  users: User[];
   
   // Loading states
   isLoading: boolean;
   error: string | null;
+  
+  // Actions - User Permissions
+  fetchCurrentUserPermissions: (userId: string, forceRefresh?: boolean) => Promise<void>;
+  hasPermission: (permission: string) => Promise<boolean>;
+  hasAnyPermission: (permissions: string[]) => Promise<boolean>;
+  hasAllPermissions: (permissions: string[]) => Promise<boolean>;
+  hasRole: (roleName: string) => Promise<boolean>;
+  isSuperAdmin: () => boolean;
+  canAccessModule: (moduleName: string) => Promise<boolean>;
+  getAccessibleModules: () => Promise<string[]>;
   
   // Actions - Organizations
   createOrganization: (org: Omit<Organization, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Organization>;
@@ -36,111 +92,109 @@ interface RBACState {
   createInvitation: (invitation: Omit<Invitation, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'expiresAt'>) => Promise<Invitation>;
   cancelInvitation: (id: string) => Promise<void>;
   resendInvitation: (id: string) => Promise<void>;
-  acceptInvitation: (id: string, userDetails: { name: string; password: string }) => Promise<UserProfile>;
+  acceptInvitation: (id: string, userDetails: { name: string; password: string }) => Promise<User>;
   
   // Utility actions
   getRoleById: (id: string) => Role | undefined;
-  getUsersByRole: (roleId: string) => UserProfile[];
-  getOrganizationUsers: (organizationId: string) => UserProfile[];
+  getUsersByRole: (roleId: string) => User[];
+  getOrganizationUsers: (organizationId: string) => User[];
+  clearCache: () => void;
+  refreshUserPermissions: (userId: string) => Promise<void>;
 }
-
-// Mock data
-const mockOrganization: Organization = {
-  id: '1',
-  name: 'Demo Organization',
-  domain: 'demo.caply.com',
-  settings: {
-    allowSelfRegistration: false,
-    defaultRole: 'employee',
-    emailDomainRestriction: [],
-  },
-  createdAt: '2023-01-01T00:00:00Z',
-  updatedAt: '2023-01-01T00:00:00Z',
-};
-
-const mockRoles: Role[] = DEFAULT_ROLES.map((role, index) => ({
-  ...role,
-  organizationId: mockOrganization.id,
-  createdAt: '2023-01-01T00:00:00Z',
-  updatedAt: '2023-01-01T00:00:00Z',
-}));
-
-const mockUsers: UserProfile[] = [
-  {
-    id: '1',
-    name: 'John Doe',
-    email: 'john@demo.caply.com',
-    avatar: '/avatars/john.jpg',
-    roleId: 'admin',
-    role: mockRoles.find(r => r.id === 'admin')!,
-    organizationId: mockOrganization.id,
-    organization: mockOrganization,
-    isActive: true,
-    lastLoginAt: '2023-10-01T10:00:00Z',
-    createdAt: '2023-01-01T00:00:00Z',
-    updatedAt: '2023-10-01T10:00:00Z',
-  },
-  {
-    id: '2',
-    name: 'Jane Smith',
-    email: 'jane@demo.caply.com',
-    avatar: '/avatars/jane.jpg',
-    roleId: 'manager',
-    role: mockRoles.find(r => r.id === 'manager')!,
-    organizationId: mockOrganization.id,
-    organization: mockOrganization,
-    isActive: true,
-    lastLoginAt: '2023-10-15T14:00:00Z',
-    createdAt: '2023-02-01T00:00:00Z',
-    updatedAt: '2023-10-15T14:00:00Z',
-  },
-  {
-    id: '3',
-    name: 'Mike Johnson',
-    email: 'mike@demo.caply.com',
-    roleId: 'employee',
-    role: mockRoles.find(r => r.id === 'employee')!,
-    organizationId: mockOrganization.id,
-    organization: mockOrganization,
-    isActive: true,
-    lastLoginAt: '2023-10-20T09:00:00Z',
-    createdAt: '2023-03-01T00:00:00Z',
-    updatedAt: '2023-10-20T09:00:00Z',
-  },
-];
-
-const mockInvitations: Invitation[] = [
-  {
-    id: '1',
-    email: 'sarah@demo.caply.com',
-    roleId: 'employee',
-    role: mockRoles.find(r => r.id === 'employee')!,
-    organizationId: mockOrganization.id,
-    invitedBy: '1',
-    invitedByUser: mockUsers[0],
-    status: 'pending',
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
-    createdAt: '2023-10-20T10:00:00Z',
-    updatedAt: '2023-10-20T10:00:00Z',
-  }
-];
 
 export const useRBACStore = create<RBACState>()(
   persist(
     (set, get) => ({
       // Initial state
+      currentUser: null,
       roles: [],
-      permissions: PERMISSIONS,
-      organizations: [mockOrganization],
+      permissions: [],
+      organizations: [],
       invitations: [],
       users: [],
       isLoading: false,
       error: null,
 
-      // Organization actions
+      // User Permission actions
+      fetchCurrentUserPermissions: async (userId: string, forceRefresh = false) => {
+        set({ isLoading: true, error: null });
+        try {
+          const userData = await rbacService.getUserPermissions(userId);
+          if (userData) {
+            set({ 
+              currentUser: userData,
+              permissions: userData.permissions,
+              isLoading: false 
+            });
+          } else {
+            set({ error: 'Failed to fetch user permissions', isLoading: false });
+          }
+        } catch (error) {
+          set({ error: 'Failed to fetch user permissions', isLoading: false });
+        }
+      },
+
+      hasPermission: async (permission: string) => {
+        const { currentUser } = get();
+        if (!currentUser) return false;
+        
+        return await rbacService.hasPermission({ userId: currentUser.userId, permission });
+      },
+
+      hasAnyPermission: async (permissions: string[]) => {
+        const { currentUser } = get();
+        if (!currentUser) return false;
+        
+        return await rbacService.hasAnyPermission(currentUser.userId, permissions);
+      },
+
+      hasAllPermissions: async (permissions: string[]) => {
+        const { currentUser } = get();
+        if (!currentUser) return false;
+        
+        return await rbacService.hasAllPermissions(currentUser.userId, permissions);
+      },
+
+      hasRole: async (roleName: string) => {
+        const { currentUser } = get();
+        if (!currentUser) return false;
+        
+        return await rbacService.hasRole(currentUser.userId, roleName);
+      },
+
+      isSuperAdmin: () => {
+        const { currentUser } = get();
+        return currentUser?.isSuperAdmin || false;
+      },
+
+      canAccessModule: async (moduleName: string) => {
+        const { currentUser } = get();
+        if (!currentUser) return false;
+        
+        return await rbacService.canAccessModule(currentUser.userId, moduleName);
+      },
+
+      getAccessibleModules: async () => {
+        const { currentUser } = get();
+        if (!currentUser) return [];
+        
+        return await rbacService.getAccessibleModules(currentUser.userId);
+      },
+
+      clearCache: () => {
+        // No caching in the consolidated version
+        set({ currentUser: null });
+      },
+
+      refreshUserPermissions: async (userId: string) => {
+        await get().fetchCurrentUserPermissions(userId, true);
+      },
+
+      // Organization actions (mock implementation for now)
       createOrganization: async (orgData) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 800));
           
           const newOrg: Organization = {
@@ -165,6 +219,7 @@ export const useRBACStore = create<RBACState>()(
       updateOrganization: async (id, updates) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
           set(state => ({
@@ -181,17 +236,15 @@ export const useRBACStore = create<RBACState>()(
         }
       },
 
-      // Role actions
+      // Role actions (mock implementation for now)
       fetchRoles: async (organizationId) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call to fetch roles
           await new Promise(resolve => setTimeout(resolve, 500));
           
-          const filteredRoles = organizationId 
-            ? mockRoles.filter(role => role.organizationId === organizationId)
-            : mockRoles;
-            
-          set({ roles: filteredRoles, isLoading: false });
+          // For now, return empty array - implement API call
+          set({ roles: [], isLoading: false });
         } catch (error) {
           set({ error: 'Failed to fetch roles', isLoading: false });
         }
@@ -200,13 +253,14 @@ export const useRBACStore = create<RBACState>()(
       createRole: async (roleData) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 800));
           
           const newRole: Role = {
             ...roleData,
             id: Date.now().toString(),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           };
           
           set(state => ({
@@ -224,6 +278,7 @@ export const useRBACStore = create<RBACState>()(
       updateRole: async (id, updates) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
           set(state => ({
@@ -243,35 +298,27 @@ export const useRBACStore = create<RBACState>()(
       deleteRole: async (id) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
-          
-          // Check if role is in use
-          const usersWithRole = get().users.filter(user => user.roleId === id);
-          if (usersWithRole.length > 0) {
-            throw new Error('Cannot delete role that is assigned to users');
-          }
           
           set(state => ({
             roles: state.roles.filter(role => role.id !== id),
             isLoading: false,
           }));
         } catch (error) {
-          set({ error: error instanceof Error ? error.message : 'Failed to delete role', isLoading: false });
+          set({ error: 'Failed to delete role', isLoading: false });
           throw error;
         }
       },
 
-      // User actions
+      // User actions (mock implementation for now)
       fetchUsers: async (organizationId) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
-          const filteredUsers = organizationId 
-            ? mockUsers.filter(user => user.organizationId === organizationId)
-            : mockUsers;
-            
-          set({ users: filteredUsers, isLoading: false });
+          set({ users: [], isLoading: false });
         } catch (error) {
           set({ error: 'Failed to fetch users', isLoading: false });
         }
@@ -280,17 +327,13 @@ export const useRBACStore = create<RBACState>()(
       updateUserRole: async (userId, roleId) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
-          
-          const role = get().roles.find(r => r.id === roleId);
-          if (!role) {
-            throw new Error('Role not found');
-          }
           
           set(state => ({
             users: state.users.map(user =>
               user.id === userId 
-                ? { ...user, roleId, role, updatedAt: new Date().toISOString() }
+                ? { ...user, roleId, updatedAt: new Date().toISOString() }
                 : user
             ),
             isLoading: false,
@@ -304,6 +347,7 @@ export const useRBACStore = create<RBACState>()(
       deactivateUser: async (userId) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
           set(state => ({
@@ -323,6 +367,7 @@ export const useRBACStore = create<RBACState>()(
       activateUser: async (userId) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
           set(state => ({
@@ -339,17 +384,14 @@ export const useRBACStore = create<RBACState>()(
         }
       },
 
-      // Invitation actions
+      // Invitation actions (mock implementation for now)
       fetchInvitations: async (organizationId) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
-          const filteredInvitations = organizationId 
-            ? mockInvitations.filter(inv => inv.organizationId === organizationId)
-            : mockInvitations;
-            
-          set({ invitations: filteredInvitations, isLoading: false });
+          set({ invitations: [], isLoading: false });
         } catch (error) {
           set({ error: 'Failed to fetch invitations', isLoading: false });
         }
@@ -358,25 +400,17 @@ export const useRBACStore = create<RBACState>()(
       createInvitation: async (invData) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 800));
-          
-          const role = get().roles.find(r => r.id === invData.roleId);
-          const invitedByUser = get().users.find(u => u.id === invData.invitedBy);
-          
-          if (!role || !invitedByUser) {
-            throw new Error('Role or inviting user not found');
-          }
           
           const newInvitation: Invitation = {
             ...invData,
             id: Date.now().toString(),
-            role,
-            invitedByUser,
             status: 'pending',
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-          };
+          } as Invitation;
           
           set(state => ({
             invitations: [...state.invitations, newInvitation],
@@ -393,6 +427,7 @@ export const useRBACStore = create<RBACState>()(
       cancelInvitation: async (id) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
           set(state => ({
@@ -412,6 +447,7 @@ export const useRBACStore = create<RBACState>()(
       resendInvitation: async (id) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 500));
           
           set(state => ({
@@ -435,39 +471,22 @@ export const useRBACStore = create<RBACState>()(
       acceptInvitation: async (id, userDetails) => {
         set({ isLoading: true, error: null });
         try {
+          // TODO: Replace with actual API call
           await new Promise(resolve => setTimeout(resolve, 1000));
           
-          const invitation = get().invitations.find(inv => inv.id === id);
-          if (!invitation) {
-            throw new Error('Invitation not found');
-          }
-          
-          // Create new user
-          const newUser: UserProfile = {
+          const newUser: User = {
             id: Date.now().toString(),
             name: userDetails.name,
-            email: invitation.email,
-            roleId: invitation.roleId,
-            role: invitation.role,
-            organizationId: invitation.organizationId,
-            organization: invitation.invitedByUser.organization,
+            email: '',
+            roleId: '',
+            role: {} as Role,
+            organizationId: '',
             isActive: true,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
           
-          // Update invitation status
           set(state => ({
-            invitations: state.invitations.map(inv =>
-              inv.id === id 
-                ? { 
-                    ...inv, 
-                    status: 'accepted' as const,
-                    acceptedAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString() 
-                  }
-                : inv
-            ),
             users: [...state.users, newUser],
             isLoading: false,
           }));
@@ -495,8 +514,7 @@ export const useRBACStore = create<RBACState>()(
     {
       name: 'rbac-storage',
       partialize: (state) => ({
-        roles: state.roles,
-        organizations: state.organizations,
+        currentUser: state.currentUser,
         // Don't persist sensitive data like invitations and users in localStorage
       }),
     }

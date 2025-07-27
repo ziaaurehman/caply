@@ -1,7 +1,146 @@
 import { Role } from '@/lib/types';
 import { PERMISSIONS } from './permissions';
 
-// Default roles for the project management system
+// Database role structure for organization setup
+export interface DefaultOrganizationRole {
+  name: string;
+  display_name: string;
+  description: string;
+  is_system_role: boolean;
+  permissions: string[];
+}
+
+// Default organization roles configuration (maps to database structure)
+export const DEFAULT_ORGANIZATION_ROLES: DefaultOrganizationRole[] = [
+  {
+    name: 'admin',
+    display_name: 'Organization Administrator',
+    description: 'Full control over organization',
+    is_system_role: false,
+    permissions: [
+      // User management
+      'users.create',
+      'users.read',
+      'users.update',
+      'users.delete',
+      
+      // Organization management (except create/delete org)
+      'organizations.read',
+      'organizations.update',
+      
+      // Project management
+      'projects.create',
+      'projects.read',
+      'projects.update',
+      'projects.delete',
+      
+      // Task management
+      'tasks.create',
+      'tasks.read',
+      'tasks.update',
+      'tasks.delete',
+      
+      // Time tracking
+      'time_entries.read',
+      'time_entries.approve',
+      
+      // Client management
+      'clients.create',
+      'clients.read',
+      'clients.update',
+      'clients.delete',
+      
+      // Invoice management
+      'invoices.create',
+      'invoices.read',
+      'invoices.update',
+      'invoices.delete',
+      'invoices.send',
+      
+      // Estimate management
+      'estimates.create',
+      'estimates.read',
+      'estimates.update',
+      'estimates.delete',
+      'estimates.send',
+      
+      // Expense management
+      'expenses.read',
+      'expenses.approve',
+      
+      // Leave management
+      'leave_requests.read',
+      'leave_requests.approve',
+      
+      // Reports and settings
+      'reports.read',
+      'reports.export',
+      'settings.read',
+      'settings.update'
+    ]
+  },
+  {
+    name: 'manager',
+    display_name: 'Manager',
+    description: 'Project and team management',
+    is_system_role: false,
+    permissions: [
+      'users.read',
+      'projects.create',
+      'projects.read',
+      'projects.update',
+      'projects.delete',
+      'tasks.create',
+      'tasks.read',
+      'tasks.update',
+      'tasks.delete',
+      'time_entries.read',
+      'time_entries.approve',
+      'clients.read',
+      'clients.create',
+      'clients.update',
+      'invoices.create',
+      'invoices.read',
+      'invoices.update',
+      'invoices.send',
+      'estimates.create',
+      'estimates.read',
+      'estimates.update',
+      'estimates.send',
+      'expenses.read',
+      'expenses.approve',
+      'leave_requests.read',
+      'leave_requests.approve',
+      'reports.read',
+      'reports.export',
+      'settings.read'
+    ]
+  },
+  {
+    name: 'member',
+    display_name: 'Team Member',
+    description: 'Basic team member access',
+    is_system_role: false,
+    permissions: [
+      'projects.read',
+      'tasks.read',
+      'tasks.update',
+      'time_entries.create',
+      'time_entries.read',
+      'time_entries.update',
+      'clients.read',
+      'invoices.read',
+      'estimates.read',
+      'expenses.create',
+      'expenses.read',
+      'leave_requests.create',
+      'leave_requests.read',
+      'leave_requests.update'
+    ]
+  }
+];
+
+// Default roles for the project management system (legacy structure)
 export const DEFAULT_ROLES: Omit<Role, 'organizationId' | 'createdAt' | 'updatedAt'>[] = [
   {
     id: 'admin',

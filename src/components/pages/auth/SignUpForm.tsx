@@ -45,81 +45,56 @@ export default function SignUpForm() {
     try {
       console.log("Attempting to register user:", formData.email)
       
-      // Register the user with Supabase (simple approach - no role logic needed)
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            name: formData.fullName,
-          },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+      // Use our new signup API that handles everything
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          full_name: formData.fullName,
+        }),
       })
 
-      if (signUpError) {
-        console.error("Supabase signup error:", signUpError)
-        setError(signUpError.message)
+      const result = await response.json()
+
+      if (!response.ok || !result.success) {
+        console.error("Signup API error:", result.error)
+        setError(result.error || "Registration failed")
         setIsLoading(false)
         return
       }
 
-      console.log("User registration response:", data)
-
+      console.log("User registration successful:", result)
+      
       // Check if email confirmation is required
-      if (data.user && data.session) {
-        // User is immediately signed in, proceed to login with NextAuth
-        console.log("User created and signed in with Supabase, proceeding to NextAuth login")
-        
-        // Create user profile manually (clean schema approach)
-        console.log("Creating user profile for:", data.user.email)
-        
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email: data.user.email,
-            full_name: formData.fullName
-          })
-        
-        if (profileError) {
-          console.error("Profile creation error:", profileError)
-          setError("Account created but profile setup failed. Please try logging in.")
-          setIsLoading(false)
-          return
-        }
-        
-        console.log("User profile created successfully")
-        
-        const signInResult = await signIn("credentials", {
-          redirect: false,
-          email: formData.email,
-          password: formData.password,
-        })
-
-        if (signInResult?.error) {
-          console.error("NextAuth sign in error:", signInResult.error)
-          setError(`Registration successful, but couldn't log in automatically. Please try logging in.`)
-          setIsLoading(false)
-          return
-        }
-
-        // Use window.location instead of router.push for a clean page reload
-        window.location.href = "/dashboard"
-      } else {
-        // Email confirmation is required
-        console.log("Email confirmation required")
-        setSuccess("Registration successful! Please check your email to confirm your account before logging in.")
+      if (result.user && !result.user.email_verified) {
+        setSuccess("Account created! Please check your email to verify your account before signing in.")
         setIsLoading(false)
-        
-        // Clear form
-        setFormData({
-          fullName: "",
-          email: "",
-          password: "",
-          confirmPassword: "",
-      })
+        return
       }
+
+      // If email is verified or doesn't require verification, sign in with NextAuth
+      console.log("Proceeding to NextAuth login")
+      
+      const signInResult = await signIn("credentials", {
+        redirect: false,
+        email: formData.email,
+        password: formData.password,
+      })
+
+      if (signInResult?.error) {
+        console.error("NextAuth sign in error:", signInResult.error)
+        setError(`Registration successful, but couldn't log in automatically. Please try logging in.`)
+        setIsLoading(false)
+        return
+      }
+
+      // Use window.location instead of router.push for a clean page reload
+      window.location.href = "/dashboard"
+      
     } catch (error: any) {
       console.error("Registration error:", error)
       setError(error.message || "Something went wrong during registration. Please try again.")
