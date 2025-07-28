@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/utils/rbac/middleware'
-import { useRBACStore } from '@/lib/stores/rbacStore'
+import { useRBACStore } from '@/utils/api/rbac-store'
 
 // GET /api/users - List users (requires users.read permission)
 export const GET = withAuth(
