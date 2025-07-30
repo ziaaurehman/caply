@@ -8,6 +8,7 @@ import { CalendarIcon, UploadCloud, Plus, ChevronDown, X } from "lucide-react"
 import { projectAPI, clientAPI, teamAPI, type CreateProjectData, type CreateClientData } from "@/utils/api"
 import ClientModal from "@/components/pages/clients/ClientModal"
 import { useOrganizationStore } from "@/lib/stores/organizationStore"
+import { toast } from "sonner"
 
 interface ProjectFormData {
   name: string
@@ -85,7 +86,7 @@ export default function ProjectCreationPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const { register, handleSubmit, watch, setValue, formState: { errors }, reset } = useForm<ProjectFormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors }, reset, trigger } = useForm<ProjectFormData>({
     mode: 'onChange', // Enable real-time validation
     defaultValues: {
       name: '',
@@ -187,6 +188,18 @@ export default function ProjectCreationPage() {
       return;
     }
 
+    // Validate client selection
+    if (!data.client_id) {
+      setSubmitError('Please select a client for this project.');
+      return;
+    }
+
+    // Validate team members selection
+    if (!data.selected_team_members || data.selected_team_members.length === 0) {
+      setSubmitError('Please select at least one team member for this project.');
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -217,6 +230,11 @@ export default function ProjectCreationPage() {
       }
 
       const result = await projectAPI.createProject(payload)
+      // Show success toast
+      toast.success(`Project "${data.name}" created successfully!`, {
+        description: "You can now start managing your project and assign tasks.",
+        duration: 5000,
+      })
       // Optionally handle file uploads here
       router.push("/projects")
     } catch (error: any) {
@@ -255,7 +273,12 @@ export default function ProjectCreationPage() {
               Cancel
             </button>
             <button 
-              onClick={handleSubmit(onSubmit)}
+              onClick={async () => {
+                const isValid = await trigger();
+                if (isValid) {
+                  handleSubmit(onSubmit)();
+                }
+              }}
               disabled={isSubmitting}
               className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -290,13 +313,17 @@ export default function ProjectCreationPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label htmlFor="client" className="block text-sm font-medium text-gray-700 mb-1">
-                  Client
+                  Client <span className="text-red-500">*</span>
                 </label>
                 <div className="flex space-x-2">
                   <div className="relative flex-1">
                     <select
-                      {...register('client_id')}
-                      className="block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md appearance-none"
+                      {...register('client_id', {
+                        required: 'Please select a client for this project'
+                      })}
+                      className={`block w-full pl-3 pr-10 py-2 text-base border focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md appearance-none ${
+                        errors.client_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                      }`}
                       disabled={loadingClients}
                     >
                       <option value="">{loadingClients ? 'Loading clients...' : 'Select client...'}</option>
@@ -316,6 +343,7 @@ export default function ProjectCreationPage() {
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
+                {errors.client_id && <p className="mt-1 text-sm text-red-600">{errors.client_id.message}</p>}
               </div>
               <div>
                 <label htmlFor="projectName" className="block text-sm font-medium text-gray-700 mb-1">
@@ -429,13 +457,15 @@ export default function ProjectCreationPage() {
               <h2 className="text-lg font-medium text-gray-800">Team Members</h2>
             </div>
             
-            <p className="text-sm text-gray-500 mb-4">Select team members who will have access to this project</p>
+            <p className="text-sm text-gray-500 mb-4">Select team members who will have access to this project <span className="text-red-500">*</span></p>
 
             <div className="relative" id="team-dropdown">
               <button
                 type="button"
                 onClick={() => setIsTeamDropdownOpen(!isTeamDropdownOpen)}
-                className="relative w-full bg-white border border-gray-300 rounded-md shadow-sm pl-3 pr-10 py-2 text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                className={`relative w-full bg-white border rounded-md shadow-sm pl-3 pr-10 py-2 text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
+                  errors.selected_team_members ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                }`}
               >
                 <span className="block truncate">
                   {getSelectedTeamMembersCount(watch('selected_team_members') || [])}
@@ -470,6 +500,9 @@ export default function ProjectCreationPage() {
                 </div>
               )}
             </div>
+            {errors.selected_team_members && (
+              <p className="mt-1 text-sm text-red-600">{errors.selected_team_members.message}</p>
+            )}
           </div>
 
           {/* Project Type */}
