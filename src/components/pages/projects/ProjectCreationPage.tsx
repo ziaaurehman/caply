@@ -82,8 +82,11 @@ export default function ProjectCreationPage() {
   const [loadingClients, setLoadingClients] = useState(false)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [loadingTeamMembers, setLoadingTeamMembers] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const { register, handleSubmit, watch, setValue, formState: { errors }, reset } = useForm<ProjectFormData>({
+    mode: 'onChange', // Enable real-time validation
     defaultValues: {
       name: '',
       project_type: 'time_materials',
@@ -180,24 +183,28 @@ export default function ProjectCreationPage() {
 
   const onSubmit = async (data: ProjectFormData) => {
     if (!currentOrganization?.id) {
-      console.error('No current organization selected');
+      setSubmitError('No organization selected. Please refresh the page and try again.');
       return;
     }
 
+    setIsSubmitting(true);
+    setSubmitError(null);
+
     try {
-      // Prepare payload for API
+      // Prepare payload for API with proper null handling for numeric fields
       const payload = {
         organization_id: currentOrganization.id,
         name: data.name,
-        client_id: data.client_id || null,
-        code: data.code,
-        description: data.description,
+        client_id: data.client_id || undefined,
+        code: data.code || undefined,
+        description: data.description || undefined,
         project_type: data.project_type,
-        billing_rate: data.billing_rate,
-        budget_hours: data.budget_hours,
-        budget_amount: data.budget_amount,
-        start_date: data.start_date,
-        end_date: data.end_date,
+        // Handle numeric fields based on project type
+        billing_rate: data.project_type === 'time_materials' && data.billing_rate ? Number(data.billing_rate) : undefined,
+        budget_hours: data.project_type === 'time_materials' && data.budget_hours ? Number(data.budget_hours) : undefined,
+        budget_amount: data.project_type === 'fixed_fee' && data.budget_amount ? Number(data.budget_amount) : undefined,
+        start_date: data.start_date || undefined,
+        end_date: data.end_date || undefined,
         // Additional fields from form and state
         team_member_ids: data.selected_team_members,
         task_categories: taskCategories,
@@ -205,7 +212,7 @@ export default function ProjectCreationPage() {
         timesheet_enabled: data.timesheet_activation,
         team_availability_enabled: data.absence_integration,
         capacity_planning_enabled: data.capacity_planning,
-        state: "published", // or "draft" if you want to support drafts
+        state: "published",
         // Add more fields as needed (e.g., documents)
       }
 
@@ -214,6 +221,9 @@ export default function ProjectCreationPage() {
       router.push("/projects")
     } catch (error: any) {
       console.error("Failed to create project:", error)
+      setSubmitError(error.message || 'Failed to create project. Please check all required fields and try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -242,16 +252,36 @@ export default function ProjectCreationPage() {
               onClick={() => router.back()}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200"
             >
-              Save as Draft
+              Cancel
             </button>
             <button 
               onClick={handleSubmit(onSubmit)}
-              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Create Project
+              {isSubmitting ? 'Creating...' : 'Create Project'}
             </button>
           </div>
         </div>
+
+        {/* Error Message Display */}
+        {submitError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Error creating project</h3>
+                <div className="mt-2 text-sm text-red-700">
+                  <p>{submitError}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
           {/* General Information */}
@@ -293,8 +323,20 @@ export default function ProjectCreationPage() {
                 </label>
                 <input
                   type="text"
-                  {...register('name', { required: 'Project name is required' })}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                  {...register('name', { 
+                    required: 'Project name is required',
+                    minLength: {
+                      value: 2,
+                      message: 'Project name must be at least 2 characters long'
+                    },
+                    maxLength: {
+                      value: 255,
+                      message: 'Project name must be less than 255 characters'
+                    }
+                  })}
+                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
+                    errors.name ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
                 />
                 {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>}
               </div>
@@ -316,12 +358,16 @@ export default function ProjectCreationPage() {
                   <div className="relative">
                     <input
                       type="date"
-                      {...register('start_date')}
-                      className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                      {...register('start_date', {
+                        required: 'Start date is required'
+                      })}
+                      className={`block w-full pl-3 pr-10 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
+                        errors.start_date ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                      }`}
                       placeholder="mm/dd/yyyy"
                     />
-                   
                   </div>
+                  {errors.start_date && <p className="mt-1 text-sm text-red-600">{errors.start_date.message}</p>}
                 </div>
                 <div>
                   <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
@@ -330,12 +376,22 @@ export default function ProjectCreationPage() {
                   <div className="relative">
                     <input
                       type="date"
-                      {...register('end_date')}
-                      className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                      {...register('end_date', {
+                        validate: {
+                          afterStartDate: (value) => {
+                            const startDate = watch('start_date');
+                            if (!value || !startDate) return true;
+                            return new Date(value) >= new Date(startDate) || 'End date must be after start date';
+                          }
+                        }
+                      })}
+                      className={`block w-full pl-3 pr-10 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
+                        errors.end_date ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                      }`}
                       placeholder="mm/dd/yyyy"
                     />
-                    
                   </div>
+                  {errors.end_date && <p className="mt-1 text-sm text-red-600">{errors.end_date.message}</p>}
                 </div>
               </div>
             </div>
@@ -457,9 +513,27 @@ export default function ProjectCreationPage() {
                   </label>
                   <input
                     type="number"
-                    {...register('billing_rate')}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                    step="0.01"
+                    min="0"
+                    {...register('billing_rate', {
+                      required: watchedProjectType === 'time_materials' ? 'Billing rate is required for Time & Materials projects' : false,
+                      validate: {
+                        validNumber: (value) => {
+                          if (watchedProjectType !== 'time_materials') return true;
+                          if (!value) return true; // Let required handle empty values
+                          const num = Number(value);
+                          if (isNaN(num)) return 'Please enter a valid number';
+                          if (num < 0) return 'Billing rate must be greater than or equal to 0';
+                          if (num > 10000) return 'Billing rate must be less than $10,000/hour';
+                          return true;
+                        }
+                      }
+                    })}
+                    className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
+                      errors.billing_rate ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                    }`}
                   />
+                  {errors.billing_rate && <p className="mt-1 text-sm text-red-600">{errors.billing_rate.message}</p>}
                 </div>
                 <div>
                   <label htmlFor="budgetHours" className="block text-sm font-medium text-gray-700 mb-1">
@@ -467,9 +541,26 @@ export default function ProjectCreationPage() {
                   </label>
                   <input
                     type="number"
-                    {...register('budget_hours')}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                    min="0"
+                    step="1"
+                    {...register('budget_hours', {
+                      validate: {
+                        validNumber: (value) => {
+                          if (watchedProjectType !== 'time_materials') return true;
+                          if (!value) return true; // Optional field
+                          const num = Number(value);
+                          if (isNaN(num)) return 'Please enter a valid number';
+                          if (num < 0) return 'Budget hours must be greater than or equal to 0';
+                          if (num > 100000) return 'Budget hours must be less than 100,000';
+                          return true;
+                        }
+                      }
+                    })}
+                    className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
+                      errors.budget_hours ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                    }`}
                   />
+                  {errors.budget_hours && <p className="mt-1 text-sm text-red-600">{errors.budget_hours.message}</p>}
                 </div>
               </div>
             )}
@@ -480,9 +571,27 @@ export default function ProjectCreationPage() {
                 </label>
                 <input
                   type="number"
-                  {...register('budget_amount')}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                  step="0.01"
+                  min="0"
+                  {...register('budget_amount', {
+                    required: watchedProjectType === 'fixed_fee' ? 'Fixed fee amount is required for Fixed Fee projects' : false,
+                    validate: {
+                      validNumber: (value) => {
+                        if (watchedProjectType !== 'fixed_fee') return true;
+                        if (!value) return true; // Let required handle empty values
+                        const num = Number(value);
+                        if (isNaN(num)) return 'Please enter a valid number';
+                        if (num < 0) return 'Budget amount must be greater than or equal to 0';
+                        if (num > 10000000) return 'Budget amount must be less than $10,000,000';
+                        return true;
+                      }
+                    }
+                  })}
+                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
+                    errors.budget_amount ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
                 />
+                {errors.budget_amount && <p className="mt-1 text-sm text-red-600">{errors.budget_amount.message}</p>}
               </div>
             )}
 
