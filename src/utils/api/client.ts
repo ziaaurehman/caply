@@ -54,8 +54,12 @@ export const clientAPI = {
   },
 
   // Get single client by ID
-  getClient: async (id: string): Promise<ClientResponse> => {
-    const response = await fetch(`/api/clients/${id}`);
+  getClient: async (id: string, organizationId: string): Promise<ClientResponse> => {
+    const response = await fetch(`/api/clients/${id}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch client');
@@ -66,13 +70,18 @@ export const clientAPI = {
 
   // Create new client
   createClient: async (data: CreateClientData & { organizationId: string }): Promise<ClientResponse> => {
+    const { organizationId, ...clientData } = data;
+    
     const response = await fetch('/api/clients', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+        'x-organization-id': organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify({
+        ...clientData,
+        organizationId // Pass organizationId in body for the API to extract
+      })
     });
 
     if (!response.ok) {
@@ -85,13 +94,21 @@ export const clientAPI = {
   },
 
   // Update existing client
-  updateClient: async (id: string, data: UpdateClientData): Promise<ClientResponse> => {
+  updateClient: async (id: string, data: UpdateClientData & { organizationId?: string }): Promise<ClientResponse> => {
+    const { organizationId, ...clientData } = data;
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (organizationId) {
+      headers['x-organization-id'] = organizationId;
+    }
+    
     const response = await fetch(`/api/clients/${id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(data)
+      headers,
+      body: JSON.stringify(clientData)
     });
 
     if (!response.ok) {
@@ -104,9 +121,16 @@ export const clientAPI = {
   },
 
   // Delete client
-  deleteClient: async (id: string): Promise<void> => {
+  deleteClient: async (id: string, organizationId?: string): Promise<void> => {
+    const headers: Record<string, string> = {};
+    
+    if (organizationId) {
+      headers['x-organization-id'] = organizationId;
+    }
+    
     const response = await fetch(`/api/clients/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers
     });
 
     if (!response.ok) {

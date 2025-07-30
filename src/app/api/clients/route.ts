@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { context: userContext } = validation;
-    const { name, ...rest } = body;
+    const { name, organizationId: bodyOrgId, ...rest } = body;
 
     if (!name) {
       return NextResponse.json({ error: 'Client name is required' }, { status: 400 });
