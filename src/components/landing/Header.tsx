@@ -82,8 +82,8 @@ export default function LandingHeader({
     <header
       className={`fixed top-0 w-full z-50 transition-all duration-500 ease-in-out ${
         scrolled
-          ? "bg-black/90 backdrop-blur-md py-3 shadow-lg border-b border-gray-700/50"
-          : "bg-transparent py-4 border-b border-gray-100/30"
+          ? "bg-white/95 backdrop-blur-md py-3 shadow-lg border-b border-gray-200/50"
+          : "bg-white/90 backdrop-blur-md py-4 border-b border-gray-200/30"
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -98,7 +98,7 @@ export default function LandingHeader({
           <nav className="hidden lg:flex">
             <div
               className={`rounded-full px-2 py-2 flex space-x-1 transition-all duration-300 ${
-                scrolled ? "bg-gray-700/90 backdrop-blur-sm" : "bg-gray-700/70 backdrop-blur-sm"
+                scrolled ? "bg-gray-100/90 backdrop-blur-sm" : "bg-gray-100/70 backdrop-blur-sm"
               }`}
             >
               {navItems.map((item) => (
@@ -108,7 +108,7 @@ export default function LandingHeader({
                   className={`relative px-6 py-2 rounded-full text-sm font-medium transition-all duration-500 ease-in-out ${
                     activeSection === item.id
                       ? "bg-primary-600 text-white shadow-lg transform scale-105"
-                      : "text-gray-300 hover:text-white hover:bg-gray-700/50"
+                      : "text-gray-700 hover:text-gray-900 hover:bg-gray-200/50"
                   }`}
                 >
                   {item.label}
@@ -122,13 +122,13 @@ export default function LandingHeader({
 
           {/* Mobile Menu Button */}
           <button
-            className="lg:hidden text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+            className="lg:hidden text-gray-700 p-2 rounded-lg hover:bg-gray-100 transition-colors"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           >
             {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
 
-          {/* Desktop CTA Button */}
+          {/* Desktop CTA Buttons */}
           {isAuthenticated ? (
             <div className="relative" ref={dropdownRef}>
               <button 
@@ -169,12 +169,29 @@ export default function LandingHeader({
                 </div>
               )}
             </div>
-          ) :(
-          <button onClick={() => router.push("/login")} className="hidden lg:flex bg-primary-600 hover:bg-primary-700 transition-colors text-white px-6 py-3 rounded-full font-medium text-sm transition-all duration-300 hover:shadow-lg hover:scale-105 items-center">
-            START FREE TRIAL
-            <ArrowRight className="ml-2 w-4 h-4" />
-          </button>
-        )}
+          ) : (
+            <div className="hidden lg:flex items-center space-x-4">
+              <button 
+                onClick={() => router.push("/login")} 
+                className="text-gray-700 hover:text-primary-600 font-medium text-sm transition-colors"
+              >
+                Login
+              </button>
+              <button 
+                onClick={() => router.push("/signup")} 
+                className="text-gray-700 hover:text-primary-600 font-medium text-sm transition-colors"
+              >
+                Sign Up
+              </button>
+              <button 
+                onClick={() => router.push("/login")} 
+                className="bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-2 rounded-full font-medium text-xs transition-all duration-300 hover:shadow-md flex items-center"
+              >
+                Start Free Trial
+                <ArrowRight className="ml-1 w-3 h-3" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Mobile Navigation Menu */}
@@ -183,7 +200,7 @@ export default function LandingHeader({
             isMobileMenuOpen ? "max-h-96 opacity-100 mt-4" : "max-h-0 opacity-0"
           }`}
         >
-          <div className="bg-gray-800/95 backdrop-blur-md rounded-2xl p-4 space-y-2 border border-gray-700/30">
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl p-4 space-y-2 border border-gray-200/30 shadow-lg">
             {navItems.map((item) => (
               <button
                 key={item.id}
@@ -191,16 +208,31 @@ export default function LandingHeader({
                 className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
                   activeSection === item.id
                     ? "bg-primary-600 text-white"
-                    : "text-gray-300 hover:text-white hover:bg-gray-700/50"
+                    : "text-gray-700 hover:text-gray-900 hover:bg-gray-100/50"
                 }`}
               >
                 {item.label}
               </button>
             ))}
-            <div className="pt-2 border-t border-gray-700">
-              <button onClick={() => router.push("/login")} className="w-full bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-3 rounded-xl font-medium text-sm transition-colors flex items-center justify-center">
-                START FREE TRIAL
-                <ArrowRight className="ml-2 w-4 h-4" />
+            <div className="pt-2 border-t border-gray-300">
+              <button 
+                onClick={() => router.push("/login")} 
+                className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 text-gray-700 hover:text-primary-600"
+              >
+                Login
+              </button>
+              <button 
+                onClick={() => router.push("/signup")} 
+                className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 text-gray-700 hover:text-primary-600"
+              >
+                Sign Up
+              </button>
+              <button 
+                onClick={() => router.push("/login")} 
+                className="w-full bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-2 rounded-full font-medium text-sm transition-colors flex items-center justify-center mt-2"
+              >
+                Start Free Trial
+                <ArrowRight className="ml-1 w-3 h-3" />
               </button>
             </div>
           </div>

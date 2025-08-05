@@ -22,6 +22,7 @@ const TeamMembersPage: React.FC = () => {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null)
   
   const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation()
   const { currentOrganization } = useOrganizationStore()
@@ -66,7 +67,10 @@ const TeamMembersPage: React.FC = () => {
       additionalMessage: 'will remove all associated data',
       onDelete: async () => {
         try {
-          await teamAPI.deleteTeamMember(id)
+          if (!currentOrganization?.id) {
+            throw new Error('No organization selected')
+          }
+          await teamAPI.deleteTeamMember(id, currentOrganization.id)
           await fetchTeamMembers() // Refresh the list
         } catch (error: any) {
           // Handle specific error messages
@@ -92,11 +96,16 @@ const TeamMembersPage: React.FC = () => {
     try {
       if (data.id) {
         // Update existing member
-        const updateData: UpdateTeamMemberData = {
+        if (!currentOrganization?.id) {
+          throw new Error('No organization selected')
+        }
+        
+        const updateData: UpdateTeamMemberData & { organizationId: string } = {
           roleId: data.roleId,
           department: data.department,
           hourlyRate: data.hourlyRate,
-          weeklyCapacity: data.weeklyCapacity
+          weeklyCapacity: data.weeklyCapacity,
+          organizationId: currentOrganization.id
         }
         await teamAPI.updateTeamMember(data.id, updateData)
         toast.success('Team member updated successfully')
@@ -248,6 +257,55 @@ const TeamMembersPage: React.FC = () => {
                     <span className="text-xs text-yellow-600">
                       Expires {new Date(invitation.expires_at).toLocaleDateString()}
                     </span>
+                    <button
+                      onClick={async () => {
+                        setResendingInvitationId(invitation.id)
+                        try {
+                          await teamAPI.resendInvitation(invitation.id)
+                          toast.success('Invitation resent successfully!')
+                        } catch (error: any) {
+                          console.error('Error resending invitation:', error)
+                          toast.error(error.message || 'Failed to resend invitation')
+                        } finally {
+                          setResendingInvitationId(null)
+                        }
+                      }}
+                      disabled={resendingInvitationId === invitation.id}
+                      className="px-3 py-1 text-xs font-medium text-blue-600 bg-blue-100 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                    >
+                      {resendingInvitationId === invitation.id ? (
+                        <>
+                          <div className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin" />
+                          Resending...
+                        </>
+                      ) : (
+                        'Resend'
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        confirm(
+                          async () => {
+                            try {
+                              await teamAPI.cancelInvitation(invitation.id)
+                              toast.success('Invitation cancelled successfully!')
+                              await fetchTeamMembers() // Refresh the list
+                            } catch (error: any) {
+                              console.error('Error cancelling invitation:', error)
+                              toast.error(error.message || 'Failed to cancel invitation')
+                            }
+                          },
+                          {
+                            title: 'Cancel Invitation',
+                            message: `Are you sure you want to cancel the invitation for ${invitation.email}?`,
+                            type: 'danger'
+                          }
+                        )
+                      }}
+                      className="px-3 py-1 text-xs font-medium text-red-600 bg-red-100 hover:bg-red-200 rounded transition-colors"
+                    >
+                      Cancel
+                    </button>
                   </div>
                 </div>
               ))}

@@ -139,11 +139,12 @@ export const capacityAPI = {
   },
 
   // Create allocation
-  createAllocation: async (allocation: Omit<ResourceAllocation, 'id' | 'created_at' | 'updated_at'>): Promise<AllocationResponse> => {
+  createAllocation: async (allocation: Omit<ResourceAllocation, 'id' | 'created_at' | 'updated_at'> & { organization_id: string }): Promise<AllocationResponse> => {
     const response = await fetch('/api/capacity/allocations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-organization-id': allocation.organization_id,
       },
       body: JSON.stringify(allocation),
     });

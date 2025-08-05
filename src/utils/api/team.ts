@@ -32,6 +32,9 @@ interface PendingInvitation {
   status: string;
   expires_at: string;
   created_at: string;
+  token: string;
+  message?: string;
+  user_id?: string;
   roles: {
     id: string;
     name: string;
@@ -107,7 +110,8 @@ export const teamAPI = {
     const response = await fetch('/api/team-members', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
       },
       body: JSON.stringify({
         email: data.email,
@@ -127,11 +131,12 @@ export const teamAPI = {
   },
 
   // Update existing team member
-  updateTeamMember: async (id: string, data: UpdateTeamMemberData): Promise<void> => {
+  updateTeamMember: async (id: string, data: UpdateTeamMemberData & { organizationId: string }): Promise<void> => {
     const response = await fetch(`/api/team-members/${id}`, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
       },
       body: JSON.stringify({
         roleId: data.roleId,
@@ -148,14 +153,53 @@ export const teamAPI = {
   },
 
   // Delete team member
-  deleteTeamMember: async (id: string): Promise<void> => {
+  deleteTeamMember: async (id: string, organizationId: string): Promise<void> => {
     const response = await fetch(`/api/team-members/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'x-organization-id': organizationId,
+      },
     });
 
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to remove member');
+    }
+  },
+
+  // Resend invitation
+  resendInvitation: async (invitationId: string): Promise<void> => {
+    const response = await fetch('/api/invitations/resend', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        invitationId
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to resend invitation');
+    }
+  },
+
+  // Cancel invitation
+  cancelInvitation: async (invitationId: string): Promise<void> => {
+    const response = await fetch('/api/invitations/cancel', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        invitationId
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to cancel invitation');
     }
   },
 

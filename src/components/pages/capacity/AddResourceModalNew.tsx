@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Users, Clock, Calendar, User } from 'lucide-react';
-import { capacityAPI } from '@/utils/api/capacity';
+import { capacityAPI, ResourceAllocation } from '@/utils/api/capacity';
 import { projectAPI } from '@/utils/api/project';
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
 

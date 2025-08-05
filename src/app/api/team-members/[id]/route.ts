@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 
 // PUT /api/team-members/[id] - Update team member
 export async function PUT(
@@ -17,33 +18,35 @@ export async function PUT(
     const memberId = params.id
     const body = await request.json()
     const { roleId, department, hourlyRate, weeklyCapacity } = body
+    
+    // Get organization ID from headers
+    const headerOrgId = request.headers.get('x-organization-id')
+    
+    if (!headerOrgId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 })
+    }
+
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      headerOrgId,
+      { resource: 'users', action: 'update' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
 
     const supabase = await createClient()
-
-    // Get user's organization and role
-    const { data: userOrg, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id, role_id, roles:role_id(name)')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrg) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    // Check permissions (admin or manager can update)
-    const userRole = (userOrg as any).roles?.name
-    if (!['admin', 'manager'].includes(userRole)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
+    const userContext = validation.context!
 
     // Get the member to update
     const { data: member, error: memberError } = await supabase
       .from('organization_members')
       .select('id, organization_id, user_id')
       .eq('id', memberId)
-      .eq('organization_id', userOrg.organization_id)
+      .eq('organization_id', headerOrgId)
       .single()
 
     if (memberError || !member) {
@@ -117,32 +120,35 @@ export async function DELETE(
     }
 
     const memberId = params.id
+    
+    // Get organization ID from headers
+    const headerOrgId = request.headers.get('x-organization-id')
+    
+    if (!headerOrgId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 })
+    }
+
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      headerOrgId,
+      { resource: 'users', action: 'delete' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
+
     const supabase = await createClient()
-
-    // Get user's organization and role
-    const { data: userOrg, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id, role_id, roles:role_id(name)')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (orgError || !userOrg) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
-    }
-
-    // Check permissions (admin or manager can delete)
-    const userRole = (userOrg as any).roles?.name
-    if (!['admin', 'manager'].includes(userRole)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
+    const userContext = validation.context!
 
     // Get the member to delete
     const { data: member, error: memberError } = await supabase
       .from('organization_members')
       .select('id, organization_id, user_id')
       .eq('id', memberId)
-      .eq('organization_id', userOrg.organization_id)
+      .eq('organization_id', headerOrgId)
       .single()
 
     if (memberError || !member) {
@@ -158,7 +164,7 @@ export async function DELETE(
     const { data: organization, error: ownerError } = await supabase
       .from('organizations')
       .select('owner_id')
-      .eq('id', userOrg.organization_id)
+      .eq('id', headerOrgId)
       .single()
 
     if (ownerError) {

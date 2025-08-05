@@ -137,6 +137,47 @@ export default function ProjectsPage() {
     // Simulate that projects typically spend proportionally to time elapsed
     return Math.min(100, timeProgress + (Math.random() * 20 - 10)); // Add some variance
   };
+
+  const getProjectBudget = (project: Project) => {
+    if (project.project_type === 'fixed_fee' && project.budget_amount) {
+      // For fixed fee projects, use the budget_amount directly
+      const budgetUtilization = getBudgetUtilization(project);
+      const spent = Math.round((budgetUtilization / 100) * project.budget_amount);
+      return {
+        type: 'fixed_fee',
+        total: project.budget_amount,
+        spent: spent,
+        remaining: project.budget_amount - spent
+      };
+    } else if (project.project_type === 'time_materials' && project.budget_hours && project.billing_rate) {
+      // For time & materials projects, calculate based on hours * rate
+      const totalBudget = project.budget_hours * project.billing_rate;
+      const budgetUtilization = getBudgetUtilization(project);
+      const spent = Math.round((budgetUtilization / 100) * totalBudget);
+      return {
+        type: 'time_materials',
+        total: totalBudget,
+        spent: spent,
+        remaining: totalBudget - spent
+      };
+    } else if (project.project_type === 'time_materials' && project.billing_rate) {
+      // If only billing rate is set, calculate based on time progress
+      const estimatedHours = project.budget_hours || 40; // Default to 40 hours if not set
+      const totalBudget = estimatedHours * project.billing_rate;
+      const budgetUtilization = getBudgetUtilization(project);
+      const spent = Math.round((budgetUtilization / 100) * totalBudget);
+      return {
+        type: 'time_materials',
+        total: totalBudget,
+        spent: spent,
+        remaining: totalBudget - spent
+      };
+    } else if (project.project_type === 'non_billable') {
+      // For non-billable projects, show no budget
+      return null;
+    }
+    return null;
+  };
   
   const getProjectStatus = (project: Project) => {
     const timeProgress = calculateTimeProgress(project);
@@ -297,19 +338,29 @@ export default function ProjectsPage() {
                           <span className="text-sm text-gray-900">{Math.round(budgetUtilization)}% / 100%</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {project.budget_amount 
-                            ? `$${Math.round((budgetUtilization / 100) * project.budget_amount).toLocaleString()} / $${project.budget_amount.toLocaleString()}`
-                            : 'No budget set'
-                          }
-                        </div>
-                        {project.budget_amount && (
-                          <div className="text-sm text-green-600">
-                            +$${(project.budget_amount - Math.round((budgetUtilization / 100) * project.budget_amount)).toLocaleString()}
-                          </div>
-                        )}
-                      </td>
+                                             <td className="px-6 py-4 whitespace-nowrap">
+                         {(() => {
+                           const budget = getProjectBudget(project);
+                           if (!budget) {
+                             return (
+                               <div className="text-sm text-gray-900">
+                                 No budget set
+                               </div>
+                             );
+                           }
+                           
+                           return (
+                             <>
+                               <div className="text-sm text-gray-900">
+                                 ${budget.spent.toLocaleString()} / ${budget.total.toLocaleString()}
+                               </div>
+                               <div className="text-sm text-green-600">
+                                 +${budget.remaining.toLocaleString()}
+                               </div>
+                             </>
+                           );
+                         })()}
+                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
                           {remainingDays > 0 ? `${remainingDays} days left` : 

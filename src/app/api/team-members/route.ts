@@ -141,6 +141,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Email, role, and organization ID are required' }, { status: 400 })
     }
 
+    // Get organization ID from headers for additional validation
+    const headerOrgId = request.headers.get('x-organization-id')
+    
     // Validate organization access and permissions
     const validation = await validateOrganizationAccessWithId(
       organizationId,
@@ -151,6 +154,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         error: validation.error 
       }, { status: validation.status })
+    }
+
+    // Additional validation: check if header organization ID matches (if provided)
+    if (headerOrgId && headerOrgId !== organizationId) {
+      return NextResponse.json({ error: 'Organization ID mismatch' }, { status: 403 })
     }
 
     const supabase = await createClient()
@@ -214,143 +222,93 @@ export async function POST(request: NextRequest) {
     const token = crypto.randomUUID()
     console.log('🎫 Generated invitation token:', token.substring(0, 8) + '...')
 
-    // If user exists, add them directly to the organization
-    if (existingUser) {
-      console.log('✅ Adding existing user to organization')
-      const { data: newMember, error: memberError } = await supabase
-        .from('organization_members')
-        .insert({
-          organization_id: organizationId,
-          user_id: existingUser.id,
-          role_id: roleId,
-          department: department || null,
-          hourly_rate: hourlyRate || null,
-          weekly_capacity: weeklyCapacity || 40,
-          status: 'active',
-          invited_by: userContext.userId
-        })
-        .select(`
-          id,
-          user_id,
-          role_id,
-          hourly_rate,
-          weekly_capacity,
-          department,
-          status,
-          users:user_id (
-            id,
-            email,
-            full_name,
-            avatar_url,
-            position
-          ),
-          roles:role_id (
-            id,
-            name,
-            display_name,
-            description
-          )
-        `)
-        .single()
-
-      if (memberError) {
-        console.error('❌ Error adding member:', memberError)
-        return NextResponse.json({ error: 'Failed to add member' }, { status: 500 })
-      }
-
-      console.log('✅ Member added successfully')
-      return NextResponse.json({ 
-        success: true, 
-        member: newMember,
-        message: 'User added to organization successfully'
+    // Always create invitation (for both existing and new users)
+    console.log('📧 Creating invitation for user:', email)
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    
+    const { data: invitation, error: inviteError } = await supabase
+      .from('organization_invitations')
+      .insert({
+        organization_id: organizationId,
+        email,
+        role_id: roleId,
+        token,
+        invited_by: userContext.userId,
+        message: message || null,
+        expires_at: expiresAt,
+        user_id: existingUser?.id || null // Link to existing user if they exist
       })
-    } else {
-      console.log('📧 Creating invitation for new user')
-      // Create invitation for new user
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-      
-      const { data: invitation, error: inviteError } = await supabase
-        .from('organization_invitations')
-        .insert({
-          organization_id: organizationId,
-          email,
-          role_id: roleId,
-          token,
-          invited_by: userContext.userId,
-          message: message || null,
-          expires_at: expiresAt
-        })
-        .select(`
+      .select(`
+        id,
+        email,
+        role_id,
+        status,
+        expires_at,
+        created_at,
+        user_id,
+        roles:role_id (
           id,
-          email,
-          role_id,
-          status,
-          expires_at,
-          created_at,
-          roles:role_id (
-            id,
-            name,
-            display_name,
-            description
-          )
-        `)
-        .single()
+          name,
+          display_name,
+          description
+        )
+      `)
+      .single()
 
-      if (inviteError) {
-        console.error('❌ Error creating invitation:', inviteError)
-        return NextResponse.json({ error: 'Failed to create invitation' }, { status: 500 })
-      }
-
-      console.log('✅ Invitation created successfully')
-
-      // Send invitation email
-      try {
-        console.log('📧 Sending invitation email...')
-        
-        // Get organization info for email
-        const { data: orgInfo } = await supabase
-          .from('organizations')
-          .select('name, logo_url')
-          .eq('id', organizationId)
-          .single()
-
-        // Get inviter info
-        const { data: inviterInfo } = await supabase
-          .from('users')
-          .select('full_name')
-          .eq('id', userContext.userId)
-          .single()
-
-        const emailResult = await sendInvitationEmail({
-          email,
-          token,
-          organizationName: orgInfo?.name || 'Organization',
-          organizationLogo: orgInfo?.logo_url,
-          roleName: roleInfo?.display_name || 'Team Member',
-          inviterName: inviterInfo?.full_name || 'Team Admin',
-          message: message || undefined,
-          expiresAt
-        })
-        
-        if (emailResult.success) {
-          console.log(`✅ Invitation email sent successfully via ${emailResult.provider}`)
-          if (emailResult.fallback) {
-            console.log('⚠️ Email sent using fallback method')
-          }
-        } else {
-          console.error('⚠️ Failed to send invitation email, but invitation was created:', emailResult.error)
-        }
-      } catch (emailError) {
-        console.error('⚠️ Failed to send invitation email, but invitation was created:', emailError)
-        // Don't fail the request if email fails - invitation is still created
-      }
-
-      return NextResponse.json({ 
-        success: true, 
-        invitation,
-        message: 'Invitation sent successfully'
-      })
+    if (inviteError) {
+      console.error('❌ Error creating invitation:', inviteError)
+      return NextResponse.json({ error: 'Failed to create invitation' }, { status: 500 })
     }
+
+    console.log('✅ Invitation created successfully')
+
+    // Send invitation email
+    try {
+      console.log('📧 Sending invitation email...')
+      
+      // Get organization info for email
+      const { data: orgInfo } = await supabase
+        .from('organizations')
+        .select('name, logo_url')
+        .eq('id', organizationId)
+        .single()
+
+      // Get inviter info
+      const { data: inviterInfo } = await supabase
+        .from('users')
+        .select('full_name')
+        .eq('id', userContext.userId)
+        .single()
+
+      const emailResult = await sendInvitationEmail({
+        email,
+        token,
+        organizationName: orgInfo?.name || 'Organization',
+        organizationLogo: orgInfo?.logo_url,
+        roleName: roleInfo?.display_name || 'Team Member',
+        inviterName: inviterInfo?.full_name || 'Team Admin',
+        message: message || undefined,
+        expiresAt
+      })
+      
+      if (emailResult.success) {
+        console.log(`✅ Invitation email sent successfully via ${emailResult.provider}`)
+        if (emailResult.fallback) {
+          console.log('⚠️ Email sent using fallback method')
+        }
+      } else {
+        console.error('⚠️ Failed to send invitation email, but invitation was created:', emailResult.error)
+      }
+    } catch (emailError) {
+      console.error('⚠️ Failed to send invitation email, but invitation was created:', emailError)
+      // Don't fail the request if email fails - invitation is still created
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      invitation,
+      message: existingUser ? 'Invitation sent to existing user' : 'Invitation sent to new user'
+    })
 
   } catch (error) {
     console.error('💥 Unexpected error in team members POST:', error)

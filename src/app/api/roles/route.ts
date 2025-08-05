@@ -2,15 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
-import { validateOrganizationAccess } from '@/utils/organizationUtils'
+import { validateOrganizationAccess, validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 
 // GET /api/roles - Get organization-specific roles
 export async function GET(request: NextRequest) {
   try {
-    // Validate organization access with roles read permission
-    const validation = await validateOrganizationAccess(
-      { resource: 'roles', action: 'read' }
-    )
+    // Get organization ID from headers or use session-based validation
+    const headerOrgId = request.headers.get('x-organization-id')
+    
+    let validation;
+    if (headerOrgId) {
+      // Use header-based validation if organization ID is provided
+      validation = await validateOrganizationAccessWithId(
+        headerOrgId,
+        { resource: 'roles', action: 'read' }
+      )
+    } else {
+      // Fallback to session-based validation
+      validation = await validateOrganizationAccess(
+        { resource: 'roles', action: 'read' }
+      )
+    }
 
     if (!validation.success) {
       return NextResponse.json({ 
@@ -85,10 +97,26 @@ export async function GET(request: NextRequest) {
 // POST /api/roles - Create a new organization-specific role
 export async function POST(request: NextRequest) {
   try {
-    // Validate organization access with role create permission
-    const validation = await validateOrganizationAccess(
-      { resource: 'roles', action: 'create' }
-    )
+    const body = await request.json()
+    const { name, display_name, description, permission_ids, organizationId } = body
+
+    // Get organization ID from body, headers, or use session-based validation
+    const headerOrgId = request.headers.get('x-organization-id')
+    const orgId = organizationId || headerOrgId
+    
+    let validation;
+    if (orgId) {
+      // Use header/body-based validation if organization ID is provided
+      validation = await validateOrganizationAccessWithId(
+        orgId,
+        { resource: 'roles', action: 'create' }
+      )
+    } else {
+      // Fallback to session-based validation
+      validation = await validateOrganizationAccess(
+        { resource: 'roles', action: 'create' }
+      )
+    }
 
     if (!validation.success) {
       return NextResponse.json({ 
@@ -97,13 +125,10 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await createClient()
-    const organizationId = validation.context!.organizationId
+    const finalOrganizationId = validation.context!.organizationId
     const userId = validation.context!.userId
 
-    const body = await request.json()
-    const { name, display_name, description, permission_ids } = body
-
-    console.log('Creating role with data:', { name, display_name, description, permission_ids, organizationId })
+    console.log('Creating role with data:', { name, display_name, description, permission_ids, organizationId: finalOrganizationId })
 
     if (!name || !display_name || !permission_ids || !Array.isArray(permission_ids)) {
       return NextResponse.json({ 
@@ -116,7 +141,7 @@ export async function POST(request: NextRequest) {
       .from('roles')
       .select('id')
       .eq('name', name)
-      .eq('organization_id', organizationId)
+      .eq('organization_id', finalOrganizationId)
       .single()
 
     if (checkError && checkError.code !== 'PGRST116') {
@@ -137,7 +162,7 @@ export async function POST(request: NextRequest) {
         name: name,
         display_name: display_name,
         description: description || null,
-        organization_id: organizationId,
+        organization_id: finalOrganizationId,
         is_system_role: false
       })
       .select()

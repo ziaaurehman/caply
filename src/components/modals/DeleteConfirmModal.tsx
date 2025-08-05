@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle, X, Loader2 } from 'lucide-react'
 
 interface DeleteConfirmModalProps {
   isOpen: boolean
@@ -10,6 +10,7 @@ interface DeleteConfirmModalProps {
   message: string
   confirmText?: string
   type?: 'danger' | 'warning'
+  isLoading?: boolean
 }
 
 export default function DeleteConfirmModal({
@@ -20,6 +21,7 @@ export default function DeleteConfirmModal({
   message,
   confirmText = 'Delete',
   type = 'danger',
+  isLoading = false,
 }: DeleteConfirmModalProps) {
   if (!isOpen) return null
 
@@ -39,7 +41,8 @@ export default function DeleteConfirmModal({
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            disabled={isLoading}
+            className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <X className="w-6 h-6" />
           </button>
@@ -54,14 +57,17 @@ export default function DeleteConfirmModal({
         <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            disabled={isLoading}
+            className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            className={`px-4 py-2 text-white rounded-lg transition-colors ${bgColor}`}
+            disabled={isLoading}
+            className={`px-4 py-2 text-white rounded-lg transition-colors ${bgColor} disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
           >
+            {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
             {confirmText}
           </button>
         </div>

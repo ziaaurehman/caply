@@ -19,7 +19,10 @@ export default function Hero() {
       ></div>
 
       {/* Dark Overlay */}
-      <div className="absolute inset-0 bg-black/80"></div>
+      <div className="absolute inset-0 bg-black/10"></div>
+
+      {/* Gradient Overlay */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/60 to-black/80"></div>
 
       {/* Background Pattern */}
       <div className="absolute inset-0 opacity-5">

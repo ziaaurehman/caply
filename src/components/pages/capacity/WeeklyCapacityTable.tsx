@@ -7,6 +7,11 @@ import { CapacityOverview, ResourceAllocation } from '@/utils/api/capacity';
 interface WeeklyCapacityTableProps {
   capacityOverview: CapacityOverview[];
   allocations: ResourceAllocation[];
+  projects?: Array<{
+    id: string;
+    name: string;
+    code?: string;
+  }>;
 }
 
 interface WeekData {
@@ -16,7 +21,7 @@ interface WeekData {
   label: string;
 }
 
-export default function WeeklyCapacityTable({ capacityOverview, allocations }: WeeklyCapacityTableProps) {
+export default function WeeklyCapacityTable({ capacityOverview, allocations, projects = [] }: WeeklyCapacityTableProps) {
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
 
   // Generate weeks data (showing 5 weeks starting from current week)
@@ -218,7 +223,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations }: W
                       <div className="flex items-center">
                         <X className="h-4 w-4 text-red-500 mr-2" />
                         <div className="text-sm text-gray-700">
-                          Project Allocation
+                          {projects.find(p => p.id === allocation.project_id)?.name || 'Project Allocation'}
                         </div>
                       </div>
                     </td>
@@ -237,13 +242,13 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations }: W
                   </tr>
                 ))}
 
-                {/* Add Project Row (when expanded) */}
+                {/* Add Resource Row (when expanded) */}
                 {isExpanded && (
                   <tr className="bg-white">
                     <td className="px-6 py-3 pl-16">
                       <button className="flex items-center text-orange-600 hover:text-orange-700 text-sm">
                         <Plus className="h-4 w-4 mr-1" />
-                        Add Project
+                        Add Resource
                       </button>
                     </td>
                     <td className="px-4 py-3"></td>

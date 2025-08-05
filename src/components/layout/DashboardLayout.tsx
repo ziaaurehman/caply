@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react"
 import Sidebar from "./Sidebar"
 import Header from "./Header"
 import SubscriptionModal from "../modals/SubscriptionModal"
+import InvitationPopup from "../ui/InvitationPopup"
 import { useSubscriptionStore } from "@/lib/stores/subscriptionStore"
 import { useAuthStore } from "@/lib/stores/authStore"
 import { useSubscriptionModal } from "@/lib/hooks/useSubscriptionModal"
@@ -67,9 +68,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         />
         
         {/* Main content with single scroll */}
-        <main className="min-h-[calc(100vh-4rem)] overflow-y-auto focus:outline-none scrollbar-thin">
+        <main className="min-h-[calc(100vh-4rem)] h-full overflow-y-auto focus:outline-none scrollbar-thin">
           <div className="py-6">     {/* sm:px-6 lg:px-8 */}
-            <div className="mx-auto max-w-7xl">   
+            <div className="mx-auto ">   
               {children}
             </div>
           </div>
@@ -91,6 +92,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         isOpen={showSubscriptionModal} 
         onClose={closeSubscriptionModal} 
       />
+      
+      {/* Invitation Popup */}
+      <InvitationPopup />
     </div>
   )
 }

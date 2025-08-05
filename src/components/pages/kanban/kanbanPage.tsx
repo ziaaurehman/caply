@@ -261,14 +261,17 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // Board management
   const updateBoardBackground = async (backgroundType: 'image' | 'color', value: string) => {
-    if (!kanbanState.currentBoard) return;
+    if (!kanbanState.currentBoard || !currentOrganization?.id) return;
 
     try {
       const updateData = backgroundType === 'image' 
         ? { background_image: value, background_color: undefined }
         : { background_color: value, background_image: undefined };
 
-      const updatedBoard = await kanbanAPI.updateBoard(kanbanState.currentBoard.id, updateData);
+      const updatedBoard = await kanbanAPI.updateBoard(kanbanState.currentBoard.id, {
+        ...updateData,
+        organizationId: currentOrganization.id
+      });
       
       setKanbanState(prev => ({
         ...prev,
@@ -416,8 +419,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-full mx-auto">
-        <div className="p-4">
+      <div className="w-full">
+        <div className="px-8 py-4">
           {/* Header */}
           <div className="flex justify-between items-center mb-6">
             <div>
@@ -567,13 +570,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
         {/* Kanban Board */}
         <div
-          className="relative py-12 rounded-lg"
+          className="relative py-12 h-screen rounded-lg w-full"
           style={getBoardStyle()}
         >
           {/* Backdrop overlay */}
           <div className="absolute inset-0 rounded-lg bg-black/10 backdrop-blur-sm"></div>
           
-          <div className="flex overflow-x-auto pb-4 gap-6 px-4 relative z-10 min-h-[500px] items-start">
+          <div className="flex overflow-x-auto pb-4 gap-6 px-8 relative z-10 min-h-[500px] items-start w-full">
             {kanbanState.lists.map((list) => (
               <div key={list.id} data-list-id={list.id} className="flex-shrink-0">
                 <KanbanColumn

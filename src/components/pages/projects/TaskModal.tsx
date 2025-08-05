@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button';
 import { useEmployeeStore } from '@/lib/stores/employeeStore';
 import { taskAPI, type Task, type CreateTaskData, type UpdateTaskData } from '@/utils/api';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -78,6 +79,15 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validate required fields
+    if (!formData.title.trim()) {
+      toast.error('Validation Error', {
+        description: 'Task title is required.',
+        duration: 5000,
+      });
+      return;
+    }
+    
     const taskData = {
       title: formData.title,
       description: formData.description,
@@ -97,12 +107,18 @@ const TaskModal: React.FC<TaskModalProps> = ({
     try {
       if (taskId) {
         await taskAPI.updateTask(taskId, taskData);
+        toast.success('Task updated successfully!');
       } else {
         await taskAPI.createTask(taskData);
+        toast.success('Task created successfully!');
       }
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to save task:', error);
+      toast.error('Failed to save task', {
+        description: error.message || 'An error occurred while saving the task.',
+        duration: 5000,
+      });
     }
   };
   

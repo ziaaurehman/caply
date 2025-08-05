@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Plus, Edit, Trash2, Shield, Users, Settings, Eye } from 'lucide-react'
+import { toast } from 'sonner'
 import { rolesApi, permissionsApi } from '@/utils/api/roles'
 import { Role, Permission } from '@/lib/types'
 import CreateRoleModal from '@/components/modals/CreateRoleModal'
@@ -13,6 +14,7 @@ export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([])
   const [permissions, setPermissions] = useState<Record<string, Permission[]>>({})
   const [loading, setLoading] = useState(true)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Modal states
@@ -89,12 +91,17 @@ export default function RolesPage() {
     if (!roleToDelete || !currentOrganization?.id) return
 
     try {
+      setDeleteLoading(true)
       await rolesApi.delete(roleToDelete.id, currentOrganization.id)
       setDeleteModalOpen(false)
       setRoleToDelete(null)
       await loadData() // Refresh data
-    } catch (err) {
+      toast.success(`Successfully deleted role "${roleToDelete.display_name || roleToDelete.name}"`)
+    } catch (err: any) {
       console.error('Error deleting role:', err)
+      toast.error(err.message || 'Failed to delete role')
+    } finally {
+      setDeleteLoading(false)
     }
   }
 
@@ -150,12 +157,14 @@ export default function RolesPage() {
   const handleCreateSuccess = async () => {
     setCreateModalOpen(false)
     await loadData() // Refresh data
+    toast.success('Role created successfully')
   }
 
   const handleEditSuccess = async () => {
     setEditModalOpen(false)
     setSelectedRole(null)
     await loadData() // Refresh data
+    toast.success('Role updated successfully')
   }
 
   // Check if user has admin access
@@ -385,6 +394,7 @@ export default function RolesPage() {
           message={`Are you sure you want to delete the "${roleToDelete.display_name || roleToDelete.name}" role? This action cannot be undone and will affect all users with this role.`}
           confirmText="Delete Role"
           type="danger"
+          isLoading={deleteLoading}
         />
       )}
     </div>

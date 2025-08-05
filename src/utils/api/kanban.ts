@@ -441,10 +441,13 @@ export const kanbanAPI = {
   },
 
   // Update board
-  updateBoard: async (id: string, data: UpdateBoardData): Promise<BoardResponse> => {
+  updateBoard: async (id: string, data: UpdateBoardData & { organizationId: string }): Promise<BoardResponse> => {
     const response = await fetch(`/api/kanban/boards/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -456,9 +459,12 @@ export const kanbanAPI = {
   },
 
   // Delete board
-  deleteBoard: async (id: string): Promise<void> => {
+  deleteBoard: async (id: string, organizationId: string): Promise<void> => {
     const response = await fetch(`/api/kanban/boards/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'x-organization-id': organizationId,
+      }
     });
     if (!response.ok) {
       const errorData = await response.json();
@@ -513,10 +519,13 @@ export const kanbanAPI = {
   },
 
   // Update list
-  updateList: async (id: string, data: UpdateListData): Promise<ListResponse> => {
+  updateList: async (id: string, data: UpdateListData & { organizationId: string }): Promise<ListResponse> => {
     const response = await fetch(`/api/kanban/lists/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -528,9 +537,12 @@ export const kanbanAPI = {
   },
 
   // Delete list
-  deleteList: async (id: string): Promise<void> => {
+  deleteList: async (id: string, organizationId: string): Promise<void> => {
     const response = await fetch(`/api/kanban/lists/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'x-organization-id': organizationId,
+      }
     });
     if (!response.ok) {
       const errorData = await response.json();
@@ -539,10 +551,13 @@ export const kanbanAPI = {
   },
 
   // Reorder lists
-  reorderLists: async (boardId: string, listPositions: ListPosition[]): Promise<ReorderResponse> => {
+  reorderLists: async (boardId: string, listPositions: ListPosition[], organizationId: string): Promise<ReorderResponse> => {
     const response = await fetch('/api/kanban/lists/reorder', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': organizationId,
+      },
       body: JSON.stringify({ board_id: boardId, list_positions: listPositions })
     });
     if (!response.ok) {
@@ -628,9 +643,12 @@ export const kanbanAPI = {
   },
 
   // Delete card
-  deleteCard: async (id: string): Promise<void> => {
+  deleteCard: async (id: string, organizationId: string): Promise<void> => {
     const response = await fetch(`/api/kanban/cards/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'x-organization-id': organizationId,
+      }
     });
     if (!response.ok) {
       const errorData = await response.json();

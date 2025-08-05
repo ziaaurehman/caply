@@ -184,19 +184,34 @@ export default function ProjectCreationPage() {
 
   const onSubmit = async (data: ProjectFormData) => {
     if (!currentOrganization?.id) {
-      setSubmitError('No organization selected. Please refresh the page and try again.');
+      const errorMessage = 'No organization selected. Please refresh the page and try again.';
+      setSubmitError(errorMessage);
+      toast.error('Organization Error', {
+        description: errorMessage,
+        duration: 5000,
+      });
       return;
     }
 
     // Validate client selection
     if (!data.client_id) {
-      setSubmitError('Please select a client for this project.');
+      const errorMessage = 'Please select a client for this project.';
+      setSubmitError(errorMessage);
+      toast.error('Validation Error', {
+        description: errorMessage,
+        duration: 5000,
+      });
       return;
     }
 
     // Validate team members selection
     if (!data.selected_team_members || data.selected_team_members.length === 0) {
-      setSubmitError('Please select at least one team member for this project.');
+      const errorMessage = 'Please select at least one team member for this project.';
+      setSubmitError(errorMessage);
+      toast.error('Validation Error', {
+        description: errorMessage,
+        duration: 5000,
+      });
       return;
     }
 
@@ -239,7 +254,12 @@ export default function ProjectCreationPage() {
       router.push("/projects")
     } catch (error: any) {
       console.error("Failed to create project:", error)
-      setSubmitError(error.message || 'Failed to create project. Please check all required fields and try again.');
+      const errorMessage = error.message || 'Failed to create project. Please check all required fields and try again.';
+      setSubmitError(errorMessage);
+      toast.error('Failed to create project', {
+        description: errorMessage,
+        duration: 5000,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -277,6 +297,15 @@ export default function ProjectCreationPage() {
                 const isValid = await trigger();
                 if (isValid) {
                   handleSubmit(onSubmit)();
+                } else {
+                  // Show validation errors in toast
+                  const errorMessages = Object.values(errors).map(error => error?.message).filter(Boolean);
+                  if (errorMessages.length > 0) {
+                    toast.error('Please fix the following errors:', {
+                      description: errorMessages.join(', '),
+                      duration: 5000,
+                    });
+                  }
                 }
               }}
               disabled={isSubmitting}

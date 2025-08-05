@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { X, CalendarIcon, ChevronDown } from 'lucide-react';
 import { projectAPI, type Project, type CreateProjectData, type UpdateProjectData } from '@/utils/api';
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
+import { toast } from 'sonner';
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -56,21 +57,33 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   });
   
   const onSubmit = async (data: FormData) => {
-    if (!currentOrganization?.id) return;
+    if (!currentOrganization?.id) {
+      toast.error('Organization Error', {
+        description: 'No organization selected. Please refresh the page and try again.',
+        duration: 5000,
+      });
+      return;
+    }
     
     try {
       if (project) {
         await projectAPI.updateProject(project.id, { ...data, organizationId: currentOrganization.id });
+        toast.success('Project updated successfully!');
       } else {
         await projectAPI.createProject({
           ...data,
           organization_id: currentOrganization.id,
         });
+        toast.success('Project created successfully!');
       }
       onClose();
       reset();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to save project:', error);
+      toast.error('Failed to save project', {
+        description: error.message || 'An error occurred while saving the project.',
+        duration: 5000,
+      });
     }
   };
   
@@ -90,7 +103,16 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
           {project ? 'Edit Project' : 'Add Project'}
         </h2>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit, (errors) => {
+          // Show validation errors in toast
+          const errorMessages = Object.values(errors).map(error => error?.message).filter(Boolean);
+          if (errorMessages.length > 0) {
+            toast.error('Please fix the following errors:', {
+              description: errorMessages.join(', '),
+              duration: 5000,
+            });
+          }
+        })} className="space-y-4">
           <div>
             <label htmlFor="projectName" className="block text-sm font-medium text-gray-700 mb-1">
               Project Name

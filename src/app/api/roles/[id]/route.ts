@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
-import { validateOrganizationAccess } from '@/utils/organizationUtils'
+import { validateOrganizationAccess, validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 
 interface Params {
   id: string
@@ -14,10 +14,22 @@ export async function GET(
   { params }: { params: Params }
 ) {
   try {
-    // Validate organization access with roles read permission
-    const validation = await validateOrganizationAccess(
-      { resource: 'roles', action: 'read' }
-    )
+    // Get organization ID from headers or use session-based validation
+    const headerOrgId = request.headers.get('x-organization-id')
+    
+    let validation;
+    if (headerOrgId) {
+      // Use header-based validation if organization ID is provided
+      validation = await validateOrganizationAccessWithId(
+        headerOrgId,
+        { resource: 'roles', action: 'read' }
+      )
+    } else {
+      // Fallback to session-based validation
+      validation = await validateOrganizationAccess(
+        { resource: 'roles', action: 'read' }
+      )
+    }
 
     if (!validation.success) {
       return NextResponse.json({ 
@@ -83,10 +95,22 @@ export async function PUT(
   { params }: { params: Params }
 ) {
   try {
-    // Validate organization access with roles update permission
-    const validation = await validateOrganizationAccess(
-      { resource: 'roles', action: 'update' }
-    )
+    // Get organization ID from headers or use session-based validation
+    const headerOrgId = request.headers.get('x-organization-id')
+    
+    let validation;
+    if (headerOrgId) {
+      // Use header-based validation if organization ID is provided
+      validation = await validateOrganizationAccessWithId(
+        headerOrgId,
+        { resource: 'roles', action: 'update' }
+      )
+    } else {
+      // Fallback to session-based validation
+      validation = await validateOrganizationAccess(
+        { resource: 'roles', action: 'update' }
+      )
+    }
 
     if (!validation.success) {
       return NextResponse.json({ 
@@ -155,10 +179,22 @@ export async function DELETE(
   { params }: { params: Params }
 ) {
   try {
-    // Validate organization access with roles delete permission
-    const validation = await validateOrganizationAccess(
-      { resource: 'roles', action: 'delete' }
-    )
+    // Get organization ID from headers or use session-based validation
+    const headerOrgId = request.headers.get('x-organization-id')
+    
+    let validation;
+    if (headerOrgId) {
+      // Use header-based validation if organization ID is provided
+      validation = await validateOrganizationAccessWithId(
+        headerOrgId,
+        { resource: 'roles', action: 'delete' }
+      )
+    } else {
+      // Fallback to session-based validation
+      validation = await validateOrganizationAccess(
+        { resource: 'roles', action: 'delete' }
+      )
+    }
 
     if (!validation.success) {
       return NextResponse.json({ 

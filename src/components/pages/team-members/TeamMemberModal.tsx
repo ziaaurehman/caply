@@ -33,7 +33,8 @@ const DEPARTMENTS = [
   'Finance',
   'HR',
   'Customer Success',
-  'Quality Assurance'
+  'Quality Assurance',
+  'IT'
 ];
 
 const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
@@ -47,6 +48,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [loadingRoles, setLoadingRoles] = useState(false);
   const [emailProvider, setEmailProvider] = useState<string | null>(null);
+  const [showAllPermissions, setShowAllPermissions] = useState(false);
   
   const { currentOrganization } = useOrganizationStore();
 
@@ -68,6 +70,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
     if (isOpen && currentOrganization?.id) {
       fetchRoles();
       checkEmailProvider();
+      setShowAllPermissions(false);
     }
   }, [isOpen, currentOrganization?.id]);
 
@@ -88,6 +91,8 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   useEffect(() => {
     const role = roles.find(r => r.id === watchedRoleId);
     setSelectedRole(role || null);
+    // Reset permissions view when role changes
+    setShowAllPermissions(false);
   }, [watchedRoleId, roles]);
 
   const checkEmailProvider = async () => {
@@ -239,16 +244,27 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
                   <div>
                     <p className="text-xs font-medium text-orange-800 mb-2">Permissions included:</p>
                     <div className="grid grid-cols-2 gap-2">
-                      {selectedRole.permissions.slice(0, 6).map((permission) => (
+                      {(showAllPermissions ? selectedRole.permissions : selectedRole.permissions.slice(0, 6)).map((permission) => (
                         <div key={permission.id} className="flex items-center space-x-1">
                           <div className="w-1.5 h-1.5 bg-orange-400 rounded-full"></div>
                           <span className="text-xs text-orange-700">{permission.display_name}</span>
                         </div>
                       ))}
-                      {selectedRole.permissions.length > 6 && (
-                        <div className="text-xs text-orange-600 col-span-2">
+                      {selectedRole.permissions.length > 6 && !showAllPermissions && (
+                        <button
+                          onClick={() => setShowAllPermissions(true)}
+                          className="text-xs text-orange-600 hover:text-orange-800 hover:underline cursor-pointer text-left w-full"
+                        >
                           +{selectedRole.permissions.length - 6} more permissions
-                        </div>
+                        </button>
+                      )}
+                      {showAllPermissions && selectedRole.permissions.length > 6 && (
+                        <button
+                          onClick={() => setShowAllPermissions(false)}
+                          className="text-xs text-orange-600 hover:text-orange-800 hover:underline cursor-pointer text-left  w-full"
+                        >
+                          Show less
+                        </button>
                       )}
                     </div>
                   </div>
