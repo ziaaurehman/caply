@@ -68,12 +68,22 @@ export async function GET(req: NextRequest) {
           cover_color,
           cover_image,
           card_members (
-            user_id,
-            users (
+            project_member_id,
+            project_members!inner (
               id,
-              full_name,
-              email,
-              avatar_url
+              organization_member_id,
+              role,
+              joined_at,
+              organization_members!inner (
+                id,
+                user_id,
+                users!organization_members_user_id_fkey!inner (
+                  id,
+                  full_name,
+                  email,
+                  avatar_url
+                )
+              )
             )
           ),
           card_labels (

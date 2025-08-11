@@ -37,26 +37,50 @@ interface Card {
   is_archived: boolean;
   cover_color?: string;
   cover_image?: string;
+  cover?: {
+    color?: string;
+    image?: string;
+    size?: 'small' | 'large';
+  };
   created_by: string;
   created_at: string;
   updated_at: string;
   card_members?: CardMember[];
   card_labels?: CardLabel[];
+  labels?: Label[];
   checklists?: Checklist[];
   comments?: Comment[];
   attachments?: Attachment[];
+  lists?: {
+    name: string;
+    boards: {
+      id: string;
+      name: string;
+      project_id: string;
+    };
+  };
 }
 
 interface CardMember {
   id: string;
   card_id: string;
-  user_id: string;
+  project_member_id: string;
   assigned_at: string;
-  users: {
+  project_members: {
     id: string;
-    full_name: string;
-    email: string;
-    avatar_url?: string;
+    organization_member_id: string;
+    role?: string;
+    joined_at: string;
+    organization_members: {
+      id: string;
+      user_id: string;
+      users: {
+        id: string;
+        full_name: string;
+        email: string;
+        avatar_url?: string;
+      };
+    };
   };
 }
 
@@ -91,14 +115,24 @@ interface ChecklistItem {
   is_completed: boolean;
   position: number;
   due_date?: string;
-  assigned_to?: string;
+  assigned_to_project_member_id?: string;
   created_at: string;
   updated_at: string;
-  users?: {
+  project_members?: {
     id: string;
-    full_name: string;
-    email: string;
-    avatar_url?: string;
+    organization_member_id: string;
+    role?: string;
+    joined_at: string;
+    organization_members: {
+      id: string;
+      user_id: string;
+      users: {
+        id: string;
+        full_name: string;
+        email: string;
+        avatar_url?: string;
+      };
+    };
   };
 }
 
@@ -232,6 +266,7 @@ interface UpdateLabelData {
 interface CreateChecklistData {
   card_id: string;
   name: string;
+  organizationId: string;
 }
 
 interface UpdateChecklistData {
@@ -243,7 +278,8 @@ interface CreateChecklistItemData {
   checklist_id: string;
   content: string;
   due_date?: string;
-  assigned_to?: string;
+  assigned_to_project_member_id?: string;
+  organizationId: string;
 }
 
 interface UpdateChecklistItemData {
@@ -251,16 +287,25 @@ interface UpdateChecklistItemData {
   is_completed?: boolean;
   position?: number;
   due_date?: string;
-  assigned_to?: string;
+  assigned_to_project_member_id?: string;
+  organizationId?: string;
 }
 
 interface CreateCommentData {
   card_id: string;
   content: string;
+  organizationId: string;
+}
+
+interface CreateAttachmentData {
+  card_id: string;
+  file: File;
+  organizationId: string;
 }
 
 interface UpdateCommentData {
   content: string;
+  organizationId?: string;
 }
 
 interface BulkCardOperation {
@@ -340,6 +385,19 @@ interface CommentsResponse {
 
 interface CommentResponse {
   comment: Comment;
+}
+
+interface AttachmentsResponse {
+  attachments: Attachment[];
+}
+
+interface AttachmentResponse {
+  attachment: Attachment;
+}
+
+interface AttachmentDownloadResponse {
+  attachment: Attachment;
+  download_url: string;
 }
 
 interface ActivitiesResponse {
@@ -686,15 +744,15 @@ export const kanbanAPI = {
 
   // ===== CARD MEMBERS =====
 
-  // Assign user to card
-  assignCardMember: async (cardId: string, userId: string, organizationId: string): Promise<{ card_member: CardMember }> => {
+  // Assign project member to card
+  assignCardMember: async (cardId: string, projectMemberId: string, organizationId: string): Promise<{ card_member: CardMember }> => {
     const response = await fetch('/api/kanban/card-members', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         'x-organization-id': organizationId,
       },
-      body: JSON.stringify({ card_id: cardId, user_id: userId, organizationId })
+      body: JSON.stringify({ card_id: cardId, project_member_id: projectMemberId, organizationId })
     });
     if (!response.ok) {
       const errorData = await response.json();
@@ -703,9 +761,9 @@ export const kanbanAPI = {
     return await response.json();
   },
 
-  // Remove user from card
-  removeCardMember: async (cardId: string, userId: string, organizationId: string): Promise<void> => {
-    const response = await fetch(`/api/kanban/card-members?card_id=${cardId}&user_id=${userId}&organizationId=${organizationId}`, {
+  // Remove project member from card
+  removeCardMember: async (cardId: string, projectMemberId: string, organizationId: string): Promise<void> => {
+    const response = await fetch(`/api/kanban/card-members?card_id=${cardId}&project_member_id=${projectMemberId}&organizationId=${organizationId}`, {
       method: 'DELETE',
       headers: {
         'x-organization-id': organizationId,
@@ -781,11 +839,14 @@ export const kanbanAPI = {
   // ===== CARD LABELS =====
 
   // Assign label to card
-  assignCardLabel: async (cardId: string, labelId: string): Promise<{ card_label: CardLabel }> => {
+  assignCardLabel: async (cardId: string, labelId: string, organizationId: string): Promise<{ card_label: CardLabel }> => {
     const response = await fetch('/api/kanban/card-labels', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ card_id: cardId, label_id: labelId })
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': organizationId,
+      },
+      body: JSON.stringify({ card_id: cardId, label_id: labelId, organizationId })
     });
     if (!response.ok) {
       const errorData = await response.json();
@@ -795,9 +856,12 @@ export const kanbanAPI = {
   },
 
   // Remove label from card
-  removeCardLabel: async (cardId: string, labelId: string): Promise<void> => {
-    const response = await fetch(`/api/kanban/card-labels?card_id=${cardId}&label_id=${labelId}`, {
-      method: 'DELETE'
+  removeCardLabel: async (cardId: string, labelId: string, organizationId: string): Promise<void> => {
+    const response = await fetch(`/api/kanban/card-labels?card_id=${cardId}&label_id=${labelId}&organizationId=${organizationId}`, {
+      method: 'DELETE',
+      headers: {
+        'x-organization-id': organizationId,
+      },
     });
     if (!response.ok) {
       const errorData = await response.json();
@@ -826,7 +890,10 @@ export const kanbanAPI = {
   createChecklist: async (data: CreateChecklistData): Promise<ChecklistResponse> => {
     const response = await fetch('/api/kanban/checklists', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -869,7 +936,10 @@ export const kanbanAPI = {
   createChecklistItem: async (data: CreateChecklistItemData): Promise<ChecklistItemResponse> => {
     const response = await fetch('/api/kanban/checklist-items', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -882,9 +952,14 @@ export const kanbanAPI = {
 
   // Update checklist item
   updateChecklistItem: async (id: string, data: UpdateChecklistItemData): Promise<ChecklistItemResponse> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (data.organizationId) {
+      headers['x-organization-id'] = data.organizationId;
+    }
+    
     const response = await fetch(`/api/kanban/checklist-items/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -927,7 +1002,10 @@ export const kanbanAPI = {
   createComment: async (data: CreateCommentData): Promise<CommentResponse> => {
     const response = await fetch('/api/kanban/comments', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-organization-id': data.organizationId,
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -940,9 +1018,14 @@ export const kanbanAPI = {
 
   // Update comment
   updateComment: async (id: string, data: UpdateCommentData): Promise<CommentResponse> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (data.organizationId) {
+      headers['x-organization-id'] = data.organizationId;
+    }
+    
     const response = await fetch(`/api/kanban/comments/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -961,6 +1044,68 @@ export const kanbanAPI = {
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to delete comment');
+    }
+  },
+
+  // ===== ATTACHMENTS =====
+
+  // Get attachments by card
+  getAttachments: async (cardId: string, organizationId: string): Promise<AttachmentsResponse> => {
+    const response = await fetch(`/api/kanban/attachments?card_id=${cardId}&organizationId=${organizationId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch attachments');
+    }
+    const data = await response.json();
+    return { attachments: data.attachments || [] };
+  },
+
+  // Create attachment (upload file)
+  createAttachment: async (data: CreateAttachmentData): Promise<AttachmentResponse> => {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('card_id', data.card_id);
+    formData.append('organizationId', data.organizationId);
+
+    const response = await fetch('/api/kanban/attachments', {
+      method: 'POST',
+      headers: {
+        'x-organization-id': data.organizationId,
+      },
+      body: formData
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to upload attachment');
+    }
+    const result = await response.json();
+    return { attachment: result.attachment };
+  },
+
+  // Get attachment download URL
+  getAttachmentDownload: async (id: string): Promise<AttachmentDownloadResponse> => {
+    const response = await fetch(`/api/kanban/attachments/${id}`, {
+      method: 'GET'
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to get attachment');
+    }
+    return await response.json();
+  },
+
+  // Delete attachment
+  deleteAttachment: async (id: string): Promise<void> => {
+    const response = await fetch(`/api/kanban/attachments/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to delete attachment');
     }
   },
 
@@ -1049,6 +1194,7 @@ export type {
   UpdateChecklistItemData,
   CreateCommentData,
   UpdateCommentData,
+  CreateAttachmentData,
   BulkCardOperation,
   CardPosition,
   ListPosition,
@@ -1066,6 +1212,9 @@ export type {
   ChecklistItemResponse,
   CommentsResponse,
   CommentResponse,
+  AttachmentsResponse,
+  AttachmentResponse,
+  AttachmentDownloadResponse,
   ActivitiesResponse,
   NotificationsResponse,
   BulkOperationResponse,

@@ -60,9 +60,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Card not found' }, { status: 404 });
     }
 
-    // Get comments for the card
-    const { data: comments, error } = await supabase
-      .from('comments')
+    // Get attachments for the card
+    const { data: attachments, error } = await supabase
+      .from('attachments')
       .select(`
         *,
         users (
@@ -73,54 +73,52 @@ export async function GET(req: NextRequest) {
         )
       `)
       .eq('card_id', cardId)
-      .order('created_at', { ascending: true });
+      .order('uploaded_at', { ascending: false });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ comments: comments || [] });
+    return NextResponse.json({ attachments: attachments || [] });
   } catch (error) {
-    console.error('Error fetching comments:', error);
-    return NextResponse.json({ error: 'Failed to fetch comments' }, { status: 500 });
+    console.error('Error fetching attachments:', error);
+    return NextResponse.json({ error: 'Failed to fetch attachments' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // Get session first (like other APIs)
     const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const supabase = await createClient();
-    const body = await req.json();
-    const { card_id, content, organizationId } = body;
-    const orgId = organizationId || req.headers.get('x-organization-id');
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
+    const cardId = formData.get('card_id') as string;
+    const organizationId = formData.get('organizationId') as string || req.headers.get('x-organization-id');
 
-    if (!card_id || !content) {
-      return NextResponse.json({ error: 'Card ID and content are required' }, { status: 400 });
+    if (!file || !cardId) {
+      return NextResponse.json({ error: 'File and card ID are required' }, { status: 400 });
     }
 
-    if (!orgId) {
+    if (!organizationId) {
       return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
     }
 
     // Validate organization access and permissions
-    console.log('Validating organization access for:', orgId);
     const validation = await validateOrganizationAccessWithId(
-      orgId,
+      organizationId,
       { resource: 'projects', action: 'update' }
     );
-
-    console.log('Validation result:', validation);
 
     if (!validation.success) {
       return NextResponse.json({ 
         error: validation.error 
       }, { status: validation.status });
     }
+
+    const supabase = await createClient();
 
     // Verify card exists and user has access through project organization
     const { data: card, error: cardError } = await supabase
@@ -142,25 +140,42 @@ export async function POST(req: NextRequest) {
           )
         )
       `)
-      .eq('id', card_id)
-      .eq('lists.boards.projects.organization_id', orgId)
+      .eq('id', cardId)
+      .eq('lists.boards.projects.organization_id', organizationId)
       .single();
 
     if (cardError || !card) {
-      console.log('Card error:', cardError);
       return NextResponse.json({ error: 'Card not found' }, { status: 404 });
     }
 
-    console.log('Card found:', card);
+    // Upload file to Supabase storage
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `card-attachments/${cardId}/${fileName}`;
 
-    // Create comment
-    console.log('Creating comment with user ID:', session.user.id);
-    const { data: comment, error } = await supabase
-      .from('comments')
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('caply')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
+    }
+
+    // Create attachment record
+    const { data: attachment, error: attachmentError } = await supabase
+      .from('attachments')
       .insert([{
-        card_id,
-        user_id: session.user.id,
-        content
+        card_id: cardId,
+        filename: fileName,
+        original_filename: file.name,
+        file_path: uploadData.path,
+        file_size: file.size,
+        mime_type: file.type,
+        uploaded_by: session.user.id
       }])
       .select(`
         *,
@@ -173,12 +188,11 @@ export async function POST(req: NextRequest) {
       `)
       .single();
 
-    if (error) {
-      console.log('Comment creation error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (attachmentError) {
+      // Clean up uploaded file if database insert fails
+      await supabase.storage.from('caply').remove([filePath]);
+      return NextResponse.json({ error: attachmentError.message }, { status: 500 });
     }
-
-    console.log('Comment created:', comment);
 
     // Create activity log
     await supabase
@@ -186,19 +200,20 @@ export async function POST(req: NextRequest) {
       .insert([{
         user_id: session.user.id,
         board_id: (card.lists as any).board_id,
-        card_id: card_id,
+        card_id: cardId,
         action_type: 'create',
-        entity_type: 'comment',
-        entity_id: comment.id,
+        entity_type: 'attachment',
+        entity_id: attachment.id,
         details: { 
-          comment_content: content,
-          card_title: card.title
+          filename: file.name,
+          file_size: file.size,
+          card_title: card.title 
         }
       }]);
 
-    return NextResponse.json({ comment });
+    return NextResponse.json({ attachment });
   } catch (error) {
-    console.error('Error creating comment:', error);
-    return NextResponse.json({ error: 'Failed to create comment' }, { status: 500 });
+    console.error('Error creating attachment:', error);
+    return NextResponse.json({ error: 'Failed to create attachment' }, { status: 500 });
   }
 }

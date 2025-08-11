@@ -1,6 +1,6 @@
 "use client"
 
-import { Calendar, MessageCircle, Paperclip, CheckSquare, User } from "lucide-react"
+import { Calendar, MessageCircle, Paperclip, CheckSquare, User, Tag, Clock, FileText } from "lucide-react"
 import { Card, ProjectMember } from "./types"
 
 interface KanbanCardProps {
@@ -13,86 +13,144 @@ interface KanbanCardProps {
 export default function KanbanCard({ card, projectMembers, onDragStart, onClick }: KanbanCardProps) {
   // Get assigned members
   const assignedMembers = card.card_members?.map(cm => 
-    projectMembers.find(pm => pm.user_id === cm.user_id)
+    projectMembers.find(pm => pm.id === cm.project_member_id)
   ).filter(Boolean) || []
 
-  // Count indicators for badges
+  // Check for content indicators
   const hasComments = card.comments && card.comments.length > 0
   const hasAttachments = card.attachments && card.attachments.length > 0
   const hasChecklists = card.checklists && card.checklists.length > 0
+  const hasDescription = card.description && card.description.trim().length > 0
+  const hasDueDate = card.due_date
+
+  // Calculate checklist progress
+  const totalChecklistItems = card.checklists?.reduce((total, checklist) => 
+    total + (checklist.checklist_items?.length || 0), 0) || 0
+  const completedChecklistItems = card.checklists?.reduce((total, checklist) => 
+    total + (checklist.checklist_items?.filter(item => item.is_completed).length || 0), 0) || 0
+
+  // Format due date in Trello style
+  const formatDueDate = (dueDate: string) => {
+    const date = new Date(dueDate)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    
+    const isOverdue = date < today
+    const isDueToday = date.toDateString() === today.toDateString()
+    const isDueTomorrow = date.toDateString() === tomorrow.toDateString()
+    
+    if (isOverdue) return { text: 'Overdue', color: 'bg-red-100 text-red-700', textColor: 'text-red-700' }
+    if (isDueToday) return { text: 'Due today', color: 'bg-red-100 text-red-700', textColor: 'text-red-700' }
+    if (isDueTomorrow) return { text: 'Due tomorrow', color: 'bg-yellow-100 text-yellow-700', textColor: 'text-yellow-700' }
+    
+    return { 
+      text: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      color: 'bg-gray-100 text-gray-700',
+      textColor: 'text-gray-700'
+    }
+  }
 
   return (
     <div
-      className="bg-white rounded-2xl shadow-sm p-4 cursor-pointer hover:shadow-lg transition-all duration-200 border border-gray-200 hover:border-orange-300 hover:shadow-orange-100/50 group"
+      className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 cursor-pointer group mb-3"
       draggable
       onDragStart={(e) => onDragStart(e, card)}
       onClick={() => onClick(card)}
     >
-      {/* Cover color */}
-      {card.cover_color && (
+      {/* Card Cover */}
+      {card.cover?.color && (
         <div 
-          className="h-2 rounded-t-2xl -mx-4 -mt-4 mb-3"
-          style={{ backgroundColor: card.cover_color }}
+          className={`w-full rounded-t-xl ${card.cover.size === 'large' ? 'h-16' : 'h-2'}`}
+          style={{ backgroundColor: card.cover.color }}
         />
       )}
 
-      {/* Card labels */}
-      {card.card_labels && card.card_labels.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-3">
-          {card.card_labels.map((cardLabel) => (
-            <div
-              key={cardLabel.label_id}
-              className="h-2 w-10 rounded-full shadow-sm"
-              style={{ backgroundColor: cardLabel.labels.color }}
-              title={cardLabel.labels.name}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Title - only content shown prominently */}
-      <h3 className="font-semibold text-gray-800 mb-3 text-sm leading-tight">
-        {card.title}
-      </h3>
-
-      {/* Bottom row with minimal indicators and members */}
-      <div className="flex items-center justify-between">
-        {/* Small indicator badges */}
-        <div className="flex items-center space-x-2">
-          {hasComments && (
-            <div className="flex items-center text-xs text-orange-500 bg-orange-50 rounded-full px-2 py-1">
-              <MessageCircle className="h-3 w-3" />
-            </div>
-          )}
-          
-          {hasAttachments && (
-            <div className="flex items-center text-xs text-blue-500 bg-blue-50 rounded-full px-2 py-1">
-              <Paperclip className="h-3 w-3" />
-            </div>
-          )}
-          
-          {hasChecklists && (
-            <div className="flex items-center text-xs text-green-500 bg-green-50 rounded-full px-2 py-1">
-              <CheckSquare className="h-3 w-3" />
-            </div>
-          )}
-        </div>
-
-        {/* Assigned members */}
-        {assignedMembers.length > 0 && (
-          <div className="flex -space-x-1">
-            {assignedMembers.slice(0, 3).map((member, index) => (
-              <div
-                key={member?.user_id || index}
-                className="h-7 w-7 rounded-full bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center text-xs font-bold text-white border-2 border-white shadow-md"
-                title={member?.users.full_name || 'Unknown User'}
+      <div className="p-2">
+        {/* Labels - Small text badges at top */}
+        {card.labels && card.labels.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-2">
+            {card.labels.map((label, index) => (
+              <span
+                key={label.id || `label-${index}`}
+                className="px-2 py-0.5 text-xs font-medium rounded-full text-white"
+                style={{ backgroundColor: label.color }}
               >
-                {member?.users.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '??'}
-              </div>
+                {label.name}
+              </span>
             ))}
-            {assignedMembers.length > 3 && (
-              <div className="h-7 w-7 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center text-xs font-bold text-white border-2 border-white shadow-md">
-                +{assignedMembers.length - 3}
+          </div>
+        )}
+
+        {/* Title */}
+        <h3 className="text-sm font-normal text-gray-900 line-clamp-3 leading-tight mb-2">
+          {card.title}
+        </h3>
+
+        {/* Bottom Row - Horizontal layout with icons and members */}
+        {(hasDescription || hasComments || hasAttachments || hasChecklists || hasDueDate || assignedMembers.length > 0) && (
+          <div className="flex items-center justify-between">
+            {/* Left side - Icons */}
+            <div className="flex items-center gap-1">
+              {/* Due Date */}
+              {hasDueDate && card.due_date && (
+                <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${formatDueDate(card.due_date).color}`}>
+                  <Clock className="h-3 w-3" />
+                  <span>{formatDueDate(card.due_date).text}</span>
+                </div>
+              )}
+              
+              {/* Description Icon */}
+              {hasDescription && (
+                <div className="text-gray-400 hover:text-gray-600">
+                  <FileText className="h-3 w-3" />
+                </div>
+              )}
+
+              {/* Comments */}
+              {hasComments && (
+                <div className="flex items-center gap-1 text-gray-400 hover:text-gray-600">
+                  <MessageCircle className="h-3 w-3" />
+                  <span className="text-xs">{card.comments?.length}</span>
+                </div>
+              )}
+
+              {/* Attachments */}
+              {hasAttachments && (
+                <div className="flex items-center gap-1 text-gray-400 hover:text-gray-600">
+                  <Paperclip className="h-3 w-3" />
+                  <span className="text-xs">{card.attachments?.length}</span>
+                </div>
+              )}
+
+              {/* Checklists */}
+              {hasChecklists && (
+                <div className={`flex items-center gap-1 text-xs ${
+                  completedChecklistItems === totalChecklistItems ? 'text-green-600' : 'text-gray-400'
+                }`}>
+                  <CheckSquare className="h-3 w-3" />
+                  <span>{completedChecklistItems}/{totalChecklistItems}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Right side - Members */}
+            {assignedMembers.length > 0 && (
+              <div className="flex -space-x-1">
+                {assignedMembers.slice(0, 3).map((member, index) => (
+                  <div
+                    key={member?.id || index}
+                    className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-medium border-2 border-white"
+                    title={member?.organization_members.users.full_name}
+                  >
+                    {member?.organization_members.users.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || '??'}
+                  </div>
+                ))}
+                {assignedMembers.length > 3 && (
+                  <div className="w-6 h-6 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs font-medium border-2 border-white">
+                    +{assignedMembers.length - 3}
+                  </div>
+                )}
               </div>
             )}
           </div>

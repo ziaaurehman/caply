@@ -2,48 +2,46 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: allocationId } = await params;
+  const organizationId = req.headers.get('x-organization-id');
+
+  // Prefer header-based org validation for consistency
+  if (!organizationId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
+
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'capacity', action: 'read' }
+  );
+  if (!validation.success) {
+    return NextResponse.json({ error: validation.error }, { status: validation.status });
   }
 
   const supabase = await createClient();
-  const allocationId = params.id;
-
-  // Get user's organization membership
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
-
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-  }
 
   try {
     const { data: allocation, error } = await supabase
-      .from('resource_allocations')
+      .from('project_assignments')
       .select(`
         *,
         projects (
           id,
           name,
           code,
-          status,
-          capacity_planning_enabled
+          status
         ),
-        project_members (
+        resource_allocations (
           id,
+          organization_id,
           organization_member_id,
-          role,
-          organization_members (
+          organization_members:organization_member_id (
             id,
-            role_id,
-            users!organization_members_user_id_fkey (
+            user_id,
+            users!user_id (
               id,
               full_name,
               email,
@@ -53,7 +51,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         )
       `)
       .eq('id', allocationId)
-      .eq('organization_id', userOrg.organization_id)
+      .eq('resource_allocations.organization_id', organizationId)
       .single();
 
     if (error || !allocation) {
@@ -67,66 +65,41 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: allocationId } = await params;
+  const organizationId = req.headers.get('x-organization-id');
+  if (!organizationId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
   }
 
   const supabase = await createClient();
-  const allocationId = params.id;
 
   try {
     const body = await req.json();
-    const {
-      allocated_hours_per_week,
-      start_date,
-      end_date,
-      role,
-      notes,
-      is_active
-    } = body;
+    const { hours_per_week, start_date, end_date, notes, is_active } = body;
 
-    // Get user's organization membership
-    const { data: userOrg, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single();
-
-    if (orgError || !userOrg) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
-
-    // Get current allocation to track changes
+    // Verify assignment belongs to same organization via join
     const { data: currentAllocation, error: currentError } = await supabase
-      .from('resource_allocations')
-      .select('*')
+      .from('project_assignments')
+      .select(`id, hours_per_week, resource_allocations ( organization_id )`)
       .eq('id', allocationId)
-      .eq('organization_id', userOrg.organization_id)
       .single();
 
     if (currentError || !currentAllocation) {
       return NextResponse.json({ error: 'Resource allocation not found' }, { status: 404 });
     }
+    if ((currentAllocation as any)?.resource_allocations?.organization_id !== organizationId) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    }
 
     // Prepare update data
-    const updateData: any = {
-      updated_at: new Date().toISOString()
-    };
-
-    if (allocated_hours_per_week !== undefined) {
-      updateData.allocated_hours_per_week = Number(allocated_hours_per_week);
-    }
+    const updateData: any = { updated_at: new Date().toISOString() };
+    if (hours_per_week !== undefined) updateData.hours_per_week = Number(hours_per_week);
     if (start_date !== undefined) {
       updateData.start_date = start_date;
     }
     if (end_date !== undefined) {
       updateData.end_date = end_date;
-    }
-    if (role !== undefined) {
-      updateData.role = role;
     }
     if (notes !== undefined) {
       updateData.notes = notes;
@@ -135,33 +108,20 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       updateData.is_active = is_active;
     }
 
-    // Update the allocation
+    // Update the assignment
     const { data: allocation, error } = await supabase
-      .from('resource_allocations')
+      .from('project_assignments')
       .update(updateData)
       .eq('id', allocationId)
-      .eq('organization_id', userOrg.organization_id)
       .select(`
         *,
-        projects (
-          id,
-          name,
-          code,
-          status
-        ),
-        project_members (
+        projects ( id, name, code, status ),
+        resource_allocations (
           id,
           organization_member_id,
-          role,
-          organization_members (
+          organization_members:organization_member_id (
             id,
-            role,
-            users (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
+            users!user_id ( id, full_name, email, avatar_url )
           )
         )
       `)
@@ -171,19 +131,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Track history if hours changed
-    if (allocated_hours_per_week !== undefined && allocated_hours_per_week !== currentAllocation.allocated_hours_per_week) {
-      await supabase
-        .from('capacity_history')
-        .insert({
-          resource_allocation_id: allocationId,
-          organization_id: userOrg.organization_id,
-          previous_hours: currentAllocation.allocated_hours_per_week,
-          new_hours: Number(allocated_hours_per_week),
-          change_reason: 'Manual update',
-          changed_by: session.user.id
-        });
-    }
+    // No history table in rework
 
     return NextResponse.json({ allocation });
   } catch (error) {
@@ -192,65 +140,41 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: allocationId } = await params;
+  const organizationId = req.headers.get('x-organization-id');
+  if (!organizationId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
   }
 
   const supabase = await createClient();
-  const allocationId = params.id;
 
   try {
-    // Get user's organization membership
-    const { data: userOrg, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
-      .single();
-
-    if (orgError || !userOrg) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-    }
-
-    // Verify allocation exists and belongs to user's organization
+    // Verify assignment exists and belongs to user's organization
     const { data: allocation, error: verifyError } = await supabase
-      .from('resource_allocations')
-      .select('id, allocated_hours_per_week')
+      .from('project_assignments')
+      .select('id, hours_per_week, resource_allocations ( organization_id )')
       .eq('id', allocationId)
-      .eq('organization_id', userOrg.organization_id)
       .single();
 
     if (verifyError || !allocation) {
-      return NextResponse.json({ error: 'Resource allocation not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Project assignment not found' }, { status: 404 });
+    }
+    if ((allocation as any)?.resource_allocations?.organization_id !== organizationId) {
+      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
-    // Soft delete by setting is_active to false
+    // Soft delete by setting is_active to false on project_assignments
     const { error } = await supabase
-      .from('resource_allocations')
-      .update({ 
-        is_active: false,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', allocationId)
-      .eq('organization_id', userOrg.organization_id);
+      .from('project_assignments')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', allocationId);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Track deletion in history
-    await supabase
-      .from('capacity_history')
-      .insert({
-        resource_allocation_id: allocationId,
-        organization_id: userOrg.organization_id,
-        previous_hours: allocation.allocated_hours_per_week,
-        new_hours: 0,
-        change_reason: 'Allocation deleted',
-        changed_by: session.user.id
-      });
+    // No history table
 
     return NextResponse.json({ message: 'Resource allocation deleted successfully' });
   } catch (error) {

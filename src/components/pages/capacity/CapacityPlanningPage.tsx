@@ -1,7 +1,8 @@
 "use client"
 
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, Settings, Users, Plus, Filter, Download, Calendar, Clock, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Settings, Users, Plus, Download, AlertTriangle } from 'lucide-react';
+import Button from '@/components/ui/Button';
 import { projectAPI } from "@/utils/api/project"
 import { capacityAPI, CapacityOverview, ResourceAllocation } from '@/utils/api/capacity';
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
@@ -64,6 +65,10 @@ export default function CapacityPlanningPage() {
     endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // 30 days from now
   });
   const [viewMode, setViewMode] = useState<'overview' | 'weekly' | 'monthly'>('overview');
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [filters, setFilters] = useState<{ userIds: string[]; projectIds: string[]; onlyOverallocated: boolean; onlyActive: boolean }>({ userIds: [], projectIds: [], onlyOverallocated: false, onlyActive: true });
+  const [showWeekModal, setShowWeekModal] = useState<null | { userId: string; week: any; member: any }>(null);
 
   // Initialize organization store if needed
   useEffect(() => {
@@ -102,7 +107,7 @@ export default function CapacityPlanningPage() {
     if (selectedProject) {
       fetchCapacityData();
     }
-  }, [selectedProject, selectedDateRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedProject, selectedDateRange, filters, selectedMonth, selectedYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchCapacityData = async () => {
     setLoading(true);
@@ -120,6 +125,11 @@ export default function CapacityPlanningPage() {
         overviewParams.project_id = selectedProject;
       }
 
+      if (filters.projectIds.length > 0) overviewParams.filter_project_ids = filters.projectIds;
+      if (filters.userIds.length > 0) overviewParams.filter_user_ids = filters.userIds;
+      overviewParams.only_overallocated = filters.onlyOverallocated;
+      overviewParams.only_active = filters.onlyActive;
+
       const overviewResponse = await capacityAPI.getOverview(currentOrganization!.id, overviewParams);
 
       setCapacityOverview(overviewResponse.capacityOverview);
@@ -135,6 +145,7 @@ export default function CapacityPlanningPage() {
         allocationsParams.project_id = selectedProject;
       }
 
+      if (filters.projectIds.length > 0) allocationsParams.filter_project_ids = filters.projectIds;
       const allocationsResponse = await capacityAPI.getAllocations(currentOrganization!.id, allocationsParams);
       setAllocations(allocationsResponse.allocations);
     } catch (err) {
@@ -209,90 +220,77 @@ export default function CapacityPlanningPage() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header Section */}
-        <div className="mb-8">
-          <div className="flex justify-between items-start mb-6">
+          <div className="mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Capacity Planning</h1>
               <p className="text-gray-600 mt-2">Monitor team capacity utilization and resource allocation across projects</p>
             </div>
             <div className="flex items-center space-x-3">
-              <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-gray-700">View:</label>
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                  className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  {Array.from({ length: 12 }).map((_, i) => (
+                    <option key={i} value={i}>{new Date(2000, i, 1).toLocaleString(undefined, { month: 'long' })}</option>
+                  ))}
+                </select>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  {Array.from({ length: 5 }).map((_, i) => {
+                    const y = new Date().getFullYear() - 2 + i;
+                    return <option key={y} value={y}>{y}</option>;
+                  })}
+                </select>
+              </div>
+                <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">View:</span>
                 <select
                   value={viewMode}
                   onChange={(e) => setViewMode(e.target.value as any)}
-                  className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="overview">Overview</option>
                   <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
                 </select>
               </div>
-              <button 
-                onClick={() => setShowSettingsModal(true)}
-                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-              >
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
-              </button>
-            </div>
-          </div>
-
-          {/* Filters Row */}
-          <div className="flex flex-wrap items-center gap-4 p-4 bg-white rounded-lg border border-gray-200">
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Project:</label>
-              <div className="relative">
-                <select
-                  value={selectedProject}
-                  onChange={(e) => setSelectedProject(e.target.value)}
-                  className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 appearance-none pr-8 min-w-[200px]"
-                >
-                  <option value="all">All Projects</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name} {project.code && `(${project.code})`}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="h-4 w-4 absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Date:</label>
-              <input
-                type="date"
-                value={selectedDateRange.startDate}
-                onChange={(e) => setSelectedDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-              <span className="text-gray-500">to</span>
-              <input
-                type="date"
-                value={selectedDateRange.endDate}
-                onChange={(e) => setSelectedDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-
-            <div className="flex items-center space-x-2 ml-auto">
-              <button 
+                <Button
                 onClick={() => setShowAddResourceModal(true)}
-                disabled={selectedProject === 'all'}
-                className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                leftIcon={<Users className="h-4 w-4" />}
+                className="bg-orange-600 hover:bg-orange-700 focus:ring-orange-500"
+                size="sm"
               >
-                <Plus className="h-4 w-4 mr-2" />
                 Add Resource
-              </button>
-              <button 
-                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </button>
+              </Button>
+                <Button
+                  variant="outline"
+                  leftIcon={<Download className="h-4 w-4" />}
+                  size="sm"
+                  onClick={() => {
+                    const headers = ['User', 'Department/Role', 'Capacity', 'Allocated', 'Available'];
+                    const rows = capacityOverview.map(m => [m.member.user.full_name, m.member.role || '', m.capacity, m.totalAllocatedHours, m.availableHours]);
+                    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'capacity_export.csv';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export
+                </Button>
             </div>
           </div>
+
+          {/* Removed project/date filters per new requirements. Actions moved to header. */}
         </div>
 
         {/* Capacity Overview */}
@@ -354,25 +352,40 @@ export default function CapacityPlanningPage() {
               capacityOverview={capacityOverview}
               allocations={allocations}
               projects={projects}
+              organizationId={currentOrganization!.id}
+              onWeekCellClick={({ userId, week, member }) => setShowWeekModal({ userId, week, member })}
+              onRefresh={fetchCapacityData}
+              onProjectClick={(projectId) => {
+                // Navigate to Kanban tab for the project
+                window.location.href = `/dashboard/kanban?project=${projectId}`;
+              }}
+              onAddResource={() => setShowAddResourceModal(true)}
             />
           )}
         </div>
       </div>
 
-      {/* Capacity Settings Modal */}
-      <CapacitySettingsModal
-        isOpen={showSettingsModal}
-        onClose={() => setShowSettingsModal(false)}
-        projectId={selectedProject === 'all' ? undefined : selectedProject}
-      />
+      {/* Settings modal removed per new UI spec */}
 
       {/* Add Resource Modal */}
       <AddResourceModal
         isOpen={showAddResourceModal}
         onClose={() => setShowAddResourceModal(false)}
         onResourceAdded={fetchCapacityData}
-        projectId={selectedProject === 'all' ? '' : selectedProject}
       />
+
+      {showWeekModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg w-full max-w-2xl p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Week Breakdown</h3>
+              <button onClick={() => setShowWeekModal(null)} className="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">{showWeekModal.member.user.full_name} • {new Date(showWeekModal.week.startDate).toLocaleDateString()} - {new Date(showWeekModal.week.endDate).toLocaleDateString()}</p>
+            <div className="text-sm text-gray-700">Project breakdown and tasks will appear here.</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

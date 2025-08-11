@@ -2,175 +2,166 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useSession } from "next-auth/react"
-import { X, Calendar, CheckSquare, Paperclip, MessageSquare, User, Plus, Edit3, Tag, Copy, Archive, Trash } from "lucide-react"
+import { toast } from "sonner"
+import { 
+  X, Calendar, CheckSquare, Paperclip, MessageSquare, User, Plus, Edit3, Tag, 
+  Copy, Archive, Trash, Clock, Image, Eye, MoreHorizontal, ChevronDown,
+  FileText, Download, Settings, Bell, Volume2, Save, EyeOff
+} from "lucide-react"
 import { kanbanAPI } from "@/utils/api/kanban"
-import { Card, Comment, Activity, Checklist, ChecklistItem } from "@/utils/api/kanban"
+import { Card, Comment, Activity, Checklist, ChecklistItem, Attachment } from "@/utils/api/kanban"
+import LabelsModal from "./LabelsModal"
+import MembersModal from "./MembersModal"
+import CoverModal from "./CoverModal"
+import DatesModal from "./DatesModal"
+import ChecklistModal from "./ChecklistModal"
+import AttachmentsModal from "./AttachmentsModal"
 
 interface ProjectMember {
-  user_id: string;
+  id: string;
+  organization_member_id: string;
   role?: string;
   joined_at?: string;
+  organization_members: {
+    id: string;
+    user_id: string;
   users: {
     id: string;
     full_name: string;
     email: string;
     avatar_url?: string;
+    };
   };
 }
 
 interface CardDetailModalProps {
-  card: Card
-  isOpen: boolean
-  onClose: () => void
-  projectMembers: ProjectMember[]
-  boardId?: string
-  organizationId: string
-  onCardUpdate: () => void
+  isOpen: boolean;
+  onClose: () => void;
+  card: Card;
+  projectMembers: ProjectMember[];
+  organizationId: string;
+  boardId: string;
+  projectId: string;
+  onCardUpdate: (updatedCard: Card) => void;
 }
 
-// Combined type for activity feed
-type ActivityFeedItem = (Activity & { type: 'activity' }) | (Comment & { type: 'comment' })
-
 export default function CardDetailModal({
-  card,
   isOpen,
   onClose,
+  card,
   projectMembers,
-  boardId,
   organizationId,
+  boardId,
+  projectId,
   onCardUpdate
 }: CardDetailModalProps) {
   const { data: session } = useSession()
-  const [cardData, setCardData] = useState<Card>(card)
-  const [activities, setActivities] = useState<Activity[]>([])
-  const [comments, setComments] = useState<Comment[]>([])
-  const [checklists, setChecklists] = useState<Checklist[]>([])
-  const [isLoading, setIsLoading] = useState(false)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [isEditingDescription, setIsEditingDescription] = useState(false)
-  const [editedDescription, setEditedDescription] = useState(card.description || "")
+  const [editedCard, setEditedCard] = useState<Card>(card)
+  const [comments, setComments] = useState<Comment[]>([])
+  const [activities, setActivities] = useState<Activity[]>([])
   const [newComment, setNewComment] = useState("")
-  const [listNames, setListNames] = useState<Record<string, string>>({})
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [activeTab, setActiveTab] = useState<'activity' | 'comments'>('activity')
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
+  const [editingCommentContent, setEditingCommentContent] = useState("")
+  const [showDropdownMenu, setShowDropdownMenu] = useState(false)
 
-  const loadCardDetails = useCallback(async () => {
-    try {
-      setIsLoading(true)
-      
-      // Load full card details
-      const cardResponse = await kanbanAPI.getCard(card.id, organizationId)
-      setCardData(cardResponse.card)
-      
-      // Load activities for this specific card
-      const activitiesResponse = await kanbanAPI.getActivitiesByCard(card.id, 50, 0, organizationId)
-      setActivities(activitiesResponse.activities)
+  // Modal states
+  const [showLabelsModal, setShowLabelsModal] = useState(false)
+  const [showMembersModal, setShowMembersModal] = useState(false)
+  const [showCoverModal, setShowCoverModal] = useState(false)
+  const [showDatesModal, setShowDatesModal] = useState(false)
+  const [showChecklistModal, setShowChecklistModal] = useState(false)
+  const [showAttachmentsModal, setShowAttachmentsModal] = useState(false)
 
-      // Load comments
-      const commentsResponse = await kanbanAPI.getComments(card.id, organizationId)
-      setComments(commentsResponse.comments)
-
-      // Load checklists
-      const checklistsResponse = await kanbanAPI.getChecklists(card.id, organizationId)
-      setChecklists(checklistsResponse.checklists)
-
-    } catch (error) {
-      console.error("Error loading card details:", error)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [card.id])
+  // Checklist item states
+  const [addingItemToChecklist, setAddingItemToChecklist] = useState<string | null>(null)
+  const [newItemContent, setNewItemContent] = useState("")
+  const [addingItemSubmitting, setAddingItemSubmitting] = useState(false)
 
   useEffect(() => {
-    if (isOpen && card.id) {
-      loadCardDetails()
-    }
-  }, [isOpen, card.id, loadCardDetails])
-
-  // Fetch list names for better activity descriptions
-  useEffect(() => {
-    const fetchListNames = async () => {
-      try {
-        if (!boardId) return;
-        const response = await kanbanAPI.getLists(boardId, organizationId);
-        // Handle the response structure properly
-        const lists = Array.isArray(response) ? response : (response as any)?.data || [];
-        const nameMap = lists.reduce((acc: Record<string, string>, list: any) => {
-          acc[list.id] = list.name;
-          return acc;
-        }, {});
-        setListNames(nameMap);
-        console.log('Fetched list names:', nameMap); // Debug log
-      } catch (error) {
-        console.error('Error fetching list names:', error);
+    if (isOpen) {
+      // Ensure card has the expected structure and remove any unexpected properties
+      const cleanCard = {
+        ...card,
+        labels: card.labels || [],
+        card_members: card.card_members || [],
+        checklists: card.checklists || [],
+        comments: card.comments || [],
+        attachments: card.attachments || []
       }
-    };
-    
-    fetchListNames();
-  }, [boardId]);
-
-  const getActivityDescription = (activity: any) => {
-    const details = activity.details;
-    
-    switch (activity.action_type) {
-      case 'create':
-        return 'added this card';
-      case 'move':
-        if (details?.from_list_name && details?.to_list_name) {
-          // Use stored list names (new format)
-          return `moved this card from "${details.from_list_name}" to "${details.to_list_name}"`;
-        } else if (details?.from_list_id && details?.to_list_id && listNames[details.from_list_id] && listNames[details.to_list_id]) {
-          // Use fetched list names (fallback for old format)
-          return `moved this card from "${listNames[details.from_list_id]}" to "${listNames[details.to_list_id]}"`;
-        } else if (details?.from_list_id && details?.to_list_id) {
-          // Show shortened IDs as fallback
-          const fromId = details.from_list_id.slice(0, 8);
-          const toId = details.to_list_id.slice(0, 8);
-          return `moved this card from "List ${fromId}..." to "List ${toId}..."`;
-        }
-        return 'moved this card';
-      case 'update':
-        if (details?.action === 'reorder_lists') {
-          return 'reordered lists on this board';
-        }
-        if (details?.changes) {
-          const changes = details.changes;
-          if (changes.title) return 'updated the title';
-          if (changes.description !== undefined) return 'updated the description';
-          if (changes.due_date) return 'updated the due date';
-          if (changes.completed !== undefined) return changes.completed ? 'marked this card complete' : 'marked this card incomplete';
-        }
-        return 'updated this card';
-      case 'delete':
-        return 'deleted this card';
-      case 'archive':
-        return 'archived this card';
-      case 'restore':
-        return 'restored this card';
-      case 'comment':
-        return 'commented on this card';
-      case 'member_add':
-        return `added ${details?.added_user_name || 'a member'} to this card`;
-      case 'member_remove':
-        return `removed ${details?.removed_user_name || 'a member'} from this card`;
-      case 'checklist_add':
-        return `added checklist "${details?.checklist_name || 'checklist'}"`;
-      case 'checklist_complete':
-        return `completed checklist "${details?.checklist_name || 'checklist'}"`;
-      case 'checklist_item_add':
-        return `added item "${details?.item_text || 'item'}" to checklist`;
-      case 'checklist_item_complete':
-        return `completed "${details?.item_text || 'item'}" on checklist`;
-      default:
-        return 'performed an action on this card';
+      // Remove any unexpected properties that might cause rendering issues
+      delete (cleanCard as any).card_title
+      setEditedCard(cleanCard)
+      loadComments()
+      loadActivities()
     }
-  };
+  }, [isOpen, card])
 
-  const handleSaveDescription = async () => {
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showDropdownMenu) {
+        setShowDropdownMenu(false)
+      }
+    }
+
+    if (showDropdownMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showDropdownMenu])
+
+  const loadComments = async () => {
     try {
-      await kanbanAPI.updateCard(card.id, { description: editedDescription, organizationId })
-      setCardData(prev => ({ ...prev, description: editedDescription }))
-      setIsEditingDescription(false)
-      onCardUpdate()
+      const response = await kanbanAPI.getComments(card.id, organizationId)
+      setComments(response.comments || [])
+      } catch (error) {
+      console.error("Error loading comments:", error)
+    }
+  }
+
+  const loadActivities = async () => {
+    try {
+      const response = await kanbanAPI.getActivitiesByCard(card.id, 50, 0, organizationId)
+      setActivities(response.activities || [])
     } catch (error) {
-      console.error("Error updating description:", error)
+      console.error("Error loading activities:", error)
+    }
+  }
+
+  const handleSave = async () => {
+    try {
+      setIsSubmitting(true)
+      const response = await kanbanAPI.updateCard(card.id, {
+        title: editedCard.title,
+        description: editedCard.description,
+        due_date: editedCard.due_date,
+        cover_color: editedCard.cover?.color,
+        cover_image: editedCard.cover?.image,
+        organizationId
+      })
+      onCardUpdate(response.card)
+      
+      // Reset edit states based on what was being edited
+      if (isEditingTitle) {
+        setIsEditingTitle(false)
+        toast.success('Title updated successfully!')
+      }
+      if (isEditingDescription) {
+        setIsEditingDescription(false)
+        toast.success('Description updated successfully!')
+      }
+    } catch (error) {
+      console.error("Error updating card:", error)
+      toast.error('Failed to update card')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -178,354 +169,1233 @@ export default function CardDetailModal({
     if (!newComment.trim()) return
 
     try {
-      await kanbanAPI.createComment({
+      setIsSubmitting(true)
+      const response = await kanbanAPI.createComment({
         card_id: card.id,
-        content: newComment
+        content: newComment,
+        organizationId
       })
+      setComments(prev => [response.comment, ...prev])
       setNewComment("")
-      loadCardDetails() // Reload to get the new comment
     } catch (error) {
       console.error("Error adding comment:", error)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  const handleAssignMember = async (userId: string) => {
+  const handleEditComment = async (commentId: string, newContent: string) => {
     try {
-      await kanbanAPI.assignCardMember(card.id, userId, organizationId)
-      loadCardDetails()
-      onCardUpdate()
+      setIsSubmitting(true)
+      const response = await kanbanAPI.updateComment(commentId, {
+        content: newContent,
+        organizationId
+      })
+      setComments(prev => prev.map(comment => 
+        comment.id === commentId ? response.comment : comment
+      ))
     } catch (error) {
-      console.error("Error assigning member:", error)
+      console.error("Error updating comment:", error)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  const handleRemoveMember = async (userId: string) => {
+  const handleDeleteComment = async (commentId: string) => {
     try {
-      await kanbanAPI.removeCardMember(card.id, userId, organizationId)
-      loadCardDetails()
-      onCardUpdate()
+      setIsSubmitting(true)
+      await kanbanAPI.deleteComment(commentId)
+      setComments(prev => prev.filter(comment => comment.id !== commentId))
     } catch (error) {
-      console.error("Error removing member:", error)
+      console.error("Error deleting comment:", error)
+    } finally {
+      setIsSubmitting(false)
     }
+  }
+
+  const startEditingComment = (commentId: string, currentContent: string) => {
+    setEditingCommentId(commentId)
+    setEditingCommentContent(currentContent)
+  }
+
+  const cancelEditingComment = () => {
+    setEditingCommentId(null)
+    setEditingCommentContent("")
+  }
+
+  const saveEditingComment = async () => {
+    if (!editingCommentId || !editingCommentContent.trim()) return
+    
+    await handleEditComment(editingCommentId, editingCommentContent)
+    setEditingCommentId(null)
+    setEditingCommentContent("")
+  }
+
+  const handleArchiveCard = async () => {
+    try {
+      setIsSubmitting(true)
+      await kanbanAPI.updateCard(card.id, {
+        is_archived: true,
+        organizationId
+      })
+      
+      // Update the card state
+      setEditedCard(prev => ({
+        ...prev,
+        is_archived: true
+      }))
+      
+      // Call the parent callback to update the card in the main view
+      onCardUpdate({...editedCard, is_archived: true})
+      
+      toast.success('Card archived successfully!')
+      setShowDropdownMenu(false)
+      onClose() // Close modal after archiving
+    } catch (error) {
+      console.error("Error archiving card:", error)
+      toast.error('Failed to archive card')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleLabelsChange = async (labelIds: string[]) => {
+    try {
+      setIsSubmitting(true)
+      console.log("Labels change requested:", labelIds)
+      
+      // Get current label IDs
+      const currentLabelIds = editedCard.labels?.map(label => label.id) || []
+      console.log("Current label IDs:", currentLabelIds)
+      
+      // Find labels to add (new labels that aren't currently assigned)
+      const labelsToAdd = labelIds.filter(id => !currentLabelIds.includes(id))
+      console.log("Labels to add:", labelsToAdd)
+      
+      // Find labels to remove (current labels that aren't in the new selection)
+      const labelsToRemove = currentLabelIds.filter(id => !labelIds.includes(id))
+      console.log("Labels to remove:", labelsToRemove)
+      
+      // Add new labels
+      for (const labelId of labelsToAdd) {
+        console.log("Adding label:", labelId)
+        await kanbanAPI.assignCardLabel(card.id, labelId, organizationId)
+      }
+      
+      // Remove labels
+      for (const labelId of labelsToRemove) {
+        console.log("Removing label:", labelId)
+        await kanbanAPI.removeCardLabel(card.id, labelId, organizationId)
+      }
+      
+      // Update the local state with the new labels
+      // We need to fetch the updated card to get the new labels
+      console.log("Fetching updated card...")
+      const updatedCardResponse = await kanbanAPI.getCard(card.id, organizationId)
+      const updatedCard = updatedCardResponse.card
+      console.log("Updated card labels:", updatedCard.labels)
+      
+      // Update both the edited card state and the original card
+      setEditedCard(prev => ({
+        ...prev,
+        labels: updatedCard.labels || []
+      }))
+      
+      // Call the parent callback to update the card in the main view
+      onCardUpdate(updatedCard)
+      
+      // Show success feedback
+      console.log("Labels updated successfully!")
+      toast.success('Labels updated successfully!')
+      
+    } catch (error) {
+      console.error("Error updating labels:", error)
+      toast.error('Failed to update labels')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleMembersChange = async (memberIds: string[]) => {
+    try {
+      setIsSubmitting(true)
+      console.log("Members change requested:", memberIds)
+      
+      // Get current member IDs
+      const currentMemberIds = editedCard.card_members?.map(cm => cm.project_member_id) || []
+      console.log("Current member IDs:", currentMemberIds)
+      
+      // Find members to add (new members that aren't currently assigned)
+      const membersToAdd = memberIds.filter(id => !currentMemberIds.includes(id))
+      console.log("Members to add:", membersToAdd)
+      
+      // Find members to remove (current members that aren't in the new selection)
+      const membersToRemove = currentMemberIds.filter(id => !memberIds.includes(id))
+      console.log("Members to remove:", membersToRemove)
+      
+      // Add new members
+      for (const memberId of membersToAdd) {
+        console.log("Adding member:", memberId)
+        await kanbanAPI.assignCardMember(card.id, memberId, organizationId)
+      }
+      
+      // Remove members
+      for (const memberId of membersToRemove) {
+        console.log("Removing member:", memberId)
+        await kanbanAPI.removeCardMember(card.id, memberId, organizationId)
+      }
+      
+      // Update the local state with the new members
+      // We need to fetch the updated card to get the new members
+      console.log("Fetching updated card...")
+      const updatedCardResponse = await kanbanAPI.getCard(card.id, organizationId)
+      const updatedCard = updatedCardResponse.card
+      console.log("Updated card members:", updatedCard.card_members)
+      
+      // Update both the edited card state and the original card
+    setEditedCard(prev => ({
+      ...prev,
+        card_members: updatedCard.card_members || []
+      }))
+      
+      // Call the parent callback to update the card in the main view
+      onCardUpdate(updatedCard)
+      
+      // Show success feedback
+      console.log("Members updated successfully!")
+      toast.success('Members updated successfully!')
+      
+    } catch (error) {
+      console.error("Error updating members:", error)
+      toast.error('Failed to update members')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleCoverChange = async (cover: { color?: string; image?: string; size?: 'small' | 'large' }) => {
+    try {
+      setIsSubmitting(true)
+      console.log("Cover change requested:", cover)
+      
+      // Update the card via API
+      const response = await kanbanAPI.updateCard(card.id, {
+        cover_color: cover.color,
+        cover_image: cover.image,
+        organizationId
+      })
+      
+      // Update both the edited card state and the original card
+      setEditedCard(prev => ({
+        ...prev,
+        cover: cover,
+        cover_color: cover.color,
+        cover_image: cover.image
+      }))
+      
+      // Call the parent callback to update the card in the main view
+      onCardUpdate(response.card)
+      
+      // Show success feedback
+      console.log("Cover updated successfully!")
+      toast.success('Cover updated successfully!')
+      
+    } catch (error) {
+      console.error("Error updating cover:", error)
+      toast.error('Failed to update cover')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDatesChange = async (dates: { due_date?: string }) => {
+    try {
+      setIsSubmitting(true)
+      console.log("Dates change requested:", dates)
+      
+      // Update the card via API
+      const response = await kanbanAPI.updateCard(card.id, {
+        due_date: dates.due_date,
+        organizationId
+      })
+      
+      // Update both the edited card state and the original card
+    setEditedCard(prev => ({
+      ...prev,
+      due_date: dates.due_date
+    }))
+      
+      // Call the parent callback to update the card in the main view
+      onCardUpdate(response.card)
+      
+      // Show success feedback
+      console.log("Dates updated successfully!")
+      toast.success('Due date updated successfully!')
+      
+    } catch (error) {
+      console.error("Error updating dates:", error)
+      toast.error('Failed to update due date')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleChecklistsChange = (checklists: any[]) => {
+    setEditedCard(prev => ({
+      ...prev,
+      checklists
+    }))
+    
+    // Call the parent callback to update the card in the main view
+    onCardUpdate({...editedCard, checklists})
+  }
+
+  const handleToggleChecklistItem = async (checklistId: string, itemId: string, isCompleted: boolean) => {
+    try {
+      await kanbanAPI.updateChecklistItem(itemId, {
+        is_completed: isCompleted,
+        organizationId
+      })
+
+      // Update local state
+      const updatedChecklists = editedCard.checklists?.map(checklist => {
+        if (checklist.id === checklistId) {
+          return {
+            ...checklist,
+            checklist_items: checklist.checklist_items?.map(item => 
+              item.id === itemId ? { ...item, is_completed: isCompleted } : item
+            )
+          }
+        }
+        return checklist
+      }) || []
+
+      setEditedCard(prev => ({
+        ...prev,
+        checklists: updatedChecklists
+      }))
+
+      // Update parent component
+      onCardUpdate({...editedCard, checklists: updatedChecklists})
+      
+    } catch (error) {
+      console.error("Error updating checklist item:", error)
+      toast.error('Failed to update checklist item')
+    }
+  }
+
+  const handleDeleteChecklist = async (checklistId: string) => {
+    try {
+      await kanbanAPI.deleteChecklist(checklistId)
+
+      // Update local state - remove the deleted checklist
+      const updatedChecklists = editedCard.checklists?.filter(checklist => checklist.id !== checklistId) || []
+
+      setEditedCard(prev => ({
+        ...prev,
+        checklists: updatedChecklists
+      }))
+
+      // Update parent component
+      onCardUpdate({...editedCard, checklists: updatedChecklists})
+      toast.success('Checklist deleted successfully!')
+      
+    } catch (error) {
+      console.error("Error deleting checklist:", error)
+      toast.error('Failed to delete checklist')
+    }
+  }
+
+  const handleDeleteChecklistItem = async (itemId: string) => {
+    try {
+      await kanbanAPI.deleteChecklistItem(itemId)
+
+      // Update local state - remove the deleted item
+      const updatedChecklists = editedCard.checklists?.map(checklist => ({
+        ...checklist,
+        checklist_items: checklist.checklist_items?.filter(item => item.id !== itemId) || []
+      })) || []
+
+      setEditedCard(prev => ({
+        ...prev,
+        checklists: updatedChecklists
+      }))
+
+      // Update parent component
+      onCardUpdate({...editedCard, checklists: updatedChecklists})
+      toast.success('Item deleted successfully!')
+      
+    } catch (error) {
+      console.error("Error deleting checklist item:", error)
+      toast.error('Failed to delete item')
+    }
+  }
+
+  const handleAddChecklistItem = async (checklistId: string) => {
+    if (!newItemContent.trim()) return
+
+    setAddingItemSubmitting(true)
+    try {
+      const response = await kanbanAPI.createChecklistItem({
+        checklist_id: checklistId,
+        content: newItemContent,
+        organizationId
+      })
+
+      // Update local state - add the new item
+      const updatedChecklists = editedCard.checklists?.map(checklist => {
+        if (checklist.id === checklistId) {
+          return {
+            ...checklist,
+            checklist_items: [...(checklist.checklist_items || []), response.checklist_item]
+          }
+        }
+        return checklist
+      }) || []
+
+      setEditedCard(prev => ({
+        ...prev,
+        checklists: updatedChecklists
+      }))
+
+      // Update parent component
+      onCardUpdate({...editedCard, checklists: updatedChecklists})
+      
+      // Reset form
+      setNewItemContent("")
+      setAddingItemToChecklist(null)
+      toast.success('Item added successfully!')
+      
+    } catch (error) {
+      console.error("Error adding checklist item:", error)
+      toast.error('Failed to add item')
+    } finally {
+      setAddingItemSubmitting(false)
+    }
+  }
+
+  const handleAttachmentsChange = (attachments: any[]) => {
+    setEditedCard(prev => ({
+      ...prev,
+      attachments
+    }))
   }
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
       month: 'short',
       day: 'numeric',
-      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
     })
   }
 
-  const getActivityIcon = (activityType: string) => {
-    switch (activityType) {
-      case 'create':
-        return <Plus className="h-4 w-4" />
-      case 'update':
-        return <Edit3 className="h-4 w-4" />
-      case 'comment':
-        return <MessageSquare className="h-4 w-4" />
-      default:
-        return <User className="h-4 w-4" />
+  const formatActivityDetails = (activity: Activity) => {
+    if (typeof activity.details === 'string') {
+      return activity.details
     }
+
+    if (typeof activity.details === 'object' && activity.details !== null) {
+      const details = activity.details as any
+      
+      switch (activity.action_type) {
+      case 'create':
+          if (details.card_title) {
+            return `created card "${details.card_title}"`
+          }
+          return 'created this card'
+          
+      case 'update':
+          // Check for member assignment/removal
+          if (details.assigned_user_name) {
+            return `assigned ${details.assigned_user_name} to this card`
+          }
+          if (details.removed_user_name) {
+            return `removed ${details.removed_user_name} from this card`
+          }
+          if (details.card_title) {
+            return `updated card "${details.card_title}"`
+          }
+          return 'updated this card'
+          
+        case 'move':
+          if (details.card_title && details.to_list_name && details.from_list_name) {
+            return `moved "${details.card_title}" from ${details.from_list_name} to ${details.to_list_name}`
+          }
+          return 'moved this card'
+          
+        case 'archive':
+          return 'archived this card'
+          
+        case 'restore':
+          return 'restored this card'
+          
+        case 'complete':
+          return 'marked this card as complete'
+          
+        case 'incomplete':
+          return 'marked this card as incomplete'
+          
+      default:
+          return 'performed an action on this card'
+    }
+    }
+
+    return 'performed an action on this card'
   }
 
   if (!isOpen) return null
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden border border-gray-100">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-orange-50 via-amber-50 to-yellow-50 px-8 py-6 border-b border-orange-100">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-4 mb-3">
-                <div className="p-3 bg-white rounded-2xl shadow-sm border border-orange-100">
-                  <CheckSquare className="h-6 w-6 text-orange-600" />
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900 mb-1">{cardData.title}</h1>
-                  <p className="text-sm text-gray-600">
-                    in list <span className="font-semibold text-orange-600">List</span>
-                  </p>
-                </div>
-              </div>
+          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Card Details</h2>
+              <p className="text-sm text-gray-500">in {card.lists?.name || 'List'}</p>
             </div>
+            <div className="flex items-center gap-2">
+              {/* Three-dot menu */}
+              <div className="relative">
             <button
-              onClick={onClose}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-white/80 rounded-2xl transition-all duration-200"
+                  onClick={() => setShowDropdownMenu(!showDropdownMenu)}
+                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
             >
-              <X className="h-6 w-6" />
+                  <MoreHorizontal className="h-5 w-5" />
             </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex h-[calc(90vh-140px)]">
-          {/* Main Content Area */}
-          <div className="flex-1 p-8 overflow-y-auto bg-gradient-to-br from-gray-50/50 to-orange-50/30">
-            {/* Members Section */}
-            <div className="mb-10">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-gradient-to-br from-orange-100 to-amber-100 rounded-xl">
-                  <User className="h-5 w-5 text-orange-600" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-800">Members</h3>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                {cardData.card_members?.map((member) => {
-                  const projectMember = projectMembers.find(pm => pm.user_id === member.user_id)
-                  return (
-                    <div 
-                      key={member.user_id} 
-                      className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-orange-200 hover:border-orange-300 hover:shadow-md transition-all duration-200 group"
-                    >
-                      <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white text-xs font-bold shadow-md">
-                        {projectMember?.users.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '??'}
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-800 text-sm">
-                          {projectMember?.users.full_name || 'Unknown User'}
-                        </p>
-                        <p className="text-xs text-gray-500">{projectMember?.role || 'Member'}</p>
-                      </div>
-                      <button className="ml-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all duration-200">
-                        <X className="h-3 w-3" />
+                
+                {/* Dropdown Menu */}
+                {showDropdownMenu && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                    <div className="py-1">
+                      <button
+                        onClick={handleArchiveCard}
+                        disabled={isSubmitting}
+                        className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                      >
+                        <Archive className="h-4 w-4" />
+                        Archive Card
                       </button>
-                    </div>
-                  )
-                })}
-                <button className="flex items-center gap-2 px-3 py-2 bg-gradient-to-br from-orange-50 to-amber-50 hover:from-orange-100 hover:to-amber-100 text-orange-600 rounded-xl border-2 border-dashed border-orange-300 hover:border-orange-400 transition-all duration-200 text-sm">
-                  <div className="w-7 h-7 rounded-xl bg-orange-100 flex items-center justify-center">
-                    <Plus className="h-4 w-4 text-orange-600" />
-                  </div>
-                  <span className="font-medium">Add member</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Description Section */}
-            <div className="mb-10">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-xl">
-                    <Edit3 className="h-5 w-5 text-blue-600" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-800">Description</h3>
                 </div>
-                <button
-                  onClick={() => setIsEditingDescription(!isEditingDescription)}
-                  className="px-4 py-2 text-sm font-medium text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-xl transition-all duration-200"
-                >
-                  {isEditingDescription ? 'Cancel' : 'Edit'}
-                </button>
+              </div>
+                )}
               </div>
               
-              {isEditingDescription ? (
-                <div className="space-y-4">
-                  <textarea
-                    value={editedDescription}
-                    onChange={(e) => setEditedDescription(e.target.value)}
-                    className="w-full p-4 border border-orange-200 rounded-2xl resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-sm shadow-sm transition-all duration-200"
-                    rows={6}
-                    placeholder="Add a detailed description..."
-                  />
-                  <div className="flex gap-3">
+              {/* Close button */}
+              <button
+                onClick={onClose}
+                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+              >
+                <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+          <div className="flex h-[calc(90vh-80px)]">
+            {/* Left Column - Card Content */}
+            <div className="flex-1 p-6 overflow-y-auto">
+              {/* Cover */}
+              {editedCard.cover?.color && (
+                <div 
+                  className={`w-full rounded-lg mb-6 ${editedCard.cover.size === 'large' ? 'h-32' : 'h-4'}`}
+                  style={{ backgroundColor: editedCard.cover.color }}
+                />
+              )}
+
+                            {/* Title */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-700">Title</h3>
+                  {!isEditingTitle && (
                     <button
-                      onClick={handleSaveDescription}
-                      className="px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-2xl hover:from-orange-700 hover:to-amber-700 font-medium shadow-lg hover:shadow-xl transition-all duration-200"
+                      onClick={() => setIsEditingTitle(true)}
+                      className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                      title="Edit title"
                     >
-                      Save Description
+                      <Edit3 className="h-4 w-4" />
                     </button>
-                    <button
-                      onClick={() => setIsEditingDescription(false)}
-                      className="px-6 py-3 text-gray-600 hover:bg-gray-100 rounded-2xl font-medium transition-all duration-200"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-white p-6 rounded-2xl border border-orange-200 min-h-[120px] shadow-sm">
-                  {cardData.description ? (
-                    <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{cardData.description}</p>
-                  ) : (
-                    <div className="flex items-center justify-center h-20">
-                      <p className="text-gray-500 italic">No description added yet. Click Edit to add one.</p>
-                    </div>
                   )}
                 </div>
-              )}
-            </div>
-
-            {/* Activity Section */}
-            <div>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-gradient-to-br from-purple-100 to-pink-100 rounded-xl">
-                  <MessageSquare className="h-5 w-5 text-purple-600" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-800">Activity</h3>
-              </div>
-              
-              {/* Add Comment */}
-              <div className="mb-8">
-                <div className="flex gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white font-bold shadow-lg">
-                    {session?.user?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'ME'}
-                  </div>
-                  <div className="flex-1">
-                    <textarea
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Write a comment..."
-                      className="w-full p-4 border border-orange-200 rounded-2xl resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-sm shadow-sm transition-all duration-200"
-                      rows={3}
+                {isEditingTitle ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={editedCard.title}
+                      onChange={(e) => setEditedCard(prev => ({ ...prev, title: e.target.value }))}
+                      className="w-full text-xl font-semibold text-gray-900 border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      autoFocus
+                      placeholder="Enter card title..."
                     />
-                    {newComment.trim() && (
-                      <div className="flex gap-3 mt-3">
-                        <button
-                          onClick={handleAddComment}
-                          className="px-6 py-2 bg-gradient-to-r from-orange-600 to-amber-600 text-white rounded-2xl hover:from-orange-700 hover:to-amber-700 font-medium shadow-md hover:shadow-lg transition-all duration-200"
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSave}
+                        disabled={isSubmitting}
+                        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditedCard(prev => ({ ...prev, title: card.title }))
+                          setIsEditingTitle(false)
+                        }}
+                        disabled={isSubmitting}
+                        className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <h1 className="text-xl font-semibold text-gray-900">{editedCard.title}</h1>
+                )}
+              </div>
+
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-2 mb-6">
+                <button
+                  onClick={() => setShowCoverModal(true)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+                >
+                  <Image className="h-4 w-4" />
+                  Cover
+                </button>
+                <button
+                  onClick={() => setShowLabelsModal(true)}
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Tag className="h-4 w-4" />
+                  Labels
+                  {editedCard.labels && editedCard.labels.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-800 text-xs rounded-full">
+                      {editedCard.labels.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowMembersModal(true)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+                >
+                  <User className="h-4 w-4" />
+                  Members
+                </button>
+                <button
+                  onClick={() => setShowDatesModal(true)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+                >
+                  <Calendar className="h-4 w-4" />
+                  Dates
+                </button>
+                    <button
+                  onClick={() => setShowChecklistModal(true)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+                    >
+                  <CheckSquare className="h-4 w-4" />
+                  Checklist
+                    </button>
+                    <button
+                  onClick={() => setShowAttachmentsModal(true)}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+                    >
+                  <Paperclip className="h-4 w-4" />
+                  Attachments
+                    </button>
+                  </div>
+{/* Card Info Bar - Members, Labels, Due Date */}
+<div className="flex flex-wrap items-center gap-6 mb-6 pb-4 border-b border-gray-100">
+                {/* Members */}
+                {editedCard.card_members && editedCard.card_members.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-gray-700">Members</h3>
+                    <div className="flex items-center gap-1">
+                      {editedCard.card_members.slice(0, 3).map((member, index) => (
+                        <div
+                          key={member.id || `member-${index}`}
+                          className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center text-white text-xs font-medium"
+                          title={member.project_members.organization_members.users.full_name}
                         >
-                          Save Comment
-                        </button>
-                        <button
-                          onClick={() => setNewComment("")}
-                          className="px-6 py-2 text-gray-600 hover:bg-orange-50 rounded-2xl font-medium transition-all duration-200"
-                        >
-                          Cancel
-                        </button>
+                          {member.project_members.organization_members.users.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'ZR'}
+                        </div>
+                      ))}
+                      {editedCard.card_members.length > 3 && (
+                        <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs font-medium">
+                          +{editedCard.card_members.length - 3}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setShowMembersModal(true)}
+                        className="w-8 h-8 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-gray-400 hover:text-gray-600"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+              {/* Labels */}
+              {editedCard.labels && editedCard.labels.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-gray-700">Labels</h3>
+                    <div className="flex flex-wrap gap-1">
+                    {editedCard.labels.map((label, index) => (
+                      <div
+                        key={label.id || `label-${index}`}
+                        className="px-3 py-1 rounded text-sm font-medium text-white"
+                        style={{ backgroundColor: label.color }}
+                      >
+                        {label.name}
                       </div>
+                    ))}
+                      <button
+                        onClick={() => setShowLabelsModal(true)}
+                        className="px-2 py-1 border-2 border-dashed border-gray-300 rounded text-gray-400 hover:border-gray-400 hover:text-gray-600 flex items-center justify-center"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                  </div>
+                </div>
+              )}
+
+                {/* Due Date */}
+                {editedCard.due_date && (
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-gray-700">Due date</h3>
+                    <div className="flex items-center gap-1">
+                      <div className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-medium">
+                        {new Date(editedCard.due_date).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit'
+                        })}
+                        <span className="ml-1 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-xs">
+                          Due soon
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setShowDatesModal(true)}
+                        className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                        </div>
+                      </div>
+                )}
+
+                {/* Add buttons for empty states */}
+                {(!editedCard.card_members || editedCard.card_members.length === 0) && (
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-gray-700">Members</h3>
+                    <button
+                      onClick={() => setShowMembersModal(true)}
+                      className="w-8 h-8 rounded-full border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-gray-400 hover:text-gray-600"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                </div>
+                )}
+
+                {(!editedCard.labels || editedCard.labels.length === 0) && (
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-gray-700">Labels</h3>
+                    <button
+                      onClick={() => setShowLabelsModal(true)}
+                      className="px-2 py-1 border-2 border-dashed border-gray-300 rounded text-gray-400 hover:border-gray-400 hover:text-gray-600 flex items-center justify-center"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                    </div>
+              )}
+
+                {!editedCard.due_date && (
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-gray-700">Due date</h3>
+                    <button
+                      onClick={() => setShowDatesModal(true)}
+                      className="px-2 py-1 border-2 border-dashed border-gray-300 rounded text-gray-400 hover:border-gray-400 hover:text-gray-600 flex items-center justify-center"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+
+
+                            {/* Description */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-gray-600" />
+                  <h3 className="text-sm font-medium text-gray-700">Description</h3>
+                  </div>
+                  {!isEditingDescription && (
+                    <button
+                      onClick={() => setIsEditingDescription(true)}
+                      className="px-3 py-1 text-sm text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                      title="Edit description"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {isEditingDescription ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editedCard.description || ''}
+                      onChange={(e) => setEditedCard(prev => ({ ...prev, description: e.target.value }))}
+                      className="w-full p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                      rows={4}
+                      placeholder="Add a more detailed description..."
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSave}
+                        disabled={isSubmitting}
+                        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditedCard(prev => ({ ...prev, description: card.description }))
+                          setIsEditingDescription(false)
+                        }}
+                        disabled={isSubmitting}
+                        className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-gray-50 rounded min-h-[100px]">
+                    {editedCard.description || (
+                      <p className="text-gray-500 italic">No description</p>
                     )}
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* Comments and Activities Timeline */}
-              <div className="space-y-6">
-                {/* Show comments first */}
-                {comments.map((comment, index) => (
-                  <div key={`comment-${comment.id}`} className="flex gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white font-bold shadow-lg">
-                      {comment.users.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '??'}
+              {/* Checklists */}
+              {editedCard.checklists && editedCard.checklists.length > 0 && (
+                editedCard.checklists.map((checklist, checklistIndex) => (
+                  <div key={checklist.id || `checklist-${checklistIndex}`} className="mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <CheckSquare className="h-4 w-4 text-gray-600" />
+                        <h3 className="text-sm font-medium text-gray-700">{checklist.name}</h3>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleDeleteChecklist(checklist.id)}
+                          className="px-2 py-1 text-xs text-gray-600 bg-gray-100 rounded hover:bg-red-200 hover:text-red-600"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="mb-4">
+                      {(() => {
+                        const totalItems = checklist.checklist_items?.length || 0
+                        const completedItems = checklist.checklist_items?.filter(item => item.is_completed).length || 0
+                        const percentage = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0
+                        
+                        return (
+                          <>
+                            <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                              <span>{percentage}%</span>
+                              <span>{completedItems}/{totalItems}</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                style={{ width: `${percentage}%` }}
+                              />
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </div>
+
+                    {/* Checklist Items */}
+                    <div className="space-y-2 mb-3">
+                      {checklist.checklist_items?.map((item, itemIndex) => (
+                        <div key={item.id || `item-${checklistIndex}-${itemIndex}`} className="flex items-center gap-2 group">
+                          <button
+                            onClick={() => handleToggleChecklistItem(checklist.id, item.id, !item.is_completed)}
+                            className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                              item.is_completed
+                                ? 'bg-blue-600 border-blue-600 text-white'
+                                : 'border-gray-300 hover:border-blue-400'
+                            }`}
+                          >
+                            {item.is_completed && (
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </button>
+                          <span className={`text-sm flex-1 ${item.is_completed ? 'line-through text-gray-500' : 'text-gray-700'}`}>
+                              {item.content}
+                            </span>
+                          <button 
+                            onClick={() => handleDeleteChecklistItem(item.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-600 transition-opacity"
+                          >
+                            <Trash className="h-3 w-3" />
+                          </button>
+                          </div>
+                        ))}
+                      </div>
+
+                    {/* Add Item Button/Form */}
+                    {addingItemToChecklist === checklist.id ? (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={newItemContent}
+                          onChange={(e) => setNewItemContent(e.target.value)}
+                          placeholder="Add an item"
+                          className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleAddChecklistItem(checklist.id)
+                            } else if (e.key === 'Escape') {
+                              setAddingItemToChecklist(null)
+                              setNewItemContent("")
+                            }
+                          }}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleAddChecklistItem(checklist.id)}
+                            disabled={addingItemSubmitting}
+                            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {addingItemSubmitting ? 'Adding...' : 'Add'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setAddingItemToChecklist(null)
+                              setNewItemContent("")
+                            }}
+                            disabled={addingItemSubmitting}
+                            className="px-3 py-1 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Cancel
+                          </button>
+                </div>
+              </div>
+                    ) : (
+                      <button 
+                        onClick={() => setAddingItemToChecklist(checklist.id)}
+                        className="w-full text-left px-2 py-2 text-sm text-gray-600 bg-gray-50 rounded hover:bg-gray-100 transition-colors"
+                      >
+                        Add an item
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+
+              {/* Attachments */}
+              {editedCard.attachments && editedCard.attachments.length > 0 && (
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Paperclip className="h-4 w-4 text-gray-600" />
+                      <h3 className="text-sm font-medium text-gray-700">Attachments</h3>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {editedCard.attachments.map((attachment, index) => (
+                      <div key={attachment.id || `attachment-${index}`} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                        <div className="flex-shrink-0">
+                          {attachment.mime_type?.startsWith('image/') ? (
+                            <Image className="h-5 w-5 text-blue-500" />
+                          ) : (
+                        <FileText className="h-5 w-5 text-gray-500" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {attachment.original_filename || attachment.filename}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {((attachment.file_size || 0) / 1024).toFixed(1)} KB • {new Date(attachment.uploaded_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={async () => {
+                              try {
+                                const response = await kanbanAPI.getAttachmentDownload(attachment.id)
+                                const link = document.createElement('a')
+                                link.href = response.download_url
+                                link.download = attachment.original_filename || attachment.filename
+                                document.body.appendChild(link)
+                                link.click()
+                                document.body.removeChild(link)
+                              } catch (error) {
+                                console.error("Error downloading attachment:", error)
+                                toast.error('Failed to download file')
+                              }
+                            }}
+                            className="p-1 text-gray-400 hover:text-blue-500"
+                            title="Download"
+                          >
+                          <Download className="h-4 w-4" />
+                        </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await kanbanAPI.deleteAttachment(attachment.id)
+                                const updatedAttachments = editedCard.attachments?.filter(a => a.id !== attachment.id) || []
+                                setEditedCard(prev => ({
+                                  ...prev,
+                                  attachments: updatedAttachments
+                                }))
+                                onCardUpdate({...editedCard, attachments: updatedAttachments})
+                                toast.success('File deleted successfully!')
+                              } catch (error) {
+                                console.error("Error deleting attachment:", error)
+                                toast.error('Failed to delete file')
+                              }
+                            }}
+                            className="p-1 text-gray-400 hover:text-red-500"
+                            title="Delete"
+                          >
+                            <Trash className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  </div>
+              )}
+
+              
+                  </div>
+
+            {/* Right Column - Activity & Comments */}
+            <div className="w-80 border-l border-gray-200 flex flex-col">
+              {/* Tabs */}
+              <div className="flex border-b border-gray-200">
+                <button
+                  onClick={() => setActiveTab('activity')}
+                  className={`flex-1 px-4 py-3 text-sm font-medium ${
+                    activeTab === 'activity' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Activity
+                </button>
+                <button
+                  onClick={() => setActiveTab('comments')}
+                  className={`flex-1 px-4 py-3 text-sm font-medium ${
+                    activeTab === 'comments' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Comments
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-4">
+                {activeTab === 'activity' ? (
+                  <div className="space-y-4">
+                    {activities.map((activity, index) => (
+                      <div key={activity.id || `activity-${index}`} className="flex gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                          {activity.users.full_name?.split(' ').map((n: string, i: number) => n[0]).join('').slice(0, 2).toUpperCase()}
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className="font-semibold text-orange-600">
-                          {comment.users.full_name}
-                        </span>
-                        <span className="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded-full">
-                          {formatDate(comment.created_at)}
-                        </span>
-                      </div>
-                      <div className="bg-white border border-orange-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all duration-200">
-                        <p className="text-gray-700 leading-relaxed">{comment.content}</p>
-                      </div>
+                           <p className="text-sm text-gray-900">
+                             <span className="font-medium">{activity.users.full_name}</span> {formatActivityDetails(activity)}
+                           </p>
+                           <p className="text-xs text-gray-500">{formatDate(activity.created_at)}</p>
                     </div>
                   </div>
                 ))}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Add Comment */}
+                    <div className="space-y-2">
+                      <textarea
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        placeholder="Write a comment..."
+                        className="w-full p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                        rows={3}
+                      />
+                      <button
+                        onClick={handleAddComment}
+                        disabled={!newComment.trim() || isSubmitting}
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium disabled:opacity-50"
+                      >
+                        Comment
+                      </button>
+                    </div>
 
-                {/* Show activities */}
-                {activities.map((activity, index) => (
-                  <div key={`activity-${activity.id}`} className="flex gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white shadow-lg">
-                      {getActivityIcon(activity.action_type)}
+                    {/* Comments List */}
+                    <div className="space-y-4">
+                      {comments.map((comment, index) => (
+                        <div key={comment.id || `comment-${index}`} className="flex gap-3">
+                          <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                            {comment.users.full_name?.split(' ').map((n: string, i: number) => n[0]).join('').slice(0, 2).toUpperCase()}
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
-                        <span className="font-semibold text-green-600">
-                          {activity.users.full_name}
-                        </span>
-                        <span className="text-xs text-green-600 bg-green-100 px-2 py-1 rounded-full">
-                          {formatDate(activity.created_at)}
-                        </span>
+                            {editingCommentId === comment.id ? (
+                              // Edit mode
+                              <div className="space-y-2">
+                                <textarea
+                                  value={editingCommentContent}
+                                  onChange={(e) => setEditingCommentContent(e.target.value)}
+                                  className="w-full p-3 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-sm"
+                                  rows={3}
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={saveEditingComment}
+                                    disabled={!editingCommentContent.trim() || isSubmitting}
+                                    className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs font-medium disabled:opacity-50"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={cancelEditingComment}
+                                    className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-xs font-medium"
+                                  >
+                                    Cancel
+                                  </button>
                       </div>
-                      <p className="text-gray-600">
-                        {getActivityDescription(activity)}
-                      </p>
+                              </div>
+                            ) : (
+                              // View mode
+                              <div>
+                                <div className="bg-gray-50 rounded-lg p-3 group">
+                                  <div className="flex justify-between items-start">
+                                    <p className="text-sm text-gray-900 flex-1">{comment.content}</p>
+                                    {session?.user?.id === comment.user_id && (
+                                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2">
+                                        <button
+                                          onClick={() => startEditingComment(comment.id, comment.content)}
+                                          className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                                          title="Edit comment"
+                                        >
+                                          <Edit3 className="h-3 w-3" />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDeleteComment(comment.id)}
+                                          className="p-1 text-gray-400 hover:text-red-600 rounded"
+                                          title="Delete comment"
+                                        >
+                                          <Trash className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex justify-between items-center mt-1">
+                                  <p className="text-xs text-gray-500">{formatDate(comment.created_at)}</p>
+                                  {comment.updated_at !== comment.created_at && (
+                                    <p className="text-xs text-gray-400 italic">(edited)</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                     </div>
                   </div>
                 ))}
-
-                {comments.length === 0 && activities.length === 0 && (
-                  <div className="text-center py-12">
-                    <div className="w-20 h-20 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                      <MessageSquare className="h-10 w-10 text-gray-400" />
                     </div>
-                    <h4 className="text-lg font-medium text-gray-500 mb-2">No activity yet</h4>
-                    <p className="text-gray-400">Comments and updates will appear here</p>
                   </div>
                 )}
               </div>
             </div>
           </div>
-
-          {/* Sidebar */}
-          {/* <div className="w-80 bg-gradient-to-br from-orange-50/80 to-amber-50/80 border-l border-orange-100 p-6 space-y-8">
-            <div>
-              <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Add to card</h4>
-              <div className="space-y-3">
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white hover:text-orange-700 rounded-2xl transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center">
-                    <User className="h-4 w-4 text-orange-600" />
-                  </div>
-                  Members
-                </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white hover:text-orange-700 rounded-2xl transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-green-100 rounded-xl flex items-center justify-center">
-                    <Tag className="h-4 w-4 text-green-600" />
-                  </div>
-                  Labels
-                </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white hover:text-orange-700 rounded-2xl transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-blue-100 rounded-xl flex items-center justify-center">
-                    <CheckSquare className="h-4 w-4 text-blue-600" />
-                  </div>
-                  Checklist
-                </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white hover:text-orange-700 rounded-2xl transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-purple-100 rounded-xl flex items-center justify-center">
-                    <Calendar className="h-4 w-4 text-purple-600" />
-                  </div>
-                  Due date
-                </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white hover:text-orange-700 rounded-2xl transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-indigo-100 rounded-xl flex items-center justify-center">
-                    <Paperclip className="h-4 w-4 text-indigo-600" />
-                  </div>
-                  Attachment
-                </button>
               </div>
             </div>
 
-            <div>
-              <h4 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Actions</h4>
-              <div className="space-y-3">
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white hover:text-orange-700 rounded-2xl transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-gray-100 rounded-xl flex items-center justify-center">
-                    <Copy className="h-4 w-4 text-gray-600" />
-                  </div>
-                  Copy
-                </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-white hover:text-orange-700 rounded-2xl transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center">
-                    <Archive className="h-4 w-4 text-amber-600" />
-                  </div>
-                  Archive
-                </button>
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 rounded-2xl transition-all duration-200 border border-red-200 hover:border-red-300 shadow-sm hover:shadow-md">
-                  <div className="w-8 h-8 bg-red-100 rounded-xl flex items-center justify-center">
-                    <Trash className="h-4 w-4 text-red-600" />
-                  </div>
-                  Delete
-                </button>
-              </div>
-            </div>
-          </div> */}
-        </div>
-      </div>
-    </div>
+      {/* Modals */}
+      {console.log("LabelsModal props:", {
+        boardId,
+        organizationId,
+        selectedLabels: editedCard.labels?.map(l => l.id) || [],
+        labels: editedCard.labels
+      })}
+      <LabelsModal
+        isOpen={showLabelsModal}
+        onClose={() => setShowLabelsModal(false)}
+        boardId={boardId}
+        organizationId={organizationId}
+        selectedLabels={editedCard.labels?.map(l => l.id) || []}
+        onLabelsChange={handleLabelsChange}
+      />
+
+      <MembersModal
+        isOpen={showMembersModal}
+        onClose={() => setShowMembersModal(false)}
+        projectId={projectId}
+        organizationId={organizationId}
+        selectedMembers={editedCard.card_members?.map(m => m.project_member_id) || []}
+        onMembersChange={handleMembersChange}
+      />
+
+      <CoverModal
+        isOpen={showCoverModal}
+        onClose={() => setShowCoverModal(false)}
+        currentCover={editedCard.cover || {}}
+        onCoverChange={handleCoverChange}
+      />
+
+      <DatesModal
+        isOpen={showDatesModal}
+        onClose={() => setShowDatesModal(false)}
+        currentDates={{
+          due_date: editedCard.due_date
+        }}
+        onDatesChange={handleDatesChange}
+      />
+
+      <ChecklistModal
+        isOpen={showChecklistModal}
+        onClose={() => setShowChecklistModal(false)}
+        cardId={card.id}
+        organizationId={organizationId}
+        checklists={(editedCard.checklists || []).map(checklist => ({
+          ...checklist,
+          checklist_items: checklist.checklist_items || []
+        }))}
+        onChecklistsChange={handleChecklistsChange}
+      />
+
+      <AttachmentsModal
+        isOpen={showAttachmentsModal}
+        onClose={() => setShowAttachmentsModal(false)}
+        cardId={card.id}
+        organizationId={organizationId}
+        attachments={(editedCard.attachments || []).map(attachment => ({
+          id: attachment.id,
+          filename: attachment.filename,
+          original_filename: attachment.original_filename,
+          file_size: attachment.file_size,
+          mime_type: attachment.mime_type,
+          file_path: attachment.file_path,
+          uploaded_at: attachment.uploaded_at,
+          users: attachment.users
+        }))}
+        onAttachmentsChange={handleAttachmentsChange}
+      />
+    </>
   )
 }

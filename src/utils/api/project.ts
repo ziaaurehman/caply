@@ -72,6 +72,42 @@ interface UpdateProjectData {
   status?: 'active' | 'on_hold' | 'completed' | 'cancelled';
 }
 
+interface ProjectDocument {
+  id: string;
+  project_id: string;
+  filename: string;
+  original_filename: string;
+  file_size: number;
+  mime_type: string;
+  file_path: string;
+  uploaded_at: string;
+  uploaded_by: string;
+  users?: {
+    id: string;
+    full_name: string;
+    email: string;
+  };
+}
+
+interface CreateProjectDocumentData {
+  projectId: string;
+  file: File;
+  organizationId: string;
+}
+
+interface ProjectDocumentsResponse {
+  documents: ProjectDocument[];
+}
+
+interface ProjectDocumentResponse {
+  document: ProjectDocument;
+}
+
+interface ProjectDocumentDownloadResponse {
+  document: ProjectDocument;
+  download_url: string;
+}
+
 interface ProjectsResponse {
   projects: Project[];
 }
@@ -175,6 +211,72 @@ export const projectAPI = {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to delete project');
     }
+  },
+
+  // ===== PROJECT DOCUMENTS =====
+
+  // Get project documents
+  getProjectDocuments: async (projectId: string, organizationId: string): Promise<ProjectDocumentsResponse> => {
+    const response = await fetch(`/api/projects/${projectId}/documents?organizationId=${organizationId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch project documents');
+    }
+    const data = await response.json();
+    return { documents: data.documents || [] };
+  },
+
+  // Upload project document
+  uploadProjectDocument: async (data: CreateProjectDocumentData): Promise<ProjectDocumentResponse> => {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('organizationId', data.organizationId);
+
+    const response = await fetch(`/api/projects/${data.projectId}/documents`, {
+      method: 'POST',
+      headers: {
+        'x-organization-id': data.organizationId,
+      },
+      body: formData
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to upload document');
+    }
+    const result = await response.json();
+    return { document: result.document };
+  },
+
+  // Get project document download URL
+  getProjectDocumentDownload: async (projectId: string, documentId: string, organizationId: string): Promise<ProjectDocumentDownloadResponse> => {
+    const response = await fetch(`/api/projects/${projectId}/documents/${documentId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to get document');
+    }
+    return await response.json();
+  },
+
+  // Delete project document
+  deleteProjectDocument: async (projectId: string, documentId: string, organizationId: string): Promise<void> => {
+    const response = await fetch(`/api/projects/${projectId}/documents/${documentId}`, {
+      method: 'DELETE',
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to delete document');
+    }
   }
 };
 
@@ -182,6 +284,11 @@ export type {
   Project,
   CreateProjectData,
   UpdateProjectData,
+  ProjectDocument,
+  CreateProjectDocumentData,
   ProjectsResponse,
-  ProjectResponse
+  ProjectResponse,
+  ProjectDocumentsResponse,
+  ProjectDocumentResponse,
+  ProjectDocumentDownloadResponse
 };

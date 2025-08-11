@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { getServerSession } from 'next-auth';
+import { authConfig } from '@/auth';
 
 export async function GET(req: NextRequest) {
   try {
@@ -69,14 +71,24 @@ export async function GET(req: NextRequest) {
           is_completed,
           position,
           due_date,
-          assigned_to,
+          assigned_to_project_member_id,
           created_at,
           updated_at,
-          users (
+          project_members!inner (
             id,
-            full_name,
-            email,
-            avatar_url
+            organization_member_id,
+            role,
+            joined_at,
+            organization_members!inner (
+              id,
+              user_id,
+              users!organization_members_user_id_fkey!inner (
+                id,
+                full_name,
+                email,
+                avatar_url
+              )
+            )
           )
         )
       `)
@@ -95,58 +107,64 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  try {
+    const session = await getServerSession(authConfig);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  const supabase = await createClient();
-  const body = await req.json();
-  const { card_id, name } = body;
+    const supabase = await createClient();
+    const body = await req.json();
+    const { card_id, name, organizationId } = body;
+    const orgId = organizationId || req.headers.get('x-organization-id');
 
-  if (!card_id || !name) {
-    return NextResponse.json({ error: 'Card ID and name are required' }, { status: 400 });
-  }
+    if (!card_id || !name) {
+      return NextResponse.json({ error: 'Card ID and name are required' }, { status: 400 });
+    }
 
-  // Verify user has access to organization
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
+    if (!orgId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
 
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-  }
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      orgId,
+      { resource: 'projects', action: 'update' }
+    );
 
-  // Verify card exists and user has access through project organization
-  const { data: card, error: cardError } = await supabase
-    .from('cards')
-    .select(`
-      id,
-      title,
-      list_id,
-      lists!inner (
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status });
+    }
+
+    // Verify card exists and user has access through project organization
+    const { data: card, error: cardError } = await supabase
+      .from('cards')
+      .select(`
         id,
-        board_id,
-        boards!inner (
+        title,
+        list_id,
+        lists!inner (
           id,
-          project_id,
-          projects!inner (
+          board_id,
+          boards!inner (
             id,
-            organization_id
+            project_id,
+            projects!inner (
+              id,
+              organization_id
+            )
           )
         )
-      )
-    `)
-    .eq('id', card_id)
-    .eq('lists.boards.projects.organization_id', userOrg.organization_id)
-    .single();
+      `)
+      .eq('id', card_id)
+      .eq('lists.boards.projects.organization_id', orgId)
+      .single();
 
-  if (cardError || !card) {
-    return NextResponse.json({ error: 'Card not found' }, { status: 404 });
-  }
+    if (cardError || !card) {
+      return NextResponse.json({ error: 'Card not found' }, { status: 404 });
+    }
 
   // Get next position
   const { data: lastChecklist } = await supabase
@@ -190,5 +208,9 @@ export async function POST(req: NextRequest) {
       }
     }]);
 
-  return NextResponse.json({ checklist });
+    return NextResponse.json({ checklist });
+  } catch (error) {
+    console.error('Error creating checklist:', error);
+    return NextResponse.json({ error: 'Failed to create checklist' }, { status: 500 });
+  }
 }

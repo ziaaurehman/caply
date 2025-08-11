@@ -1,12 +1,12 @@
 // Capacity API Types
+// After rework, frontend uses project_assignments as allocations
 export interface ResourceAllocation {
   id: string;
-  project_member_id: string;
+  resource_allocation_id: string;
   project_id: string;
-  allocated_hours_per_week: number;
+  hours_per_week: number;
   start_date: string;
   end_date?: string | null;
-  role?: string | null;
   notes?: string | null;
   is_active: boolean;
   created_at: string;
@@ -54,6 +54,7 @@ export interface CapacitySettings {
 }
 
 export interface MemberCapacity {
+  // kept for type compatibility (not used after rework)
   id: string;
   project_member_id: string;
   weekly_capacity_hours: number;
@@ -111,19 +112,19 @@ interface CapacityResponse {
 export const capacityAPI = {
   // ===== RESOURCE ALLOCATIONS =====
   
-  // Get allocations
+  // Get allocations (project_assignments)
   getAllocations: async (organizationId: string, params?: {
     project_id?: string;
-    project_member_id?: string;
     start_date?: string;
     end_date?: string;
+    filter_project_ids?: string[];
   }): Promise<AllocationsResponse> => {
     const searchParams = new URLSearchParams();
     searchParams.set('organizationId', organizationId);
     if (params?.project_id) searchParams.set('project_id', params.project_id);
-    if (params?.project_member_id) searchParams.set('project_member_id', params.project_member_id);
     if (params?.start_date) searchParams.set('start_date', params.start_date);
     if (params?.end_date) searchParams.set('end_date', params.end_date);
+    params?.filter_project_ids?.forEach(id => searchParams.append('filter_project_id', id));
 
     const response = await fetch(`/api/capacity/allocations?${searchParams.toString()}`, {
       headers: {
@@ -138,15 +139,16 @@ export const capacityAPI = {
     return { allocations: data.allocations || [] };
   },
 
-  // Create allocation
-  createAllocation: async (allocation: Omit<ResourceAllocation, 'id' | 'created_at' | 'updated_at'> & { organization_id: string }): Promise<AllocationResponse> => {
+  // Create allocation (project assignment). Requires organization_member_id
+  createAllocation: async (allocation: { organization_id: string; project_id: string; organization_member_id: string; hours_per_week: number; start_date: string; end_date?: string | null; notes?: string | null }): Promise<AllocationResponse> => {
+    const { organization_id, ...rest } = allocation as any;
     const response = await fetch('/api/capacity/allocations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-organization-id': allocation.organization_id,
+        'x-organization-id': organization_id,
       },
-      body: JSON.stringify(allocation),
+      body: JSON.stringify({ organizationId: organization_id, ...rest }),
     });
 
     if (!response.ok) {
@@ -157,14 +159,15 @@ export const capacityAPI = {
     return { allocation: data.allocation };
   },
 
-  // Update allocation
-  updateAllocation: async (id: string, allocation: Partial<ResourceAllocation>): Promise<AllocationResponse> => {
-    const response = await fetch('/api/capacity/allocations', {
+  // Update allocation (project assignment)
+  updateAllocation: async (id: string, allocation: Partial<ResourceAllocation>, organizationId?: string): Promise<AllocationResponse> => {
+    const response = await fetch(`/api/capacity/allocations/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
+        ...(organizationId ? { 'x-organization-id': organizationId } : {}),
       },
-      body: JSON.stringify({ id, ...allocation }),
+      body: JSON.stringify(allocation),
     });
 
     if (!response.ok) {
@@ -175,14 +178,13 @@ export const capacityAPI = {
     return { allocation: data.allocation };
   },
 
-  // Delete allocation
-  deleteAllocation: async (id: string): Promise<void> => {
-    const response = await fetch('/api/capacity/allocations', {
+  // Delete allocation (project assignment)
+  deleteAllocation: async (organizationId: string, id: string): Promise<void> => {
+    const response = await fetch(`/api/capacity/allocations/${id}`, {
       method: 'DELETE',
       headers: {
-        'Content-Type': 'application/json',
+        'x-organization-id': organizationId,
       },
-      body: JSON.stringify({ id }),
     });
 
     if (!response.ok) {
@@ -193,17 +195,25 @@ export const capacityAPI = {
 
   // ===== CAPACITY OVERVIEW =====
   
-  // Get capacity overview
+  // Get capacity overview (still supported by server route; will compute from new tables)
   getOverview: async (organizationId: string, params?: {
     project_id?: string;
     start_date?: string;
     end_date?: string;
+    filter_project_ids?: string[];
+    filter_user_ids?: string[];
+    only_overallocated?: boolean;
+    only_active?: boolean;
   }): Promise<OverviewResponse> => {
     const searchParams = new URLSearchParams();
     searchParams.set('organizationId', organizationId);
     if (params?.project_id) searchParams.set('project_id', params.project_id);
     if (params?.start_date) searchParams.set('start_date', params.start_date);
     if (params?.end_date) searchParams.set('end_date', params.end_date);
+    params?.filter_project_ids?.forEach(id => searchParams.append('filter_project_id', id));
+    params?.filter_user_ids?.forEach(id => searchParams.append('filter_user_id', id));
+    if (params?.only_overallocated !== undefined) searchParams.set('only_overallocated', String(params.only_overallocated));
+    if (params?.only_active !== undefined) searchParams.set('only_active', String(params.only_active));
 
     const response = await fetch(`/api/capacity/overview?${searchParams.toString()}`, {
       headers: {
@@ -217,39 +227,9 @@ export const capacityAPI = {
     return await response.json();
   },
 
-  // ===== CAPACITY SETTINGS =====
-  
-  // Get settings
-  getSettings: async (project_id?: string): Promise<SettingsResponse> => {
-    const searchParams = new URLSearchParams();
-    if (project_id) searchParams.set('project_id', project_id);
-
-    const response = await fetch(`/api/capacity/settings?${searchParams.toString()}`);
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch capacity settings');
-    }
-    const data = await response.json();
-    return { settings: data.settings || [] };
-  },
-
-  // Update settings
-  updateSettings: async (settings: Partial<CapacitySettings> & { project_id: string }): Promise<SettingResponse> => {
-    const response = await fetch('/api/capacity/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(settings),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update capacity settings');
-    }
-    const data = await response.json();
-    return { settings: data.settings };
-  },
+  // ===== CAPACITY SETTINGS ===== (deprecated in rework; kept to avoid breaking calls)
+  getSettings: async (_project_id?: string): Promise<SettingsResponse> => ({ settings: [] }),
+  updateSettings: async (_settings: Partial<CapacitySettings> & { project_id: string }): Promise<SettingResponse> => ({ settings: {} as any }),
 
   // ===== MEMBER CAPACITY =====
   
@@ -287,5 +267,36 @@ export const capacityAPI = {
     }
     const data = await response.json();
     return { capacity: data.capacity };
+  },
+
+  // ===== TASKS SUMMARY =====
+  getTasksSummary: async (
+    organizationId: string,
+    params: {
+      user_id?: string;
+      project_id?: string;
+      project_ids?: string[];
+      start_date?: string;
+      end_date?: string;
+      include_tasks?: boolean;
+    }
+  ): Promise<{ summary: Array<{ project_id: string; project_name?: string; tasks_count: number; estimated_hours: number; tasks?: Array<{ id: string; title: string; estimated_hours?: number; due_date?: string }> }> }> => {
+    const sp = new URLSearchParams();
+    sp.set('organizationId', organizationId);
+    if (params.user_id) sp.set('user_id', params.user_id);
+    if (params.project_id) sp.set('project_id', params.project_id);
+    params.project_ids?.forEach(id => sp.append('project_id', id));
+    if (params.start_date) sp.set('start_date', params.start_date);
+    if (params.end_date) sp.set('end_date', params.end_date);
+    if (params.include_tasks) sp.set('include_tasks', 'true');
+
+    const res = await fetch(`/api/capacity/tasks/summary?${sp.toString()}`, {
+      headers: { 'x-organization-id': organizationId }
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || 'Failed to fetch tasks summary');
+    }
+    return res.json();
   },
 };

@@ -112,10 +112,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       
       // Map project members to the format expected by Kanban components
       const members = project.project_members?.map(pm => ({
-        user_id: pm.organization_members.user_id,
-        users: pm.organization_members.users,
+        id: pm.id,
+        organization_member_id: pm.organization_member_id,
         role: pm.role,
-        joined_at: pm.joined_at
+        joined_at: pm.joined_at,
+        organization_members: pm.organization_members
       })) || [];
       setProjectMembers(members);
 
@@ -329,8 +330,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       
       // Assign members to the card if any were selected
       if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
-        for (const userId of cardData.assignee_ids) {
-          await kanbanAPI.assignCardMember(newCard.card.id, userId, currentOrganization.id);
+        for (const projectMemberId of cardData.assignee_ids) {
+          await kanbanAPI.assignCardMember(newCard.card.id, projectMemberId, currentOrganization.id);
         }
       }
       
@@ -346,9 +347,14 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   };
 
   const handleCardClick = (card: Card) => {
+    // Ensure card has the expected structure and remove any unexpected properties
+    const cleanCard = { ...card }
+    // Remove any unexpected properties that might cause rendering issues
+    delete (cleanCard as any).card_title
+    
     setCardModal({
       isOpen: true,
-      card,
+      card: cleanCard,
       mode: 'view'
     });
   };
@@ -364,7 +370,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
       // Assignee filter
       if (selectedAssignee !== "all") {
-        const isAssigned = card.card_members?.some(member => member.user_id === selectedAssignee);
+        const isAssigned = card.card_members?.some(member => member.project_member_id === selectedAssignee);
         if (!isAssigned) return false;
       }
 
@@ -454,8 +460,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                 >
                   <option value="all">All Assignees</option>
                   {projectMembers.map((member) => (
-                    <option key={member.user_id} value={member.user_id}>
-                      {member.users.full_name}
+                    <option key={member.id} value={member.id}>
+                      {member.organization_members.users.full_name}
                     </option>
                   ))}
                 </select>
@@ -613,15 +619,28 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         projectMembers={projectMembers}
       />
 
-      {cardModal.isOpen && cardModal.card && (
+      {cardModal.isOpen && cardModal.card && kanbanState.currentBoard && (
         <CardDetailModal
           card={cardModal.card}
           isOpen={cardModal.isOpen}
           onClose={() => setCardModal({ isOpen: false, card: null, mode: 'view' })}
           projectMembers={projectMembers}
-          boardId={kanbanState.currentBoard?.id}
           organizationId={currentOrganization?.id || ''}
-          onCardUpdate={() => {
+          boardId={kanbanState.currentBoard.id}
+          projectId={projectId}
+          onCardUpdate={(updatedCard: Card) => {
+            // Update the card in the current state
+            setKanbanState(prev => ({
+              ...prev,
+              lists: prev.lists.map(list => ({
+                ...list,
+                cards: list.cards?.map(card => 
+                  card.id === updatedCard.id ? updatedCard : card
+                ) || []
+              }))
+            }));
+            
+            // Refresh board data to ensure consistency
             if (kanbanState.currentBoard) {
               loadBoardData(kanbanState.currentBoard.id);
             }

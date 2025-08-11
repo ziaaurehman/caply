@@ -49,17 +49,27 @@ export async function GET(
             )
           )
         ),
-        card_members (
+              card_members (
+        id,
+        project_member_id,
+        assigned_at,
+        project_members!inner (
           id,
-          user_id,
-          assigned_at,
-          users (
+          organization_member_id,
+          role,
+          joined_at,
+          organization_members!inner (
             id,
-            full_name,
-            email,
-            avatar_url
+            user_id,
+            users!organization_members_user_id_fkey!inner (
+              id,
+              full_name,
+              email,
+              avatar_url
+            )
           )
-        ),
+        )
+      ),
         card_labels (
           id,
           label_id,
@@ -79,13 +89,23 @@ export async function GET(
             is_completed,
             position,
             due_date,
-            assigned_to,
-            users (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
+            assigned_to_project_member_id,
+                         project_members!inner (
+               id,
+               organization_member_id,
+               role,
+               joined_at,
+               organization_members!inner (
+                 id,
+                 user_id,
+                 users!organization_members_user_id_fkey!inner (
+                   id,
+                   full_name,
+                   email,
+                   avatar_url
+                 )
+               )
+             )
           )
         ),
         comments (
@@ -126,7 +146,14 @@ export async function GET(
       return NextResponse.json({ error: 'Card not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ card });
+    // Transform card_labels to labels for frontend compatibility
+    const transformedCard = {
+      ...card,
+      labels: card.card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+      card_labels: undefined // Remove the original card_labels to avoid confusion
+    };
+
+    return NextResponse.json({ card: transformedCard });
   } catch (error) {
     console.error('Error in GET /api/kanban/cards/[id]:', error);
     return NextResponse.json({ 

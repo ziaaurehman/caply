@@ -28,28 +28,19 @@ export async function GET(req: NextRequest) {
   const userContext = validation.context!
 
   try {
-    // Get capacity settings for projects in this organization
+    // Get organization-level capacity settings
     const { data: settings, error } = await supabase
       .from('capacity_settings')
-      .select(`
-        *,
-        projects (
-          id,
-          name,
-          organization_id
-        )
-      `)
-      .eq('projects.organization_id', organizationId);
+      .select('*')
+      .eq('organization_id', organizationId)
+      .single();
 
     if (error) {
       console.error('Error fetching capacity settings:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ 
-      settings: settings || [],
-      total: settings?.length || 0
-    });
+    return NextResponse.json({ settings: settings ? [settings] : [], total: settings ? 1 : 0 });
 
   } catch (error) {
     console.error('Error in capacity settings GET:', error);
@@ -85,61 +76,32 @@ export async function POST(req: NextRequest) {
   const userContext = validation.context!
 
   const {
-    project_id,
-    default_hours_per_week,
+    default_work_hours_per_week,
     default_work_days_per_week,
-    overtime_threshold,
-    capacity_buffer_percentage,
-    auto_allocation_enabled
+    capacity_planning_enabled,
+    allow_overallocation,
+    overallocation_threshold_percent
   } = settingsData;
 
   // Validate required fields
-  if (!project_id || !default_hours_per_week) {
-    return NextResponse.json({ 
-      error: 'Project ID and default hours per week are required' 
-    }, { status: 400 });
+  if (!default_work_hours_per_week) {
+    return NextResponse.json({ error: 'Default work hours per week is required' }, { status: 400 });
   }
 
   try {
-    // Verify project exists and belongs to the organization
-    const { data: project, error: projectError } = await supabase
-      .from('projects')
-      .select('id, organization_id, capacity_planning_enabled')
-      .eq('id', project_id)
-      .eq('organization_id', organizationId)
-      .single();
-
-    if (projectError || !project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-    }
-
-    if (!project.capacity_planning_enabled) {
-      return NextResponse.json({ 
-        error: 'Capacity planning is not enabled for this project' 
-      }, { status: 403 });
-    }
-
-    // Create or update capacity settings
+    // Create or update organization-level capacity settings
     const { data: settings, error: createError } = await supabase
       .from('capacity_settings')
       .upsert([{
-        project_id,
-        default_hours_per_week,
-        default_work_days_per_week: default_work_days_per_week || 5,
-        overtime_threshold: overtime_threshold || 40,
-        capacity_buffer_percentage: capacity_buffer_percentage || 10,
-        auto_allocation_enabled: auto_allocation_enabled || false,
-        updated_by: userContext.userId,
+        organization_id: organizationId,
+        default_work_hours_per_week,
+        default_work_days_per_week: default_work_days_per_week ?? 5,
+        capacity_planning_enabled: capacity_planning_enabled ?? true,
+        allow_overallocation: allow_overallocation ?? false,
+        overallocation_threshold_percent: overallocation_threshold_percent ?? 100,
         updated_at: new Date().toISOString()
       }])
-      .select(`
-        *,
-        projects (
-          id,
-          name,
-          organization_id
-        )
-      `)
+      .select('*')
       .single();
 
     if (createError) {
@@ -147,10 +109,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: createError.message }, { status: 500 });
     }
 
-    return NextResponse.json({ 
-      success: true,
-      settings 
-    });
+    return NextResponse.json({ success: true, settings });
 
   } catch (error) {
     console.error('Error in capacity settings POST:', error);

@@ -1,23 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const supabase = await createClient();
   const body = await req.json();
   const { card_id, label_id } = body;
+  const organizationId = body.organizationId || body.organization_id || req.headers.get('x-organization-id');
 
   if (!card_id || !label_id) {
     return NextResponse.json({ error: 'Card ID and Label ID are required' }, { status: 400 });
   }
 
-  // Check if user has access to the card
+  if (!organizationId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
+
+  // Validate organization access and permissions
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'projects', action: 'update' }
+  );
+
+  if (!validation.success) {
+    return NextResponse.json({ 
+      error: validation.error 
+    }, { status: validation.status });
+  }
+
+  // Check if card exists within the organization
   const { data: card, error: cardError } = await supabase
     .from('cards')
     .select(`
@@ -28,16 +39,13 @@ export async function POST(req: NextRequest) {
         boards!inner (
           id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            organization_id
           )
         )
       )
     `)
     .eq('id', card_id)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', organizationId)
     .single();
 
   if (cardError || !card) {
@@ -94,7 +102,7 @@ export async function POST(req: NextRequest) {
   await supabase
     .from('activities')
     .insert([{
-      user_id: session.user.id,
+      user_id: validation.context!.userId,
       board_id: boardId,
       card_id: card_id,
       action_type: 'create',
@@ -111,21 +119,33 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const supabase = await createClient();
   const { searchParams } = new URL(req.url);
   const cardId = searchParams.get('card_id');
   const labelId = searchParams.get('label_id');
+  const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
   if (!cardId || !labelId) {
     return NextResponse.json({ error: 'Card ID and Label ID are required' }, { status: 400 });
   }
 
-  // Check if user has access to the card
+  if (!organizationId) {
+    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+  }
+
+  // Validate organization access and permissions
+  const validation = await validateOrganizationAccessWithId(
+    organizationId,
+    { resource: 'projects', action: 'update' }
+  );
+
+  if (!validation.success) {
+    return NextResponse.json({ 
+      error: validation.error 
+    }, { status: validation.status });
+  }
+
+  // Check if card exists within the organization
   const { data: card, error: cardError } = await supabase
     .from('cards')
     .select(`
@@ -136,16 +156,13 @@ export async function DELETE(req: NextRequest) {
         boards!inner (
           id,
           projects!inner (
-            organization_members!inner (
-              user_id
-            )
+            organization_id
           )
         )
       )
     `)
     .eq('id', cardId)
-    .eq('lists.boards.projects.organization_members.user_id', session.user.id)
-    .eq('lists.boards.projects.organization_members.status', 'active')
+    .eq('lists.boards.projects.organization_id', organizationId)
     .single();
 
   if (cardError || !card) {
@@ -186,7 +203,7 @@ export async function DELETE(req: NextRequest) {
   await supabase
     .from('activities')
     .insert([{
-      user_id: session.user.id,
+      user_id: validation.context!.userId,
       board_id: (card.lists as any).boards.id,
       card_id: cardId,
       action_type: 'delete',

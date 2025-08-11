@@ -34,14 +34,19 @@ export interface KanbanBoardProps {
 }
 
 export interface ProjectMember {
-  user_id: string;
+  id: string;
+  organization_member_id: string;
   role?: string;
   joined_at?: string;
-  users: {
+  organization_members: {
     id: string;
-    full_name: string;
-    email: string;
-    avatar_url?: string;
+    user_id: string;
+    users: {
+      id: string;
+      full_name: string;
+      email: string;
+      avatar_url?: string;
+    };
   };
 }
 

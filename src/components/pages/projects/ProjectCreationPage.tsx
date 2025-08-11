@@ -4,8 +4,9 @@ import React, { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { useRouter } from "next/navigation"
 // import { useProjectStore } from "@/lib/stores/projectStore" // No longer needed
-import { CalendarIcon, UploadCloud, Plus, ChevronDown, X } from "lucide-react"
-import { projectAPI, clientAPI, teamAPI, type CreateProjectData, type CreateClientData } from "@/utils/api"
+import { CalendarIcon, UploadCloud, Plus, ChevronDown, X, FileText, Download, Trash, Image } from "lucide-react"
+import { projectAPI as projectAPIFromIndex, clientAPI, teamAPI, type CreateProjectData, type CreateClientData, type ProjectDocument } from "@/utils/api"
+import { projectAPI as projectAPIDirect } from "@/utils/api/project"
 import ClientModal from "@/components/pages/clients/ClientModal"
 import { useOrganizationStore } from "@/lib/stores/organizationStore"
 import { toast } from "sonner"
@@ -67,6 +68,8 @@ export default function ProjectCreationPage() {
   const router = useRouter()
   // const { addProject } = useProjectStore() // No longer needed
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [uploadedDocuments, setUploadedDocuments] = useState<ProjectDocument[]>([])
+  const [isUploading, setIsUploading] = useState(false)
   const [isClientModalOpen, setIsClientModalOpen] = useState(false)
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false)
   
@@ -244,13 +247,35 @@ export default function ProjectCreationPage() {
         // Add more fields as needed (e.g., documents)
       }
 
-      const result = await projectAPI.createProject(payload)
+      const result = await projectAPIDirect.createProject(payload)
+      
+      // Upload files if any were selected
+      if (uploadedFiles.length > 0) {
+        toast.info('Uploading project documents...', {
+          description: `Uploading ${uploadedFiles.length} file(s)...`,
+        });
+        
+        for (const file of uploadedFiles) {
+          try {
+            await (projectAPIDirect || projectAPIFromIndex).uploadProjectDocument({
+              projectId: result.project.id,
+              file,
+              organizationId: currentOrganization.id
+            });
+          } catch (error) {
+            console.error('Error uploading file:', file.name, error);
+            toast.error(`Failed to upload ${file.name}`);
+          }
+        }
+        
+        toast.success('Project documents uploaded successfully!');
+      }
+      
       // Show success toast
       toast.success(`Project "${data.name}" created successfully!`, {
         description: "You can now start managing your project and assign tasks.",
         duration: 5000,
       })
-      // Optionally handle file uploads here
       router.push("/projects")
     } catch (error: any) {
       console.error("Failed to create project:", error)
@@ -274,6 +299,66 @@ export default function ProjectCreationPage() {
 
   const handleRemoveCategory = (categoryToRemove: string) => {
     setTaskCategories(taskCategories.filter((category) => category !== categoryToRemove))
+  }
+
+  // File upload handlers
+  const handleFileUpload = async (files: File[]) => {
+    if (!currentOrganization?.id) {
+      toast.error('No organization selected');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      // For now, just store files locally - they'll be uploaded after project creation
+      setUploadedFiles(prev => [...prev, ...files]);
+      toast.success(`${files.length} file(s) selected for upload`);
+    } catch (error) {
+      console.error('Error handling file upload:', error);
+      toast.error('Failed to process files');
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  const handleRemoveFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  }
+
+  const handleDownloadDocument = async (doc: ProjectDocument) => {
+    try {
+      const response = await (projectAPIDirect || projectAPIFromIndex).getProjectDocumentDownload(
+        doc.project_id,
+        doc.id,
+        currentOrganization!.id
+      );
+      
+      const link = document.createElement('a');
+      link.href = response.download_url;
+      link.download = doc.original_filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error downloading document:', error);
+      toast.error('Failed to download file');
+    }
+  }
+
+  const handleDeleteDocument = async (doc: ProjectDocument) => {
+    try {
+      await (projectAPIDirect || projectAPIFromIndex).deleteProjectDocument(
+        doc.project_id,
+        doc.id,
+        currentOrganization!.id
+      );
+      
+      setUploadedDocuments(prev => prev.filter(d => d.id !== doc.id));
+      toast.success('Document deleted successfully');
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      toast.error('Failed to delete document');
+    }
   }
 
   return (
@@ -812,15 +897,111 @@ export default function ProjectCreationPage() {
           {/* Project Documents */}
           <div className="p-6 border border-gray-200 rounded-lg">
             <h2 className="text-lg font-medium text-gray-800 mb-4">Project Documents</h2>
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center flex flex-col items-center justify-center h-48">
-              <UploadCloud className="h-10 w-10 text-gray-400 mb-3" />
-              <p className="text-sm text-gray-600">
-                <span className="font-medium text-orange-600 hover:text-orange-500 cursor-pointer">Drop files here</span>{" "}
-                or click to upload
-              </p>
-              <p className="text-xs text-gray-500 mt-1">Maximum 10 files, up to 10MB each</p>
-              <p className="text-xs text-gray-500">Supported formats: PDF, Word, Excel, Images</p>
+            
+            {/* File Upload Area */}
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center flex flex-col items-center justify-center h-48 mb-4">
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length > 0) {
+                    handleFileUpload(files);
+                  }
+                }}
+                className="hidden"
+                id="file-upload"
+                disabled={isUploading}
+              />
+              <label htmlFor="file-upload" className="cursor-pointer">
+                <UploadCloud className={`h-10 w-10 mb-3 ${isUploading ? 'text-gray-300' : 'text-gray-400'}`} />
+                <p className="text-sm text-gray-600">
+                  <span className={`font-medium ${isUploading ? 'text-gray-400' : 'text-orange-600 hover:text-orange-500'}`}>
+                    {isUploading ? 'Uploading...' : 'Drop files here'}
+                  </span>{" "}
+                  or click to upload
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Maximum 10 files, up to 10MB each</p>
+                <p className="text-xs text-gray-500">Supported formats: PDF, Word, Excel, Images, Text</p>
+              </label>
             </div>
+
+            {/* Uploaded Files List */}
+            {uploadedFiles.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-gray-700">Selected Files ({uploadedFiles.length})</h3>
+                {uploadedFiles.map((file, index) => (
+                  <div key={index} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                    <div className="flex-shrink-0">
+                      {file.type.startsWith('image/') ? (
+                        <Image className="h-5 w-5 text-blue-500" />
+                      ) : (
+                        <FileText className="h-5 w-5 text-gray-500" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {file.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveFile(index)}
+                      disabled={isUploading}
+                      className="p-1 text-gray-400 hover:text-red-500 disabled:opacity-50"
+                      title="Remove file"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Existing Documents (for editing) */}
+            {uploadedDocuments.length > 0 && (
+              <div className="space-y-2 mt-4">
+                <h3 className="text-sm font-medium text-gray-700">Existing Documents ({uploadedDocuments.length})</h3>
+                {uploadedDocuments.map((document) => (
+                  <div key={document.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                    <div className="flex-shrink-0">
+                      {document.mime_type?.startsWith('image/') ? (
+                        <Image className="h-5 w-5 text-blue-500" />
+                      ) : (
+                        <FileText className="h-5 w-5 text-gray-500" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {document.original_filename}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {((document.file_size || 0) / 1024).toFixed(1)} KB • {new Date(document.uploaded_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDownloadDocument(document)}
+                        className="p-1 text-gray-400 hover:text-blue-500"
+                        title="Download"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteDocument(document)}
+                        className="p-1 text-gray-400 hover:text-red-500"
+                        title="Delete"
+                      >
+                        <Trash className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </form>
       </div>

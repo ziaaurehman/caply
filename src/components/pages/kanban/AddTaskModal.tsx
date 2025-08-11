@@ -72,12 +72,12 @@ export default function AddTaskModal({ isOpen, onClose, onSave, listId, projectM
     }))
   }
 
-  const handleAssigneeToggle = (userId: string) => {
+  const handleAssigneeToggle = (projectMemberId: string) => {
     setFormData(prev => ({
       ...prev,
-      assignee_ids: prev.assignee_ids.includes(userId)
-        ? prev.assignee_ids.filter(id => id !== userId)
-        : [...prev.assignee_ids, userId]
+      assignee_ids: prev.assignee_ids.includes(projectMemberId)
+        ? prev.assignee_ids.filter(id => id !== projectMemberId)
+        : [...prev.assignee_ids, projectMemberId]
     }))
   }
 
@@ -85,7 +85,7 @@ export default function AddTaskModal({ isOpen, onClose, onSave, listId, projectM
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-lg font-semibold text-gray-800">Add New Card</h2>
           <button
@@ -187,19 +187,19 @@ export default function AddTaskModal({ isOpen, onClose, onSave, listId, projectM
               </label>
               <div className="space-y-2 max-h-32 overflow-y-auto">
                 {projectMembers.map((member) => (
-                  <label key={member.user_id} className="flex items-center space-x-2 cursor-pointer">
+                  <label key={member.id} className="flex items-center space-x-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={formData.assignee_ids.includes(member.user_id)}
-                      onChange={() => handleAssigneeToggle(member.user_id)}
+                      checked={formData.assignee_ids.includes(member.id)}
+                      onChange={() => handleAssigneeToggle(member.id)}
                       className="rounded border-gray-300 text-orange-600 focus:ring-orange-500"
                       disabled={isSubmitting}
                     />
                     <div className="flex items-center space-x-2">
                       <div className="h-6 w-6 rounded-full bg-purple-200 flex items-center justify-center text-xs font-medium text-purple-700">
-                        {member.users.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '??'}
+                        {member.organization_members.users.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || '??'}
                       </div>
-                      <span className="text-sm text-gray-700">{member.users.full_name}</span>
+                      <span className="text-sm text-gray-700">{member.organization_members.users.full_name}</span>
                     </div>
                   </label>
                 ))}

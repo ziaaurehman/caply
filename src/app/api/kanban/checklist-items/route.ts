@@ -1,80 +1,90 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authConfig);
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  try {
+    const session = await getServerSession(authConfig);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-  const supabase = await createClient();
-  const body = await req.json();
-  const { checklist_id, content, due_date, assigned_to } = body;
+    const supabase = await createClient();
+    const body = await req.json();
+    const { checklist_id, content, due_date, assigned_to_project_member_id, organizationId } = body;
+    const orgId = organizationId || req.headers.get('x-organization-id');
 
-  if (!checklist_id || !content) {
-    return NextResponse.json({ error: 'Checklist ID and content are required' }, { status: 400 });
-  }
+    if (!checklist_id || !content) {
+      return NextResponse.json({ error: 'Checklist ID and content are required' }, { status: 400 });
+    }
 
-  // Verify user has access to organization
-  const { data: userOrg, error: orgError } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', session.user.id)
-    .eq('status', 'active')
-    .single();
+    if (!orgId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
 
-  if (orgError || !userOrg) {
-    return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
-  }
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      orgId,
+      { resource: 'projects', action: 'update' }
+    );
 
-  // Verify checklist exists and user has access through project organization
-  const { data: checklist, error: checklistError } = await supabase
-    .from('checklists')
-    .select(`
-      id,
-      name,
-      card_id,
-      cards!inner (
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status });
+    }
+
+    // Verify checklist exists and user has access through project organization
+    const { data: checklist, error: checklistError } = await supabase
+      .from('checklists')
+      .select(`
         id,
-        title,
-        list_id,
-        lists!inner (
+        name,
+        card_id,
+        cards!inner (
           id,
-          board_id,
-          boards!inner (
+          title,
+          list_id,
+          lists!inner (
             id,
-            project_id,
-            projects!inner (
+            board_id,
+            boards!inner (
               id,
-              organization_id
+              project_id,
+              projects!inner (
+                id,
+                organization_id
+              )
             )
           )
         )
-      )
-    `)
-    .eq('id', checklist_id)
-    .eq('cards.lists.boards.projects.organization_id', userOrg.organization_id)
-    .single();
-
-  if (checklistError || !checklist) {
-    return NextResponse.json({ error: 'Checklist not found' }, { status: 404 });
-  }
-
-  // If assigned_to is provided, verify the user is a member of the organization
-  if (assigned_to) {
-    const organizationId = (checklist.cards as any).lists.boards.projects.organization_id;
-    const { data: assignedUser, error: userError } = await supabase
-      .from('organization_members')
-      .select('id, user_id')
-      .eq('organization_id', organizationId)
-      .eq('user_id', assigned_to)
-      .eq('status', 'active')
+      `)
+      .eq('id', checklist_id)
+      .eq('cards.lists.boards.projects.organization_id', orgId)
       .single();
 
-    if (userError || !assignedUser) {
-      return NextResponse.json({ error: 'Assigned user not found in organization' }, { status: 404 });
+    if (checklistError || !checklist) {
+      return NextResponse.json({ error: 'Checklist not found' }, { status: 404 });
+    }
+
+  // If assigned_to_project_member_id is provided, verify the project member exists
+  if (assigned_to_project_member_id) {
+    const organizationId = (checklist.cards as any).lists.boards.projects.organization_id;
+    const { data: projectMember, error: memberError } = await supabase
+      .from('project_members')
+      .select(`
+        id,
+        organization_member_id,
+        projects!inner(id, organization_id)
+      `)
+      .eq('id', assigned_to_project_member_id)
+      .eq('projects.organization_id', organizationId)
+      .single();
+
+    if (memberError || !projectMember) {
+      return NextResponse.json({ error: 'Assigned project member not found' }, { status: 404 });
     }
   }
 
@@ -97,17 +107,28 @@ export async function POST(req: NextRequest) {
       content,
       position,
       due_date,
-      assigned_to
+      assigned_to_project_member_id
     }])
-    .select(`
-      *,
-      users (
-        id,
-        full_name,
-        email,
-        avatar_url
-      )
-    `)
+          .select(`
+        *,
+        assigned_to_project_member_id,
+        project_members (
+          id,
+          organization_member_id,
+          role,
+          joined_at,
+          organization_members!inner (
+            id,
+            user_id,
+            users!organization_members_user_id_fkey!inner (
+              id,
+              full_name,
+              email,
+              avatar_url
+            )
+          )
+        )
+      `)
     .single();
 
   if (error) {
@@ -131,5 +152,9 @@ export async function POST(req: NextRequest) {
       }
     }]);
 
-  return NextResponse.json({ checklist_item: checklistItem });
+    return NextResponse.json({ checklist_item: checklistItem });
+  } catch (error) {
+    console.error('Error creating checklist item:', error);
+    return NextResponse.json({ error: 'Failed to create checklist item' }, { status: 500 });
+  }
 }

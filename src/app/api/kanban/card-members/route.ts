@@ -5,11 +5,11 @@ import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { card_id, user_id } = body;
+    const { card_id, project_member_id } = body;
     const organizationId = body.organizationId || body.organization_id || req.headers.get('x-organization-id');
 
-    if (!card_id || !user_id) {
-      return NextResponse.json({ error: 'Card ID and User ID are required' }, { status: 400 });
+    if (!card_id || !project_member_id) {
+      return NextResponse.json({ error: 'Card ID and Project Member ID are required' }, { status: 400 });
     }
 
     if (!organizationId) {
@@ -59,45 +59,69 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Card not found' }, { status: 404 });
     }
 
-    // Verify the user to be assigned is a member of the organization
-    const { data: targetUser, error: userError } = await supabase
-      .from('organization_members')
-      .select('id, user_id, users!inner(id, full_name, email, avatar_url)')
-      .eq('organization_id', organizationId)
-      .eq('user_id', user_id)
-      .eq('status', 'active')
+    // Verify the project member exists and belongs to the same project
+    const { data: projectMember, error: memberError } = await supabase
+      .from('project_members')
+      .select(`
+        id,
+        role,
+        organization_member_id,
+        organization_members!inner (
+          id,
+          user_id,
+          users!organization_members_user_id_fkey!inner (
+            id,
+            full_name,
+            email,
+            avatar_url
+          )
+        )
+      `)
+      .eq('id', project_member_id)
+      .eq('organization_members.organization_id', organizationId)
+      .eq('organization_members.status', 'active')
       .single();
 
-    if (userError || !targetUser) {
-      return NextResponse.json({ error: 'User not found in organization' }, { status: 404 });
+    if (memberError || !projectMember) {
+      return NextResponse.json({ error: 'Project member not found' }, { status: 404 });
     }
 
-    // Check if user is already assigned to the card
+    // Check if project member is already assigned to the card
     const { data: existingMember } = await supabase
       .from('card_members')
       .select('id')
       .eq('card_id', card_id)
-      .eq('user_id', user_id)
+      .eq('project_member_id', project_member_id)
       .single();
 
     if (existingMember) {
-      return NextResponse.json({ error: 'User is already assigned to this card' }, { status: 400 });
+      return NextResponse.json({ error: 'Project member is already assigned to this card' }, { status: 400 });
     }
 
-    // Assign user to card
+    // Assign project member to card
     const { data: cardMember, error } = await supabase
       .from('card_members')
       .insert([{
         card_id,
-        user_id
+        project_member_id
       }])
       .select(`
         *,
-        users (
+        project_members (
           id,
-          full_name,
-          email,
-          avatar_url
+          organization_member_id,
+          role,
+          joined_at,
+          organization_members!inner (
+            id,
+            user_id,
+            users!organization_members_user_id_fkey!inner (
+              id,
+              full_name,
+              email,
+              avatar_url
+            )
+          )
         )
       `)
       .single();
@@ -117,8 +141,8 @@ export async function POST(req: NextRequest) {
         entity_type: 'member',
         entity_id: cardMember.id,
         details: { 
-          assigned_user_id: user_id,
-          assigned_user_name: (targetUser.users as any).full_name,
+          assigned_project_member_id: project_member_id,
+          assigned_user_name: (projectMember.organization_members as any).users.full_name,
           card_title: card.title 
         }
       }]);
@@ -134,11 +158,11 @@ export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const cardId = searchParams.get('card_id');
-    const userId = searchParams.get('user_id');
+    const projectMemberId = searchParams.get('project_member_id');
     const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
-    if (!cardId || !userId) {
-      return NextResponse.json({ error: 'Card ID and User ID are required' }, { status: 400 });
+    if (!cardId || !projectMemberId) {
+      return NextResponse.json({ error: 'Card ID and Project Member ID are required' }, { status: 400 });
     }
 
     if (!organizationId) {
@@ -193,26 +217,34 @@ export async function DELETE(req: NextRequest) {
       .from('card_members')
       .select(`
         id,
-        users (
+        project_members (
           id,
-          full_name,
-          email
+          organization_member_id,
+          organization_members!inner (
+            id,
+            user_id,
+            users!organization_members_user_id_fkey!inner (
+              id,
+              full_name,
+              email
+            )
+          )
         )
       `)
       .eq('card_id', cardId)
-      .eq('user_id', userId)
+      .eq('project_member_id', projectMemberId)
       .single();
 
     if (memberError || !cardMember) {
       return NextResponse.json({ error: 'Card member not found' }, { status: 404 });
     }
 
-    // Remove user from card
+    // Remove project member from card
     const { error } = await supabase
       .from('card_members')
       .delete()
       .eq('card_id', cardId)
-      .eq('user_id', userId);
+      .eq('project_member_id', projectMemberId);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -229,8 +261,8 @@ export async function DELETE(req: NextRequest) {
         entity_type: 'member',
         entity_id: cardMember.id,
         details: { 
-          removed_user_id: userId,
-          removed_user_name: (cardMember.users as any).full_name,
+          removed_project_member_id: projectMemberId,
+          removed_user_name: ((cardMember.project_members as any).organization_members as any).users.full_name,
           card_title: card.title 
         }
       }]);

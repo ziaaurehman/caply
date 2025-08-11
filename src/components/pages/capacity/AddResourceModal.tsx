@@ -3,14 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { X, Users, Clock, Calendar, User } from 'lucide-react';
 import { capacityAPI } from '@/utils/api/capacity';
-import { projectAPI } from '@/utils/api/project';
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
+import { teamAPI } from '@/utils/api/team';
 
 interface AddResourceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onResourceAdded: () => void;
-  projectId: string;
 }
 
 interface ProjectMember {
@@ -36,60 +35,49 @@ interface Project {
   project_members?: ProjectMember[];
 }
 
-export default function AddResourceModal({ isOpen, onClose, onResourceAdded, projectId }: AddResourceModalProps) {
+export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: AddResourceModalProps) {
   const { currentOrganization } = useOrganizationStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [project, setProject] = useState<Project | null>(null);
-  const [availableMembers, setAvailableMembers] = useState<ProjectMember[]>([]);
+  const [availableMembers, setAvailableMembers] = useState<any[]>([]);
   const [formData, setFormData] = useState({
-    project_member_id: '',
-    allocated_hours_per_week: 40,
-    start_date: '',
-    end_date: '',
-    role: '',
-    notes: ''
+    organization_member_id: '',
+    weekly_capacity_hours: 40,
   });
 
   useEffect(() => {
     const fetchProject = async () => {
-      if (!currentOrganization?.id || !projectId) return;
-      
+      if (!currentOrganization?.id) return;
       try {
         setLoading(true);
-        const response = await projectAPI.getProject(projectId, currentOrganization.id);
-        setProject(response.project);
-        
-        // Filter out members who already have current allocations
-        const members = response.project.project_members || [];
+        const teamRes = await teamAPI.getTeamMembers(currentOrganization.id);
+        // Use organization members
+        const members = (teamRes.members || []).map((m: any) => ({
+          id: m.id,
+          organization_member_id: m.id,
+          role: m.roles?.name || '',
+          organization_members: {
+            id: m.id,
+            user_id: m.users?.id,
+            users: m.users
+          }
+        }));
         setAvailableMembers(members);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch project details');
+        setError(err instanceof Error ? err.message : 'Failed to fetch members');
       } finally {
         setLoading(false);
       }
     };
 
-    if (isOpen && projectId && projectId !== 'all') {
+    if (isOpen) {
       fetchProject();
-      // Set default start date to current week
-      const today = new Date();
-      const currentWeekStart = new Date(today);
-      const dayOfWeek = today.getDay();
-      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      currentWeekStart.setDate(today.getDate() - daysToSubtract);
-      
-      setFormData(prev => ({
-        ...prev,
-        start_date: currentWeekStart.toISOString().split('T')[0],
-        allocated_hours_per_week: 40
-      }));
     }
-  }, [isOpen, projectId, currentOrganization?.id]);
+  }, [isOpen, currentOrganization?.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.project_member_id || !formData.start_date || formData.allocated_hours_per_week <= 0) {
+    if (!formData.organization_member_id) {
       setError('Please fill in all required fields');
       return;
     }
@@ -103,19 +91,21 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
       setLoading(true);
       setError(null);
 
-      const allocationData = {
-        project_id: projectId,
-        project_member_id: formData.project_member_id,
-        allocated_hours_per_week: formData.allocated_hours_per_week,
-        start_date: formData.start_date,
-        end_date: formData.end_date || null,
-        role: formData.role || null,
-        notes: formData.notes || null,
-        is_active: true,
-        organization_id: currentOrganization.id
-      };
-
-      await capacityAPI.createAllocation(allocationData);
+      const member = availableMembers.find(m => m.id === formData.organization_member_id);
+      const res = await fetch('/api/capacity/resources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId: currentOrganization.id,
+          organization_member_id: member?.organization_member_id || formData.organization_member_id,
+          weekly_capacity_hours: formData.weekly_capacity_hours,
+          is_active: true
+        })
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || 'Failed to add resource');
+      }
 
       onResourceAdded();
       onClose();
@@ -129,12 +119,8 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
 
   const resetForm = () => {
     setFormData({
-      project_member_id: '',
-      allocated_hours_per_week: 40,
-      start_date: '',
-      end_date: '',
-      role: '',
-      notes: ''
+      organization_member_id: '',
+      weekly_capacity_hours: 40,
     });
     setError(null);
   };
@@ -144,16 +130,16 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
     onClose();
   };
 
-  const selectedMember = availableMembers.find(member => member.id === formData.project_member_id);
+  const selectedMember = availableMembers.find(member => member.id === formData.organization_member_id);
 
-  if (!isOpen || !projectId || projectId === 'all') return null;
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white px-6 py-4 border-b border-gray-200">
           <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-gray-900">Add Resource Allocation</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Add Resource</h2>
             <button
               onClick={handleClose}
               className="text-gray-400 hover:text-gray-600 p-2"
@@ -161,11 +147,7 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
               <X className="h-5 w-5" />
             </button>
           </div>
-          {project && (
-            <p className="text-sm text-gray-600 mt-1">
-              Project: {project.name} {project.code && `(${project.code})`}
-            </p>
-          )}
+          {/* No project context here */}
         </div>
 
         <div className="px-6 py-6">
@@ -181,21 +163,21 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Team Member Selection */}
             <div>
-              <label htmlFor="project_member_id" className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="organization_member_id" className="block text-sm font-medium text-gray-700 mb-2">
                 <Users className="inline h-4 w-4 mr-1" />
                 Team Member *
               </label>
               <select
-                id="project_member_id"
-                value={formData.project_member_id}
-                onChange={(e) => setFormData(prev => ({ ...prev, project_member_id: e.target.value }))}
+                id="organization_member_id"
+                value={formData.organization_member_id}
+                onChange={(e) => setFormData(prev => ({ ...prev, organization_member_id: e.target.value }))}
                 className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 required
               >
                 <option value="">Select a team member...</option>
-                {availableMembers.map((member) => (
+                 {availableMembers.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.organization_members.users.full_name} - {member.role}
+                     {member.organization_members.users.full_name} - {member.role}
                   </option>
                 ))}
               </select>
@@ -228,36 +210,23 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
               <div>
                 <label htmlFor="allocated_hours_per_week" className="block text-sm font-medium text-gray-700 mb-2">
                   <Clock className="inline h-4 w-4 mr-1" />
-                  Weekly Hours *
+                  Weekly Capacity Hours
                 </label>
                 <input
                   type="number"
                   id="allocated_hours_per_week"
-                  value={formData.allocated_hours_per_week}
-                  onChange={(e) => setFormData(prev => ({ ...prev, allocated_hours_per_week: Number(e.target.value) }))}
+                  value={formData.weekly_capacity_hours}
+                  onChange={(e) => setFormData(prev => ({ ...prev, weekly_capacity_hours: Number(e.target.value) }))}
                   min="0"
                   max="168"
                   step="0.5"
                   className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                   placeholder="e.g., 40"
-                  required
                 />
                 <p className="text-xs text-gray-500 mt-1">Maximum 168 hours per week</p>
               </div>
 
-              <div>
-                <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
-                  Role/Position
-                </label>
-                <input
-                  type="text"
-                  id="role"
-                  value={formData.role}
-                  onChange={(e) => setFormData(prev => ({ ...prev, role: e.target.value }))}
-                  className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                  placeholder="e.g., Frontend Developer"
-                />
-              </div>
+              <div></div>
             </div>
 
             {/* Date Range */}
@@ -323,7 +292,7 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
             <button
               type="submit"
               onClick={handleSubmit}
-              disabled={loading || !formData.project_member_id || !formData.start_date || formData.allocated_hours_per_week <= 0}
+              disabled={loading || !formData.organization_member_id}
               className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               {loading ? (
@@ -332,7 +301,7 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded, pro
                   Adding...
                 </div>
               ) : (
-                'Add Resource Allocation'
+                'Add Resource'
               )}
             </button>
           </div>

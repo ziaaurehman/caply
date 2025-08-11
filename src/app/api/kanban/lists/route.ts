@@ -68,12 +68,22 @@ export async function GET(req: NextRequest) {
           created_at,
           updated_at,
           card_members (
-            user_id,
-            users (
+            project_member_id,
+            project_members!inner (
               id,
-              full_name,
-              email,
-              avatar_url
+              organization_member_id,
+              role,
+              joined_at,
+              organization_members!inner (
+                id,
+                user_id,
+                users!organization_members_user_id_fkey!inner (
+                  id,
+                  full_name,
+                  email,
+                  avatar_url
+                )
+              )
             )
           ),
           card_labels (
@@ -92,7 +102,25 @@ export async function GET(req: NextRequest) {
               id,
               content,
               is_completed,
-              position
+              position,
+              due_date,
+              assigned_to_project_member_id,
+              project_members (
+                id,
+                organization_member_id,
+                role,
+                joined_at,
+                organization_members (
+                  id,
+                  user_id,
+                  users!organization_members_user_id_fkey (
+                    id,
+                    full_name,
+                    email,
+                    avatar_url
+                  )
+                )
+              )
             )
           )
         )
@@ -105,7 +133,22 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ lists: lists || [] });
+    // Transform card_labels to labels and cover data for frontend compatibility
+    const transformedLists = lists?.map(list => ({
+      ...list,
+      cards: list.cards?.map((card: any) => ({
+        ...card,
+        labels: card.card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+        cover: {
+          color: card.cover_color,
+          image: card.cover_image,
+          size: card.cover_color || card.cover_image ? 'small' : undefined
+        },
+        card_labels: undefined // Remove the original card_labels to avoid confusion
+      })) || []
+    })) || [];
+
+    return NextResponse.json({ lists: transformedLists });
   } catch (error: any) {
     console.error('Error in GET /api/kanban/lists:', error);
     return NextResponse.json({ 
