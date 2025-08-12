@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { validateOrganizationAccess, validateOrganizationAccessWithId } from '@/utils/organizationUtils'
+import { redisSetJSON } from '@/utils/redis'
 
 interface Params {
   id: string
@@ -165,6 +166,51 @@ export async function PUT(
       }
     }
 
+    // Refresh cached roles list for this organization (15 days)
+    try {
+      const { data: roles } = await supabase
+        .from('roles')
+        .select(`
+          id,
+          name,
+          display_name,
+          description,
+          is_system_role,
+          organization_id,
+          created_at,
+          updated_at,
+          role_permissions:role_permissions(
+            permissions:permission_id(
+              id,
+              name,
+              display_name,
+              description,
+              module,
+              action
+            )
+          )
+        `)
+        .eq('organization_id', organizationId)
+        .eq('is_system_role', false)
+        .order('name')
+
+      const transformed = (roles || []).map((role: any) => ({
+        id: role.id,
+        name: role.name,
+        display_name: role.display_name,
+        description: role.description,
+        is_system_role: role.is_system_role,
+        organization_id: role.organization_id,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
+      }))
+
+      await redisSetJSON(`organization:roles:${organizationId}`, transformed, 1296000)
+    } catch (e) {
+      console.warn('Failed to refresh roles cache after update:', e)
+    }
+
     return NextResponse.json({ message: 'Role updated successfully' })
 
   } catch (error) {
@@ -253,6 +299,51 @@ export async function DELETE(
     if (deleteError) {
       console.error('Error deleting role:', deleteError)
       return NextResponse.json({ error: 'Failed to delete role' }, { status: 500 })
+    }
+
+    // Refresh cached roles after deletion (15 days)
+    try {
+      const { data: roles } = await supabase
+        .from('roles')
+        .select(`
+          id,
+          name,
+          display_name,
+          description,
+          is_system_role,
+          organization_id,
+          created_at,
+          updated_at,
+          role_permissions:role_permissions(
+            permissions:permission_id(
+              id,
+              name,
+              display_name,
+              description,
+              module,
+              action
+            )
+          )
+        `)
+        .eq('organization_id', organizationId)
+        .eq('is_system_role', false)
+        .order('name')
+
+      const transformed = (roles || []).map((role: any) => ({
+        id: role.id,
+        name: role.name,
+        display_name: role.display_name,
+        description: role.description,
+        is_system_role: role.is_system_role,
+        organization_id: role.organization_id,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
+      }))
+
+      await redisSetJSON(`organization:roles:${organizationId}`, transformed, 1296000)
+    } catch (e) {
+      console.warn('Failed to refresh roles cache after delete:', e)
     }
 
     return NextResponse.json({ message: 'Role deleted successfully' })

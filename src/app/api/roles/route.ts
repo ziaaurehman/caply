@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { validateOrganizationAccess, validateOrganizationAccessWithId } from '@/utils/organizationUtils'
+import { redisGetJSON, redisSetJSON } from '@/utils/redis'
 
 // GET /api/roles - Get organization-specific roles
 export async function GET(request: NextRequest) {
@@ -30,11 +31,21 @@ export async function GET(request: NextRequest) {
       }, { status: validation.status })
     }
 
-    const supabase = await createClient()
     const organizationId = validation.context!.organizationId
 
     console.log('User organization:', organizationId)
 
+    // Try Redis cache first (15 days TTL elsewhere when we set)
+    const cached = await redisGetJSON<any[]>(`organization:roles:${organizationId}`)
+    if (cached && Array.isArray(cached)) {
+      return NextResponse.json({ 
+        roles: cached,
+        organization_id: organizationId,
+        count: cached.length 
+      })
+    }
+
+    const supabase = await createClient()
     // Get organization-specific roles only (exclude system roles)
     const { data: roles, error } = await supabase
       .from('roles')
@@ -81,6 +92,13 @@ export async function GET(request: NextRequest) {
       updated_at: role.updated_at,
       permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
     })) || []
+
+    // Cache the transformed roles list (15 days)
+    try {
+      await redisSetJSON(`organization:roles:${organizationId}`, transformedRoles, 1296000)
+    } catch (e) {
+      console.warn('Failed to cache roles list:', e)
+    }
 
     return NextResponse.json({ 
       roles: transformedRoles,
@@ -194,6 +212,52 @@ export async function POST(request: NextRequest) {
       }
 
       console.log('Role permissions created:', rolePermissions.length)
+    }
+
+    // Update cache for roles list (15 days)
+    try {
+      // fetch latest roles to ensure cache consistency
+      const { data: roles } = await supabase
+        .from('roles')
+        .select(`
+          id,
+          name,
+          display_name,
+          description,
+          is_system_role,
+          organization_id,
+          created_at,
+          updated_at,
+          role_permissions:role_permissions(
+            permissions:permission_id(
+              id,
+              name,
+              display_name,
+              description,
+              module,
+              action
+            )
+          )
+        `)
+        .eq('organization_id', finalOrganizationId)
+        .eq('is_system_role', false)
+        .order('name')
+
+      const transformed = (roles || []).map((role: any) => ({
+        id: role.id,
+        name: role.name,
+        display_name: role.display_name,
+        description: role.description,
+        is_system_role: role.is_system_role,
+        organization_id: role.organization_id,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
+      }))
+
+      await redisSetJSON(`organization:roles:${finalOrganizationId}`, transformed, 1296000)
+    } catch (e) {
+      console.warn('Failed to refresh roles cache after create:', e)
     }
 
     return NextResponse.json({ 

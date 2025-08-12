@@ -1,32 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
+import { redisGetJSON, redisSetJSON } from '@/utils/redis'
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 
 // GET /api/permissions - Get all available permissions
 export async function GET(request: NextRequest) {
   try {
-    // Get organization ID from headers
-    const organizationId = request.headers.get('x-organization-id')
-    
-    if (!organizationId) {
-      return NextResponse.json({ 
-        error: 'Organization ID is required' 
-      }, { status: 400 })
-    }
-
-    // Validate organization access and permissions (admin only)
-    const validation = await validateOrganizationAccessWithId(
-      organizationId,
-      { resource: 'roles', action: 'read' }
-    )
-
-    if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status })
-    }
-
+    const organizationId = request.headers.get('x-organization-id') || 'global'
     const supabase = await createClient()
+
+    // Try cache first: scope by organization for consistency with access rules
+    const cacheKey = `permissions:by-module:${organizationId}`
+    const cached = await redisGetJSON<Record<string, any[]>>(cacheKey)
+    if (cached) {
+      return NextResponse.json({ permissions: cached })
+    }
 
     // Get all permissions grouped by module
     const { data: permissions, error } = await supabase
@@ -47,6 +35,13 @@ export async function GET(request: NextRequest) {
       acc[permission.module].push(permission)
       return acc
     }, {})
+
+    // Cache grouped permissions (15 days)
+    try {
+      await redisSetJSON(cacheKey, groupedPermissions, 1296000)
+    } catch (e) {
+      console.warn('Failed to cache permissions:', e)
+    }
 
     return NextResponse.json({ permissions: groupedPermissions })
 

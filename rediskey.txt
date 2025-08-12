@@ -1,0 +1,4 @@
+organization: organization:{orgId}
+roles: organization:roles:{orgId}
+single member (the new admin): organization:member:{orgId}:{userId}
+all members list: organization:members:{orgId}
