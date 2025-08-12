@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { sendInvitationEmail } from '@/lib/email'
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
+import { redisSetJSON } from '@/utils/redis'
 
 // GET /api/team-members - List all team members in the organization
 export async function GET(request: NextRequest) {
@@ -302,6 +303,86 @@ export async function POST(request: NextRequest) {
     } catch (emailError) {
       console.error('⚠️ Failed to send invitation email, but invitation was created:', emailError)
       // Don't fail the request if email fails - invitation is still created
+    }
+
+    // Refresh organizations cache for the invited user if they already exist
+    try {
+      if (existingUser?.id) {
+        const { data: orgs } = await supabase
+          .from('organization_members')
+          .select(`
+            id,
+            organization_id,
+            user_id,
+            role_id,
+            status,
+            hourly_rate,
+            weekly_capacity,
+            department,
+            hire_date,
+            joined_at,
+            organizations!inner(
+              id,
+              name,
+              slug,
+              description,
+              logo_url,
+              owner_id,
+              created_at
+            ),
+            roles!inner(
+              id,
+              name,
+              display_name,
+              description,
+              role_permissions!inner(
+                permissions!inner(
+                  module,
+                  action
+                )
+              )
+            )
+          `)
+          .eq('user_id', existingUser.id)
+          .eq('status', 'active')
+
+        const transformed = (orgs || []).map((org: any) => ({
+          id: org.organizations.id,
+          name: org.organizations.name,
+          slug: org.organizations.slug,
+          description: org.organizations.description,
+          logo_url: org.organizations.logo_url,
+          is_owner: org.organizations.owner_id === existingUser.id,
+          created_at: org.organizations.created_at,
+          membership_status: org.status,
+          membership: {
+            id: org.id,
+            organization_id: org.organization_id,
+            user_id: org.user_id,
+            role_id: org.role_id,
+            status: org.status,
+            hourly_rate: org.hourly_rate,
+            weekly_capacity: org.weekly_capacity,
+            department: org.department,
+            hire_date: org.hire_date,
+            joined_at: org.joined_at,
+            role: {
+              id: org.roles.id,
+              name: org.roles.name,
+              display_name: org.roles.display_name,
+              description: org.roles.description,
+              permissions: org.roles.role_permissions?.map((rp: any) => ({
+                resource: rp.permissions.module,
+                action: rp.permissions.action
+              })) || []
+            }
+          }
+        }))
+
+        await redisSetJSON(`user:organizations:${existingUser.id}`, transformed, 1296000)
+      }
+    } catch (e) {
+      console.warn('Failed to refresh invited user organizations cache:', e)
     }
 
     return NextResponse.json({ 

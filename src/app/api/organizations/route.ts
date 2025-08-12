@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
+import { redisGetJSON, redisSetJSON } from '@/utils/redis'
 
 // GET /api/organizations - Get user's organizations
 export async function GET(request: NextRequest) {
@@ -12,6 +13,14 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = await createClient()
+
+    // Try cache first (15 days TTL elsewhere when set)
+    const userId = session.user.id
+    const cacheKey = `user:organizations:${userId}`
+    const cached = await redisGetJSON<any[]>(cacheKey)
+    if (cached) {
+      return NextResponse.json({ organizations: cached })
+    }
 
     // Get user's organizations with complete membership and role data
     const { data: organizations, error } = await supabase
@@ -90,6 +99,13 @@ export async function GET(request: NextRequest) {
       }
     }))
 
+    // Cache organizations for this user (15 days)
+    try {
+      await redisSetJSON(cacheKey, transformedOrganizations, 1296000)
+    } catch (e) {
+      console.warn('Failed to cache user organizations:', e)
+    }
+
     return NextResponse.json({ organizations: transformedOrganizations })
 
   } catch (error) {
@@ -166,6 +182,84 @@ export async function POST(request: NextRequest) {
     if (memberError) {
       console.error('Error adding organization member:', memberError)
       return NextResponse.json({ error: 'Failed to add user to organization' }, { status: 500 })
+    }
+
+    // Refresh user's organizations cache after creation (15 days)
+    try {
+      const { data: organizations } = await supabase
+        .from('organization_members')
+        .select(`
+          id,
+          organization_id,
+          user_id,
+          role_id,
+          status,
+          hourly_rate,
+          weekly_capacity,
+          department,
+          hire_date,
+          joined_at,
+          organizations!inner(
+            id,
+            name,
+            slug,
+            description,
+            logo_url,
+            owner_id,
+            created_at
+          ),
+          roles!inner(
+            id,
+            name,
+            display_name,
+            description,
+            role_permissions!inner(
+              permissions!inner(
+                module,
+                action
+              )
+            )
+          )
+        `)
+        .eq('user_id', session.user.id)
+        .eq('status', 'active')
+
+      const transformedOrganizations = (organizations || []).map((org: any) => ({
+        id: org.organizations.id,
+        name: org.organizations.name,
+        slug: org.organizations.slug,
+        description: org.organizations.description,
+        logo_url: org.organizations.logo_url,
+        is_owner: org.organizations.owner_id === session.user.id,
+        created_at: org.organizations.created_at,
+        membership_status: org.status,
+        membership: {
+          id: org.id,
+          organization_id: org.organization_id,
+          user_id: org.user_id,
+          role_id: org.role_id,
+          status: org.status,
+          hourly_rate: org.hourly_rate,
+          weekly_capacity: org.weekly_capacity,
+          department: org.department,
+          hire_date: org.hire_date,
+          joined_at: org.joined_at,
+          role: {
+            id: org.roles.id,
+            name: org.roles.name,
+            display_name: org.roles.display_name,
+            description: org.roles.description,
+            permissions: org.roles.role_permissions?.map((rp: any) => ({
+              resource: rp.permissions.module,
+              action: rp.permissions.action
+            })) || []
+          }
+        }
+      }))
+
+      await redisSetJSON(`user:organizations:${session.user.id}`, transformedOrganizations, 1296000)
+    } catch (e) {
+      console.warn('Failed to refresh user organizations cache after create:', e)
     }
 
     return NextResponse.json({ 
