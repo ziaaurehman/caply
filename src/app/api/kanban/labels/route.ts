@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(req: NextRequest) {
   try {
@@ -48,6 +49,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Board not found' }, { status: 404 });
     }
 
+    // Try cache first (15 days)
+    const cacheKey = `kanban:labels:${boardId}:${organizationId}`;
+    const cached = await redisGetJSON<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
     // Get labels for the board
     const { data: labels, error } = await supabase
       .from('labels')
@@ -59,7 +67,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ labels: labels || [] });
+    const result = { labels: labels || [] };
+    try {
+      await redisSetJSON(cacheKey, result, 1296000);
+    } catch (e) {
+      console.warn('Failed to cache kanban labels:', e);
+    }
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error in GET /api/kanban/labels:', error);
     return NextResponse.json({ 
@@ -146,6 +160,19 @@ export async function POST(req: NextRequest) {
         entity_id: label.id,
         details: { label_name: name, label_color: color }
       }]);
+
+    // Refresh labels cache for this board
+    try {
+      const { data: freshLabels } = await supabase
+        .from('labels')
+        .select('*')
+        .eq('board_id', board_id)
+        .order('name', { ascending: true });
+      const cacheKey = `kanban:labels:${board_id}:${organizationId}`;
+      await redisSetJSON(cacheKey, { labels: freshLabels || [] }, 1296000);
+    } catch (e) {
+      console.warn('Failed to refresh kanban labels cache after create:', e);
+    }
 
     return NextResponse.json({ label });
   } catch (error) {

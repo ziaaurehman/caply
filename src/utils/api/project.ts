@@ -234,12 +234,13 @@ export const projectAPI = {
   uploadProjectDocument: async (data: CreateProjectDocumentData): Promise<ProjectDocumentResponse> => {
     const formData = new FormData();
     formData.append('file', data.file);
-    formData.append('organizationId', data.organizationId);
+    // Note: Don't append organizationId to formData since it's in headers
 
     const response = await fetch(`/api/projects/${data.projectId}/documents`, {
       method: 'POST',
       headers: {
         'x-organization-id': data.organizationId,
+        // Don't set Content-Type for FormData - browser will set it with boundary
       },
       body: formData
     });

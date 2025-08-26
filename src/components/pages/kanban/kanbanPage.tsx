@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import Image from "next/image"
 import { ChevronDown, Plus, Settings, Users, Filter, Search, Bell } from "lucide-react"
+import { toast } from "sonner"
 import { kanbanAPI } from "@/utils/api/kanban"
 import { projectAPI } from "@/utils/api/project"
 import { useOrganizationStore } from "@/lib/stores/organizationStore"
@@ -68,6 +69,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
   const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
+
+
 
   // Filters and search
   const [filters, setFilters] = useState<KanbanFilters>({});
@@ -216,15 +219,27 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // Drag and Drop handlers
   const handleDragStart = useCallback((e: React.DragEvent, card: Card) => {
+    // Find the source list ID by searching for the card in our current state
+    let sourceListId = null;
+    for (const list of kanbanState.lists) {
+      const foundCard = (list.cards || []).find(c => c.id === card.id);
+      if (foundCard) {
+        sourceListId = list.id;
+        break;
+      }
+    }
+    
+    console.log('Drag start - Card:', card.title, 'Source List ID:', sourceListId);
+    
     setDragState({
       isDragging: true,
       draggedCard: card,
-      sourceListId: card.list_id,
+      sourceListId: sourceListId,
       targetListId: null
     });
     e.dataTransfer.setData("cardId", card.id);
-    e.dataTransfer.setData("sourceListId", card.list_id);
-  }, []);
+    e.dataTransfer.setData("sourceListId", sourceListId || '');
+  }, [kanbanState.lists]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -234,22 +249,94 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     e.preventDefault();
     
     const cardId = e.dataTransfer.getData("cardId");
-    const sourceListId = e.dataTransfer.getData("sourceListId");
+    let sourceListId = e.dataTransfer.getData("sourceListId");
+    
+    // Fallback: if sourceListId is empty or undefined, use the drag state
+    if (!sourceListId || sourceListId === 'undefined') {
+      sourceListId = dragState.sourceListId || '';
+    }
+
+    console.log('Drop event - Card ID:', cardId, 'Source List ID:', sourceListId, 'Target List ID:', targetListId);
 
     if (cardId && sourceListId && sourceListId !== targetListId) {
       if (!currentOrganization?.id) return;
 
-      try {
-        // Update card's list
+      // Find the card being moved - more explicit approach
+      let cardToMove = null;
+      let sourceList = null;
+      
+      for (const list of kanbanState.lists) {
+        const foundCard = (list.cards || []).find(card => card.id === cardId);
+        if (foundCard) {
+          cardToMove = foundCard;
+          sourceList = list;
+          break;
+        }
+      }
+
+      if (!cardToMove) {
+        console.warn('Card not found:', cardId);
+        console.log('Available cards:', kanbanState.lists.flatMap(l => l.cards || []).map(c => ({ id: c.id, title: c.title })));
+        return;
+      }
+
+      console.log('Moving card:', cardToMove.title, 'from', sourceListId, 'to', targetListId);
+      console.log('Source list found:', sourceList?.name, 'with', sourceList?.cards?.length, 'cards');
+
+      // Store original state for potential rollback
+      const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
+
+      // OPTIMISTIC UPDATE: Immediately move the card in the UI
+      console.log('Starting optimistic update...');
+      
+      // Force immediate state update
+      setKanbanState(prevState => {
+        const newLists = prevState.lists.map(list => {
+          if (list.id === sourceListId) {
+            // Remove from source list
+            const cardsWithoutMoved = (list.cards || []).filter(card => card.id !== cardId);
+            console.log(`Removing card ${cardId} from ${list.name}, cards left: ${cardsWithoutMoved.length}`);
+            return { ...list, cards: cardsWithoutMoved };
+          }
+          if (list.id === targetListId) {
+            // Add to target list
+            const movedCard = { ...cardToMove, list_id: targetListId };
+            const cardsWithMoved = [...(list.cards || []), movedCard];
+            console.log(`Adding card ${cardId} to ${list.name}, total cards: ${cardsWithMoved.length}`);
+            return { ...list, cards: cardsWithMoved };
+          }
+          return list;
+        });
+        
+        console.log('Optimistic update completed');
+        return { ...prevState, lists: newLists };
+      });
+
+      // Make API call in the background after a small delay to ensure UI update
+      setTimeout(async () => {
+        try {
+          console.log('Making API call to update card...');
         await kanbanAPI.updateCard(cardId, { list_id: targetListId, organizationId: currentOrganization.id });
         
-        // Refresh board data
+          // API call successful - refresh data to ensure consistency
         if (kanbanState.currentBoard) {
           await loadBoardData(kanbanState.currentBoard.id);
         }
+          console.log('API call successful');
       } catch (error) {
         console.error("Error moving card:", error);
-      }
+          
+          // ROLLBACK: Revert the optimistic update on failure
+          console.log('Rolling back to original state');
+          setKanbanState(prev => ({
+            ...prev,
+            lists: originalLists
+          }));
+          
+          // Show error toast
+          toast.error('Failed to move card. Please try again.');
+        }
+      }, 0);
     }
 
     setDragState({
@@ -258,7 +345,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       sourceListId: null,
       targetListId: null
     });
-  }, [kanbanState.currentBoard]);
+  }, [kanbanState.currentBoard, kanbanState.lists, currentOrganization?.id]);
 
   // Board management
   const updateBoardBackground = async (backgroundType: 'image' | 'color', value: string) => {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(req: NextRequest) {
   try {
@@ -26,6 +27,14 @@ export async function GET(req: NextRequest) {
     }
 
     const supabase = await createClient();
+
+    // Try cache first (15 days TTL)
+    const cacheKey = `organization:clients:${organizationId}`
+    const cached = await redisGetJSON<any>(cacheKey)
+    if (cached) {
+      return NextResponse.json(cached)
+    }
+
     const { data, error } = await supabase
       .from('clients')
       .select('*')
@@ -36,7 +45,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ clients: data });
+    const result = {
+      clients: data || []
+    };
+
+    // Cache the result (15 days)
+    try {
+      await redisSetJSON(cacheKey, result, 1296000)
+    } catch (e) {
+      console.warn('Failed to cache clients:', e)
+    }
+
+    return NextResponse.json(result);
   } catch (error: any) {
     console.error('Error in GET /api/clients:', error);
     return NextResponse.json({ 
@@ -89,6 +109,22 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Refresh clients cache after creation (15 days)
+    try {
+      const { data: freshClients } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: false });
+
+      const cacheKey = `organization:clients:${organizationId}`;
+      await redisSetJSON(cacheKey, {
+        clients: freshClients || []
+      }, 1296000);
+    } catch (e) {
+      console.warn('Failed to refresh clients cache after create:', e);
     }
 
     return NextResponse.json({ client: data });

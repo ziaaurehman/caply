@@ -23,15 +23,16 @@ export default function KanbanColumn({
   onDragOver, 
   onDrop, 
   onAddCard,
-  onCardClick 
+  onCardClick
 }: KanbanColumnProps) {
   return (
     <div
-      className="flex-shrink-0 w-80 bg-white/90 backdrop-blur-sm rounded-xl shadow-md p-4 flex flex-col min-h-[350px]"
+      className="flex-shrink-0 w-80 bg-white/90 backdrop-blur-sm rounded-xl shadow-md p-4 flex flex-col"
+      style={{ height: 'calc(100vh - 120px)' }}
       onDragOver={onDragOver}
       onDrop={(e) => onDrop(e, list.id)}
     >
-      <div className="flex items-center mb-4">
+      <div className="flex items-center mb-4 flex-shrink-0">
         <button
           onClick={() => onAddCard(list.id)}
           className="text-gray-500 hover:text-blue-600 p-1 rounded-full hover:bg-gray-100 mr-2"
@@ -46,7 +47,7 @@ export default function KanbanColumn({
           {cards.length}
         </span>
       </div>
-      <div className="flex-grow overflow-y-auto pr-1 -mr-1 mb-2 space-y-3">
+      <div className="overflow-y-auto pr-1 -mr-1 space-y-3 flex-1">
         {cards.map((card) => (
           <KanbanCard 
             key={card.id} 

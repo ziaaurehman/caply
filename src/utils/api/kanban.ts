@@ -628,8 +628,12 @@ export const kanbanAPI = {
   // ===== CARDS =====
 
   // Get cards by list
-  getCardsByList: async (listId: string): Promise<CardsResponse> => {
-    const response = await fetch(`/api/kanban/cards?list_id=${listId}`);
+  getCardsByList: async (listId: string, organizationId: string): Promise<CardsResponse> => {
+    const response = await fetch(`/api/kanban/cards?list_id=${listId}&organizationId=${organizationId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch cards');
@@ -639,8 +643,12 @@ export const kanbanAPI = {
   },
 
   // Get cards by board
-  getCardsByBoard: async (boardId: string): Promise<CardsResponse> => {
-    const response = await fetch(`/api/kanban/cards?board_id=${boardId}`);
+  getCardsByBoard: async (boardId: string, organizationId: string): Promise<CardsResponse> => {
+    const response = await fetch(`/api/kanban/cards?board_id=${boardId}&organizationId=${organizationId}`, {
+      headers: {
+        'x-organization-id': organizationId,
+      },
+    });
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to fetch cards');

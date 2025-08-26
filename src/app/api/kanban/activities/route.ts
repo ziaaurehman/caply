@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(req: NextRequest) {
   try {
@@ -32,6 +33,14 @@ export async function GET(req: NextRequest) {
     }
 
     const supabase = await createClient();
+
+    // Try cache first (15 days)
+    const scope = cardId ? `card:${cardId}` : `board:${boardId}`;
+    const cacheKey = `kanban:activities:${scope}:${limit}:${offset}:${organizationId}`;
+    const cached = await redisGetJSON<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
 
     // Build query based on parameters
     let query = supabase
@@ -105,7 +114,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ activities: activities || [] });
+    const result = { activities: activities || [] };
+    try {
+      await redisSetJSON(cacheKey, result, 1296000);
+    } catch (e) {
+      console.warn('Failed to cache kanban activities:', e);
+    }
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error in GET /api/kanban/activities:', error);
     return NextResponse.json({ 

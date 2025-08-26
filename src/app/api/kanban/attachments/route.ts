@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
 
@@ -60,6 +61,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Card not found' }, { status: 404 });
     }
 
+    // Try cache first (15 days)
+    const cacheKey = `kanban:attachments:${cardId}:${organizationId}`;
+    const cached = await redisGetJSON<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
     // Get attachments for the card
     const { data: attachments, error } = await supabase
       .from('attachments')
@@ -79,7 +87,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ attachments: attachments || [] });
+    const result = { attachments: attachments || [] };
+    try {
+      await redisSetJSON(cacheKey, result, 1296000);
+    } catch (e) {
+      console.warn('Failed to cache kanban attachments:', e);
+    }
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error fetching attachments:', error);
     return NextResponse.json({ error: 'Failed to fetch attachments' }, { status: 500 });
@@ -210,6 +224,27 @@ export async function POST(req: NextRequest) {
           card_title: card.title 
         }
       }]);
+
+    // Refresh attachments cache for this card
+    try {
+      const cacheKey = `kanban:attachments:${cardId}:${organizationId}`;
+      const { data: freshAttachments } = await supabase
+        .from('attachments')
+        .select(`
+          *,
+          users (
+            id,
+            full_name,
+            email,
+            avatar_url
+          )
+        `)
+        .eq('card_id', cardId)
+        .order('uploaded_at', { ascending: false });
+      await redisSetJSON(cacheKey, { attachments: freshAttachments || [] }, 1296000);
+    } catch (e) {
+      console.warn('Failed to refresh kanban attachments cache after create:', e);
+    }
 
     return NextResponse.json({ attachment });
   } catch (error) {

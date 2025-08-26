@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
+import { redisSetJSON } from '@/utils/redis';
 
 export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authConfig);
@@ -89,6 +90,69 @@ export async function PATCH(req: NextRequest) {
 
   const successCount = results.filter(r => r.success).length;
   const errorCount = results.filter(r => !r.success).length;
+
+  // Refresh cache for the affected list
+  try {
+    const { data: freshCards } = await supabase
+      .from('cards')
+      .select(`
+        *,
+        lists!inner (
+          id,
+          name,
+          boards!inner (
+            id,
+            project_id,
+            projects!inner (
+              id,
+              organization_id
+            )
+          )
+        ),
+        card_members (
+          project_member_id,
+          project_members!inner (
+            id,
+            organization_member_id,
+            role,
+            joined_at,
+            organization_members!inner (
+              id,
+              user_id,
+              users!organization_members_user_id_fkey!inner (
+                id,
+                full_name,
+                email,
+                avatar_url
+              )
+            )
+          )
+        ),
+        card_labels (
+          label_id,
+          labels (
+            id,
+            name,
+            color
+          )
+        )
+      `)
+      .eq('list_id', list_id)
+      .eq('is_archived', false)
+      .order('position', { ascending: true });
+
+    const transformed = (freshCards || []).map(c => ({
+      ...c,
+      labels: (c as any).card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+      cover: { color: (c as any).cover_color, image: (c as any).cover_image, size: ((c as any).cover_color || (c as any).cover_image) ? 'small' : undefined },
+      card_labels: undefined
+    }));
+
+    const listCacheKey = `kanban:cards:list:${list_id}:${(list.boards as any).projects.organization_id}`;
+    await redisSetJSON(listCacheKey, { cards: transformed }, 1296000);
+  } catch (e) {
+    console.warn('Failed to refresh kanban cards cache after reorder:', e);
+  }
 
   return NextResponse.json({ 
     results,

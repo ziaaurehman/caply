@@ -248,27 +248,54 @@ export default function ProjectCreationPage() {
       }
 
       const result = await projectAPIDirect.createProject(payload)
+      console.log('Project created successfully:', result.project.id)
       
       // Upload files if any were selected
-      if (uploadedFiles.length > 0) {
+      if (uploadedFiles.length > 0 && result.project?.id) {
         toast.info('Uploading project documents...', {
           description: `Uploading ${uploadedFiles.length} file(s)...`,
         });
         
+        const uploadResults = [];
+        const failedFiles = [];
+        
         for (const file of uploadedFiles) {
           try {
+            console.log('Uploading file:', file.name, 'Size:', file.size, 'Type:', file.type);
             await (projectAPIDirect || projectAPIFromIndex).uploadProjectDocument({
               projectId: result.project.id,
               file,
               organizationId: currentOrganization.id
             });
+            uploadResults.push({ file: file.name, success: true });
+            console.log('File uploaded successfully:', file.name);
           } catch (error) {
             console.error('Error uploading file:', file.name, error);
-            toast.error(`Failed to upload ${file.name}`);
+            failedFiles.push(file.name);
+            uploadResults.push({ file: file.name, success: false, error });
           }
         }
         
-        toast.success('Project documents uploaded successfully!');
+        // Show appropriate toast based on upload results
+        const successfulUploads = uploadResults.filter(r => r.success).length;
+        const failedUploads = failedFiles.length;
+        
+        if (failedUploads === 0) {
+          // All files uploaded successfully
+          toast.success('Project documents uploaded successfully!', {
+            description: `All ${successfulUploads} file(s) uploaded successfully.`,
+          });
+        } else if (successfulUploads === 0) {
+          // All files failed
+          toast.error('Failed to upload project documents', {
+            description: `All ${failedUploads} file(s) failed to upload.`,
+          });
+        } else {
+          // Mixed results
+          toast.warning('Partial document upload', {
+            description: `${successfulUploads} file(s) uploaded successfully, ${failedUploads} file(s) failed.`,
+          });
+        }
       }
       
       // Show success toast

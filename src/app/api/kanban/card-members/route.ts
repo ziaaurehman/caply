@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisSetJSON } from '@/utils/redis';
 
 export async function POST(req: NextRequest) {
   try {
@@ -147,6 +148,43 @@ export async function POST(req: NextRequest) {
         }
       }]);
 
+    // Refresh single card cache
+    try {
+      const orgId = organizationId;
+      const supabaseRef = await createClient();
+      const { data: freshCard } = await supabaseRef
+        .from('cards')
+        .select(`
+          *,
+          card_members (
+            project_member_id,
+            project_members!inner (
+              id,
+              organization_member_id,
+              role,
+              joined_at,
+              organization_members!inner (
+                id,
+                user_id,
+                users!organization_members_user_id_fkey!inner (
+                  id,
+                  full_name,
+                  email,
+                  avatar_url
+                )
+              )
+            )
+          )
+        `)
+        .eq('id', card_id)
+        .single();
+      if (freshCard) {
+        await redisSetJSON(`kanban:card:${card_id}:${orgId}`, { card: freshCard }, 1296000);
+      }
+    } catch (e) {
+      console.warn('Failed to refresh card cache after member assign:', e);
+    }
+
     return NextResponse.json({ card_member: cardMember });
   } catch (error) {
     console.error('POST error:', error);
@@ -266,6 +304,43 @@ export async function DELETE(req: NextRequest) {
           card_title: card.title 
         }
       }]);
+
+    // Refresh single card cache
+    try {
+      const orgId = organizationId;
+      const supabaseRef = await createClient();
+      const { data: freshCard } = await supabaseRef
+        .from('cards')
+        .select(`
+          *,
+          card_members (
+            project_member_id,
+            project_members!inner (
+              id,
+              organization_member_id,
+              role,
+              joined_at,
+              organization_members!inner (
+                id,
+                user_id,
+                users!organization_members_user_id_fkey!inner (
+                  id,
+                  full_name,
+                  email,
+                  avatar_url
+                )
+              )
+            )
+          )
+        `)
+        .eq('id', cardId)
+        .single();
+      if (freshCard) {
+        await redisSetJSON(`kanban:card:${cardId}:${orgId}`, { card: freshCard }, 1296000);
+      }
+    } catch (e) {
+      console.warn('Failed to refresh card cache after member removal:', e);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

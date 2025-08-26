@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(
   req: NextRequest,
@@ -41,6 +42,13 @@ export async function GET(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
+    // Try cache first (15 days TTL)
+    const cacheKey = `project:documents:${projectId}:${organizationId}`
+    const cached = await redisGetJSON<any>(cacheKey)
+    if (cached) {
+      return NextResponse.json(cached)
+    }
+
     // Fetch project documents
     const { data: documents, error } = await supabase
       .from('project_documents')
@@ -52,12 +60,7 @@ export async function GET(
         mime_type,
         file_path,
         uploaded_at,
-        uploaded_by,
-        users!project_documents_uploaded_by_fkey (
-          id,
-          full_name,
-          email
-        )
+        uploaded_by
       `)
       .eq('project_id', projectId)
       .order('uploaded_at', { ascending: false });
@@ -67,7 +70,18 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ documents: documents || [] });
+    const result = {
+      documents: documents || []
+    };
+
+    // Cache the result (15 days)
+    try {
+      await redisSetJSON(cacheKey, result, 1296000)
+    } catch (e) {
+      console.warn('Failed to cache project documents:', e)
+    }
+
+    return NextResponse.json(result);
 
   } catch (error) {
     console.error('Error in GET /api/projects/[id]/documents:', error);
@@ -129,7 +143,7 @@ export async function POST(
       return NextResponse.json({ error: 'File size must be less than 10MB' }, { status: 400 });
     }
 
-    // Validate file type
+    // Validate file type - check both MIME type and file extension
     const allowedTypes = [
       'application/pdf',
       'application/msword',
@@ -142,15 +156,21 @@ export async function POST(
       'text/plain'
     ];
 
-    if (!allowedTypes.includes(file.type)) {
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.gif', '.txt'];
+    const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+    
+    const isValidMimeType = allowedTypes.includes(file.type);
+    const isValidExtension = allowedExtensions.includes(fileExtension);
+    
+    if (!isValidMimeType && !isValidExtension) {
       return NextResponse.json({ 
-        error: 'File type not allowed. Supported types: PDF, Word, Excel, Images, Text' 
+        error: `File type not allowed. File: ${file.name}, Type: ${file.type}. Supported types: PDF, Word, Excel, Images, Text` 
       }, { status: 400 });
     }
 
     // Generate unique filename
-    const fileExtension = file.name.split('.').pop();
-    const uniqueFilename = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExtension}`;
+    const fileExt = file.name.split('.').pop();
+    const uniqueFilename = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
     const filePath = `projects/${projectId}/${uniqueFilename}`;
 
     // Upload file to Supabase Storage
@@ -163,7 +183,9 @@ export async function POST(
 
     if (uploadError) {
       console.error('Error uploading file:', uploadError);
-      return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
+      return NextResponse.json({ 
+        error: `Failed to upload file: ${uploadError.message || 'Storage error'}` 
+      }, { status: 500 });
     }
 
     // Get public URL
@@ -191,12 +213,7 @@ export async function POST(
         mime_type,
         file_path,
         uploaded_at,
-        uploaded_by,
-        users!project_documents_uploaded_by_fkey (
-          id,
-          full_name,
-          email
-        )
+        uploaded_by
       `)
       .single();
 
@@ -206,6 +223,31 @@ export async function POST(
       await supabase.storage.from('caply').remove([filePath]);
       return NextResponse.json({ error: 'Failed to save document record' }, { status: 500 });
     }
+
+          // Refresh project documents cache after upload (15 days)
+      try {
+        const { data: freshDocuments } = await supabase
+          .from('project_documents')
+          .select(`
+            id,
+            filename,
+            original_filename,
+            file_size,
+            mime_type,
+            file_path,
+            uploaded_at,
+            uploaded_by
+          `)
+          .eq('project_id', projectId)
+          .order('uploaded_at', { ascending: false });
+
+        const cacheKey = `project:documents:${projectId}:${organizationId}`;
+        await redisSetJSON(cacheKey, {
+          documents: freshDocuments || []
+        }, 1296000);
+      } catch (e) {
+        console.warn('Failed to refresh project documents cache after upload:', e);
+      }
 
     return NextResponse.json({ document });
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(
   req: NextRequest,
@@ -40,6 +41,13 @@ export async function GET(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
+    // Try cache first (15 days TTL)
+    const cacheKey = `project:document:${projectId}:${documentId}:${organizationId}`
+    const cached = await redisGetJSON<any>(cacheKey)
+    if (cached) {
+      return NextResponse.json(cached)
+    }
+
     // Get document details
     const { data: document, error: documentError } = await supabase
       .from('project_documents')
@@ -62,10 +70,19 @@ export async function GET(
       return NextResponse.json({ error: 'Failed to generate download URL' }, { status: 500 });
     }
 
-    return NextResponse.json({
+    const result = {
       document,
       download_url: signedUrl.signedUrl
-    });
+    };
+
+    // Cache the result (15 days)
+    try {
+      await redisSetJSON(cacheKey, result, 1296000)
+    } catch (e) {
+      console.warn('Failed to cache document:', e)
+    }
+
+    return NextResponse.json(result);
 
   } catch (error) {
     console.error('Error in GET /api/projects/[id]/documents/[documentId]:', error);
@@ -145,6 +162,35 @@ export async function DELETE(
       return NextResponse.json({ error: 'Failed to delete document record' }, { status: 500 });
     }
 
+          // Refresh project documents cache after deletion (15 days)
+      try {
+        const { data: freshDocuments } = await supabase
+          .from('project_documents')
+          .select(`
+            id,
+            filename,
+            original_filename,
+            file_size,
+            mime_type,
+            file_path,
+            uploaded_at,
+            uploaded_by
+          `)
+          .eq('project_id', projectId)
+          .order('uploaded_at', { ascending: false });
+
+        const documentsCacheKey = `project:documents:${projectId}:${organizationId}`;
+        await redisSetJSON(documentsCacheKey, {
+          documents: freshDocuments || []
+        }, 1296000);
+
+        // Clear individual document cache
+        const documentCacheKey = `project:document:${projectId}:${documentId}:${organizationId}`;
+        // Note: Redis cache will expire naturally, no need to manually delete
+      } catch (e) {
+        console.warn('Failed to refresh project documents cache after delete:', e);
+      }
+
     return NextResponse.json({ message: 'Document deleted successfully' });
 
   } catch (error) {
@@ -152,6 +198,10 @@ export async function DELETE(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+
+
+
 
 
 

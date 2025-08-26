@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(req: NextRequest) {
   try {
@@ -47,6 +48,13 @@ export async function GET(req: NextRequest) {
 
     if (boardError || !board) {
       return NextResponse.json({ error: 'Board not found' }, { status: 404 });
+    }
+
+    // Try cache first (15 days)
+    const cacheKey = `kanban:lists:${boardId}:${organizationId}`;
+    const cached = await redisGetJSON<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
     }
 
     // Get lists for the board
@@ -148,7 +156,13 @@ export async function GET(req: NextRequest) {
       })) || []
     })) || [];
 
-    return NextResponse.json({ lists: transformedLists });
+    const result = { lists: transformedLists };
+    try {
+      await redisSetJSON(cacheKey, result, 1296000);
+    } catch (e) {
+      console.warn('Failed to cache kanban lists:', e);
+    }
+    return NextResponse.json(result);
   } catch (error: any) {
     console.error('Error in GET /api/kanban/lists:', error);
     return NextResponse.json({ 

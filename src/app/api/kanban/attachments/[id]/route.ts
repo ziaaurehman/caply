@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisSetJSON } from '@/utils/redis';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
 
@@ -97,6 +98,28 @@ export async function DELETE(
           card_title: (existingAttachment.cards as any).title
         }
       }]);
+
+    // Refresh attachments cache for the card
+    try {
+      const orgId = (existingAttachment.cards as any).lists.boards.projects.organization_id;
+      const cardId = existingAttachment.card_id as string;
+      const { data: freshAttachments } = await supabase
+        .from('attachments')
+        .select(`
+          *,
+          users (
+            id,
+            full_name,
+            email,
+            avatar_url
+          )
+        `)
+        .eq('card_id', cardId)
+        .order('uploaded_at', { ascending: false });
+      await redisSetJSON(`kanban:attachments:${cardId}:${orgId}`, { attachments: freshAttachments || [] }, 1296000);
+    } catch (e) {
+      console.warn('Failed to refresh kanban attachments cache after delete:', e);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

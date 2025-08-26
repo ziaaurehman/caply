@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisSetJSON } from '@/utils/redis';
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -115,6 +116,47 @@ export async function POST(req: NextRequest) {
       }
     }]);
 
+  // Refresh single card cache and list cache for the card's list
+  try {
+    const listId = (card.lists as any).id;
+    const orgId = organizationId;
+    const supabaseRef = await createClient();
+    const { data: freshCard } = await supabaseRef
+      .from('cards')
+      .select(`
+        *,
+        card_labels ( label_id, labels ( id, name, color ) )
+      `)
+      .eq('id', card_id)
+      .single();
+    const transformed = freshCard ? {
+      ...freshCard,
+      labels: (freshCard as any).card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+      card_labels: undefined
+    } : undefined;
+    if (transformed) {
+      await redisSetJSON(`kanban:card:${card_id}:${orgId}`, { card: transformed }, 1296000);
+    }
+    // Optionally refresh list cache
+    const { data: freshCards } = await supabaseRef
+      .from('cards')
+      .select(`
+        *,
+        card_labels ( label_id, labels ( id, name, color ) )
+      `)
+      .eq('list_id', listId)
+      .eq('is_archived', false)
+      .order('position', { ascending: true });
+    const transformedList = (freshCards || []).map((c: any) => ({
+      ...c,
+      labels: c.card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+      card_labels: undefined
+    }));
+    await redisSetJSON(`kanban:cards:list:${listId}:${orgId}`, { cards: transformedList }, 1296000);
+  } catch (e) {
+    console.warn('Failed to refresh caches after card-label assign:', e);
+  }
+
   return NextResponse.json({ card_label: cardLabel });
 }
 
@@ -215,6 +257,46 @@ export async function DELETE(req: NextRequest) {
         card_title: card.title 
       }
     }]);
+
+  // Refresh caches after label removal
+  try {
+    const listId = (card.lists as any).id;
+    const orgId = organizationId;
+    const supabaseRef = await createClient();
+    const { data: freshCard } = await supabaseRef
+      .from('cards')
+      .select(`
+        *,
+        card_labels ( label_id, labels ( id, name, color ) )
+      `)
+      .eq('id', cardId)
+      .single();
+    const transformed = freshCard ? {
+      ...freshCard,
+      labels: (freshCard as any).card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+      card_labels: undefined
+    } : undefined;
+    if (transformed) {
+      await redisSetJSON(`kanban:card:${cardId}:${orgId}`, { card: transformed }, 1296000);
+    }
+    const { data: freshCards } = await supabaseRef
+      .from('cards')
+      .select(`
+        *,
+        card_labels ( label_id, labels ( id, name, color ) )
+      `)
+      .eq('list_id', listId)
+      .eq('is_archived', false)
+      .order('position', { ascending: true });
+    const transformedList = (freshCards || []).map((c: any) => ({
+      ...c,
+      labels: c.card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+      card_labels: undefined
+    }));
+    await redisSetJSON(`kanban:cards:list:${listId}:${orgId}`, { cards: transformedList }, 1296000);
+  } catch (e) {
+    console.warn('Failed to refresh caches after card-label removal:', e);
+  }
 
   return NextResponse.json({ success: true });
 }

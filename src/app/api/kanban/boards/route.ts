@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -46,6 +47,13 @@ export async function GET(req: NextRequest) {
 
   if (!project.kanban_enabled) {
     return NextResponse.json({ error: 'Kanban is not enabled for this project' }, { status: 403 });
+  }
+
+  // Try cache first (15 days)
+  const cacheKey = `kanban:boards:${projectId}:${organizationId}`;
+  const cached = await redisGetJSON<any>(cacheKey);
+  if (cached) {
+    return NextResponse.json(cached);
   }
 
   // Get boards for the project
@@ -105,7 +113,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ boards: boards || [] });
+  const result = { boards: boards || [] };
+  try {
+    await redisSetJSON(cacheKey, result, 1296000);
+  } catch (e) {
+    console.warn('Failed to cache kanban boards:', e);
+  }
+  return NextResponse.json(result);
 }
 
 export async function POST(req: NextRequest) {
@@ -195,6 +209,66 @@ export async function POST(req: NextRequest) {
       entity_id: board.id,
       details: { board_name: name }
     }]);
+
+  // Refresh boards cache for this project
+  try {
+    const { data: freshBoards } = await supabase
+      .from('boards')
+      .select(`
+        *,
+        lists (
+          id,
+          name,
+          position,
+          is_archived,
+          cards (
+            id,
+            title,
+            position,
+            is_completed,
+            is_archived,
+            due_date,
+            cover_color,
+            cover_image,
+            card_members (
+              project_member_id,
+              project_members!inner (
+                id,
+                organization_member_id,
+                role,
+                joined_at,
+                organization_members!inner (
+                  id,
+                  user_id,
+                  users!organization_members_user_id_fkey!inner (
+                    id,
+                    full_name,
+                    email,
+                    avatar_url
+                  )
+                )
+              )
+            ),
+            card_labels (
+              label_id,
+              labels (
+                id,
+                name,
+                color
+              )
+            )
+          )
+        )
+      `)
+      .eq('project_id', project_id)
+      .eq('is_closed', false)
+      .order('position', { ascending: true });
+
+    const cacheKey = `kanban:boards:${project_id}:${organizationId}`;
+    await redisSetJSON(cacheKey, { boards: freshBoards || [] }, 1296000);
+  } catch (e) {
+    console.warn('Failed to refresh kanban boards cache after create:', e);
+  }
 
   return NextResponse.json({ board });
 }

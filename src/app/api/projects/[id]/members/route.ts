@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
 export async function GET(
   req: NextRequest,
@@ -67,6 +68,13 @@ export async function GET(
       }
     }
 
+    // Try cache first (15 days TTL)
+    const cacheKey = `project:members:${projectId}:${organizationId}:${hasFullAccess ? 'all' : userContext.userId}`
+    const cached = await redisGetJSON<any>(cacheKey)
+    if (cached) {
+      return NextResponse.json(cached)
+    }
+
     // Fetch project members
     const { data: members, error } = await supabase
       .from('project_members')
@@ -92,9 +100,18 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ 
+    const result = {
       members: members || []
-    });
+    };
+
+    // Cache the result (15 days)
+    try {
+      await redisSetJSON(cacheKey, result, 1296000)
+    } catch (e) {
+      console.warn('Failed to cache project members:', e)
+    }
+
+    return NextResponse.json(result);
 
   } catch (error) {
     console.error('Error fetching project members:', error);

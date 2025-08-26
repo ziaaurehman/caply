@@ -1,6 +1,6 @@
 "use client"
 
-import { Calendar, MessageCircle, Paperclip, CheckSquare, User, Tag, Clock, FileText } from "lucide-react"
+import { Calendar, MessageCircle, Paperclip, CheckSquare, User, Tag, Clock, FileText, Loader2 } from "lucide-react"
 import { Card, ProjectMember } from "./types"
 
 interface KanbanCardProps {
@@ -66,7 +66,8 @@ export default function KanbanCard({ card, projectMembers, onDragStart, onClick 
         />
       )}
 
-      <div className="p-2">
+      <div className="p-2 relative">
+        
         {/* Labels - Small text badges at top */}
         {card.labels && card.labels.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-2">

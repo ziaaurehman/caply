@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
+import { redisSetJSON } from '@/utils/redis';
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authConfig);
@@ -208,6 +209,141 @@ export async function POST(req: NextRequest) {
 
   const successCount = results.filter(r => r.success).length;
   const errorCount = results.filter(r => !r.success).length;
+
+  // Refresh caches for affected lists and boards
+  try {
+    const affectedLists = new Set<string>();
+    const affectedBoards = new Set<string>();
+    
+    // Collect affected lists and boards
+    cards.forEach(card => {
+      affectedLists.add(card.list_id);
+      affectedBoards.add((card.lists as any).boards.id);
+    });
+
+    // Refresh caches for each affected list and board
+    for (const listId of Array.from(affectedLists)) {
+      const { data: freshCards } = await supabase
+        .from('cards')
+        .select(`
+          *,
+          lists!inner (
+            id,
+            name,
+            boards!inner (
+              id,
+              project_id,
+              projects!inner (
+                id,
+                organization_id
+              )
+            )
+          ),
+          card_members (
+            project_member_id,
+            project_members!inner (
+              id,
+              organization_member_id,
+              role,
+              joined_at,
+              organization_members!inner (
+                id,
+                user_id,
+                users!organization_members_user_id_fkey!inner (
+                  id,
+                  full_name,
+                  email,
+                  avatar_url
+                )
+              )
+            )
+          ),
+          card_labels (
+            label_id,
+            labels (
+              id,
+              name,
+              color
+            )
+          )
+        `)
+        .eq('list_id', listId)
+        .eq('is_archived', false)
+        .order('position', { ascending: true });
+
+      const transformed = (freshCards || []).map(c => ({
+        ...c,
+        labels: (c as any).card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+        cover: { color: (c as any).cover_color, image: (c as any).cover_image, size: ((c as any).cover_color || (c as any).cover_image) ? 'small' : undefined },
+        card_labels: undefined
+      }));
+
+      const listCacheKey = `kanban:cards:list:${listId}:${(cards[0]?.lists as any)?.boards?.projects?.organization_id}`;
+      await redisSetJSON(listCacheKey, { cards: transformed }, 1296000);
+    }
+
+    for (const boardId of Array.from(affectedBoards)) {
+      const { data: boardCards } = await supabase
+        .from('cards')
+        .select(`
+          *,
+          lists!inner (
+            id,
+            name,
+            boards!inner (
+              id,
+              project_id,
+              projects!inner (
+                id,
+                organization_id
+              )
+            )
+          ),
+          card_members (
+            project_member_id,
+            project_members!inner (
+              id,
+              organization_member_id,
+              role,
+              joined_at,
+              organization_members!inner (
+                id,
+                user_id,
+                users!organization_members_user_id_fkey!inner (
+                  id,
+                  full_name,
+                  email,
+                  avatar_url
+                )
+              )
+            )
+          ),
+          card_labels (
+            label_id,
+            labels (
+              id,
+              name,
+              color
+            )
+          )
+        `)
+        .eq('lists.board_id', boardId)
+        .eq('is_archived', false)
+        .order('position', { ascending: true });
+
+      const transformedBoard = (boardCards || []).map(c => ({
+        ...c,
+        labels: (c as any).card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
+        cover: { color: (c as any).cover_color, image: (c as any).cover_image, size: ((c as any).cover_color || (c as any).cover_image) ? 'small' : undefined },
+        card_labels: undefined
+      }));
+
+      const boardCacheKey = `kanban:cards:board:${boardId}:${(cards[0]?.lists as any)?.boards?.projects?.organization_id}`;
+      await redisSetJSON(boardCacheKey, { cards: transformedBoard }, 1296000);
+    }
+  } catch (e) {
+    console.warn('Failed to refresh kanban cards cache after bulk operation:', e);
+  }
 
   return NextResponse.json({ 
     results,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
 
@@ -60,6 +61,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Card not found' }, { status: 404 });
     }
 
+    // Try cache first (15 days)
+    const cacheKey = `kanban:comments:${cardId}:${organizationId}`;
+    const cached = await redisGetJSON<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
     // Get comments for the card
     const { data: comments, error } = await supabase
       .from('comments')
@@ -79,7 +87,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ comments: comments || [] });
+    const result = { comments: comments || [] };
+    try {
+      await redisSetJSON(cacheKey, result, 1296000);
+    } catch (e) {
+      console.warn('Failed to cache kanban comments:', e);
+    }
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Error fetching comments:', error);
     return NextResponse.json({ error: 'Failed to fetch comments' }, { status: 500 });
@@ -195,6 +209,27 @@ export async function POST(req: NextRequest) {
           card_title: card.title
         }
       }]);
+
+    // Refresh comments cache for this card
+    try {
+      const cacheKey = `kanban:comments:${card_id}:${orgId}`;
+      const { data: freshComments } = await supabase
+        .from('comments')
+        .select(`
+          *,
+          users (
+            id,
+            full_name,
+            email,
+            avatar_url
+          )
+        `)
+        .eq('card_id', card_id)
+        .order('created_at', { ascending: true });
+      await redisSetJSON(cacheKey, { comments: freshComments || [] }, 1296000);
+    } catch (e) {
+      console.warn('Failed to refresh kanban comments cache after create:', e);
+    }
 
     return NextResponse.json({ comment });
   } catch (error) {
