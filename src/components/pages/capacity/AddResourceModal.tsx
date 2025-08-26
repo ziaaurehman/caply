@@ -40,13 +40,22 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [availableMembers, setAvailableMembers] = useState<any[]>([]);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    organization_member_id: string;
+    weekly_capacity_hours: number;
+    start_date: string;
+    end_date: string;
+    notes: string;
+  }>({
     organization_member_id: '',
     weekly_capacity_hours: 40,
+    start_date: '',
+    end_date: '',
+    notes: ''
   });
 
   useEffect(() => {
-    const fetchProject = async () => {
+    const fetchMembers = async () => {
       if (!currentOrganization?.id) return;
       try {
         setLoading(true);
@@ -71,7 +80,19 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
     };
 
     if (isOpen) {
-      fetchProject();
+      fetchMembers();
+      // Set default start date to current week
+      const today = new Date();
+      const currentWeekStart = new Date(today);
+      const dayOfWeek = today.getDay();
+      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      currentWeekStart.setDate(today.getDate() - daysToSubtract);
+      
+      setFormData(prev => ({
+        ...prev,
+        start_date: currentWeekStart.toISOString().split('T')[0],
+        weekly_capacity_hours: 40
+      }));
     }
   }, [isOpen, currentOrganization?.id]);
 
@@ -99,6 +120,9 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
           organizationId: currentOrganization.id,
           organization_member_id: member?.organization_member_id || formData.organization_member_id,
           weekly_capacity_hours: formData.weekly_capacity_hours,
+          start_date: formData.start_date,
+          end_date: formData.end_date || null,
+          notes: formData.notes || null,
           is_active: true
         })
       });
@@ -121,6 +145,9 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
     setFormData({
       organization_member_id: '',
       weekly_capacity_hours: 40,
+      start_date: '',
+      end_date: '',
+      notes: ''
     });
     setError(null);
   };
@@ -147,7 +174,6 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
               <X className="h-5 w-5" />
             </button>
           </div>
-          {/* No project context here */}
         </div>
 
         <div className="px-6 py-6">
@@ -182,7 +208,7 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
                 ))}
               </select>
               {availableMembers.length === 0 && (
-                <p className="text-sm text-gray-500 mt-1">No team members available for this project.</p>
+                <p className="text-sm text-gray-500 mt-1">No team members available.</p>
               )}
             </div>
 
@@ -208,13 +234,13 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
             {/* Capacity Configuration */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="allocated_hours_per_week" className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="weekly_capacity_hours" className="block text-sm font-medium text-gray-700 mb-2">
                   <Clock className="inline h-4 w-4 mr-1" />
-                  Weekly Capacity Hours
+                  Weekly Capacity Hours *
                 </label>
                 <input
                   type="number"
-                  id="allocated_hours_per_week"
+                  id="weekly_capacity_hours"
                   value={formData.weekly_capacity_hours}
                   onChange={(e) => setFormData(prev => ({ ...prev, weekly_capacity_hours: Number(e.target.value) }))}
                   min="0"
@@ -222,6 +248,7 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
                   step="0.5"
                   className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                   placeholder="e.g., 40"
+                  required
                 />
                 <p className="text-xs text-gray-500 mt-1">Maximum 168 hours per week</p>
               </div>

@@ -6,7 +6,7 @@ import Button from '@/components/ui/Button';
 import { projectAPI } from "@/utils/api/project"
 import { capacityAPI, CapacityOverview, ResourceAllocation } from '@/utils/api/capacity';
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
-import CapacitySettingsModal from './CapacitySettingsModal';
+
 import WeeklyCapacityTable from './WeeklyCapacityTable';
 import CapacitySkeleton from "./CapacitySkeleton"
 import AddResourceModal from './AddResourceModal';
@@ -58,7 +58,6 @@ export default function CapacityPlanningPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
   const [selectedDateRange, setSelectedDateRange] = useState({
     startDate: new Date().toISOString().split('T')[0],
@@ -83,6 +82,51 @@ export default function CapacityPlanningPage() {
       fetchProjects();
     }
   }, [currentOrganization?.id]);
+
+  // Update date range when month/year changes
+  useEffect(() => {
+    const newDateRange = calculateDateRange(selectedMonth, selectedYear, viewMode);
+    setSelectedDateRange(newDateRange);
+  }, [selectedMonth, selectedYear, viewMode]);
+
+  // Calculate date range based on view mode and month/year selection
+  const calculateDateRange = (month: number, year: number, mode: 'overview' | 'weekly' | 'monthly') => {
+    const startDate = new Date(year, month, 1);
+    let endDate: Date;
+
+    if (mode === 'monthly') {
+      // For monthly view, show the entire month
+      endDate = new Date(year, month + 1, 0); // Last day of the month
+    } else if (mode === 'weekly') {
+      // For weekly view, show 4 weeks from the start of the month
+      endDate = new Date(year, month, 1);
+      endDate.setDate(endDate.getDate() + 28); // 4 weeks
+    } else {
+      // For overview, show 30 days from start of month
+      endDate = new Date(year, month, 1);
+      endDate.setDate(endDate.getDate() + 30);
+    }
+
+    return {
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0]
+    };
+  };
+
+  // Handle month change
+  const handleMonthChange = (month: number) => {
+    setSelectedMonth(month);
+  };
+
+  // Handle year change
+  const handleYearChange = (year: number) => {
+    setSelectedYear(year);
+  };
+
+  // Handle view mode change
+  const handleViewModeChange = (mode: 'overview' | 'weekly' | 'monthly') => {
+    setViewMode(mode);
+  };
 
   // Fetch projects from API
   const fetchProjects = async () => {
@@ -110,32 +154,12 @@ export default function CapacityPlanningPage() {
   }, [selectedProject, selectedDateRange, filters, selectedMonth, selectedYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchCapacityData = async () => {
+    console.log('fetchCapacityData called');
     setLoading(true);
     setError(null);
 
     try {
-      // Fetch capacity overview
-      const overviewParams: any = {
-        start_date: selectedDateRange.startDate,
-        end_date: selectedDateRange.endDate
-      };
-
-      // Only add project_id if a specific project is selected
-      if (selectedProject !== 'all') {
-        overviewParams.project_id = selectedProject;
-      }
-
-      if (filters.projectIds.length > 0) overviewParams.filter_project_ids = filters.projectIds;
-      if (filters.userIds.length > 0) overviewParams.filter_user_ids = filters.userIds;
-      overviewParams.only_overallocated = filters.onlyOverallocated;
-      overviewParams.only_active = filters.onlyActive;
-
-      const overviewResponse = await capacityAPI.getOverview(currentOrganization!.id, overviewParams);
-
-      setCapacityOverview(overviewResponse.capacityOverview);
-      setSummary(overviewResponse.summary);
-
-      // Fetch allocations
+      // Fetch allocations first
       const allocationsParams: any = {
         start_date: selectedDateRange.startDate,
         end_date: selectedDateRange.endDate
@@ -146,8 +170,76 @@ export default function CapacityPlanningPage() {
       }
 
       if (filters.projectIds.length > 0) allocationsParams.filter_project_ids = filters.projectIds;
+      
       const allocationsResponse = await capacityAPI.getAllocations(currentOrganization!.id, allocationsParams);
       setAllocations(allocationsResponse.allocations);
+
+      // Fetch capacity overview for member info
+      const overviewParams: any = {
+        start_date: selectedDateRange.startDate,
+        end_date: selectedDateRange.endDate
+      };
+
+      if (selectedProject !== 'all') {
+        overviewParams.project_id = selectedProject;
+      }
+
+      if (filters.projectIds.length > 0) overviewParams.filter_project_ids = filters.projectIds;
+      if (filters.userIds.length > 0) overviewParams.filter_user_ids = filters.userIds;
+      overviewParams.only_overallocated = filters.onlyOverallocated;
+      overviewParams.only_active = filters.onlyActive;
+
+      const overviewResponse = await capacityAPI.getOverview(currentOrganization!.id, overviewParams);
+      setCapacityOverview(overviewResponse.capacityOverview);
+
+      // Calculate summary from allocations data
+      const memberAllocations = new Map<string, { capacity: number; allocated: number; user: any; role: string }>();
+      
+      // Group allocations by member
+      allocationsResponse.allocations.forEach(allocation => {
+        const orgMemberId = (allocation as any)?.organization_member_id || 
+                           (allocation as any)?.resource_allocations?.organization_member_id;
+        
+        if (orgMemberId) {
+          if (!memberAllocations.has(orgMemberId)) {
+            // Find member info from overview
+            const memberInfo = overviewResponse.capacityOverview.find(o => 
+              (o as any)?.member?.organization_member_id === orgMemberId
+            );
+            
+            memberAllocations.set(orgMemberId, {
+              capacity: memberInfo?.capacity || 40,
+              allocated: 0,
+              user: memberInfo?.member?.user,
+              role: memberInfo?.member?.role || ''
+            });
+          }
+          
+          const member = memberAllocations.get(orgMemberId)!;
+          member.allocated += Number(allocation.hours_per_week || 0);
+        }
+      });
+
+      // Calculate summary
+      const members = Array.from(memberAllocations.values());
+      const totalCapacity = members.reduce((sum, m) => sum + m.capacity, 0);
+      const totalAllocated = members.reduce((sum, m) => sum + m.allocated, 0);
+      const totalAvailable = Math.max(0, totalCapacity - totalAllocated);
+      
+      const overallocatedMembers = members.filter(m => m.allocated > m.capacity).length;
+      const optimalMembers = members.filter(m => m.allocated >= m.capacity * 0.6 && m.allocated <= m.capacity).length;
+      const underutilizedMembers = members.filter(m => m.allocated < m.capacity * 0.6).length;
+
+      setSummary({
+        totalMembers: members.length,
+        overallocatedMembers,
+        optimalMembers,
+        underutilizedMembers,
+        totalCapacity,
+        totalAllocated,
+        totalAvailable
+      });
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch capacity data');
     } finally {
@@ -225,12 +317,19 @@ export default function CapacityPlanningPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Capacity Planning</h1>
               <p className="text-gray-600 mt-2">Monitor team capacity utilization and resource allocation across projects</p>
+              {/* Date Range Display */}
+              <div className="mt-2 text-sm text-gray-500">
+                Viewing: {new Date(selectedDateRange.startDate).toLocaleDateString()} - {new Date(selectedDateRange.endDate).toLocaleDateString()}
+                <span className="ml-2 px-2 py-1 bg-gray-100 rounded text-xs">
+                  {viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} View
+                </span>
+              </div>
             </div>
             <div className="flex items-center space-x-3">
               <div className="flex items-center gap-2">
                 <select
                   value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                  onChange={(e) => handleMonthChange(Number(e.target.value))}
                   className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   {Array.from({ length: 12 }).map((_, i) => (
@@ -239,7 +338,7 @@ export default function CapacityPlanningPage() {
                 </select>
                 <select
                   value={selectedYear}
-                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  onChange={(e) => handleYearChange(Number(e.target.value))}
                   className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   {Array.from({ length: 5 }).map((_, i) => {
@@ -248,11 +347,11 @@ export default function CapacityPlanningPage() {
                   })}
                 </select>
               </div>
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-700">View:</span>
                 <select
                   value={viewMode}
-                  onChange={(e) => setViewMode(e.target.value as any)}
+                  onChange={(e) => handleViewModeChange(e.target.value as 'overview' | 'weekly' | 'monthly')}
                   className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="overview">Overview</option>
@@ -294,7 +393,7 @@ export default function CapacityPlanningPage() {
         </div>
 
         {/* Capacity Overview */}
-        <div className="bg-white rounded-lg border border-gray-200 mb-8">
+        <div className="bg-white rounded-lg border border-gray-200 mb-8 z-10">
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">
@@ -360,6 +459,9 @@ export default function CapacityPlanningPage() {
                 window.location.href = `/dashboard/kanban?project=${projectId}`;
               }}
               onAddResource={() => setShowAddResourceModal(true)}
+              viewMode={viewMode}
+              selectedMonth={selectedMonth}
+              selectedYear={selectedYear}
             />
           )}
         </div>
@@ -375,14 +477,14 @@ export default function CapacityPlanningPage() {
       />
 
       {showWeekModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg w-full max-w-2xl p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Week Breakdown</h3>
               <button onClick={() => setShowWeekModal(null)} className="text-gray-500 hover:text-gray-700">✕</button>
             </div>
             <p className="text-sm text-gray-600 mb-4">{showWeekModal.member.user.full_name} • {new Date(showWeekModal.week.startDate).toLocaleDateString()} - {new Date(showWeekModal.week.endDate).toLocaleDateString()}</p>
-            <div className="text-sm text-gray-700">Project breakdown and tasks will appear here.</div>
+          
           </div>
         </div>
       )}

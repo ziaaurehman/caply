@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { CapacityOverview, ResourceAllocation, capacityAPI } from '@/utils/api/capacity';
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
+import { toast } from 'sonner';
 
 interface WeeklyCapacityTableProps {
   capacityOverview: CapacityOverview[];
@@ -18,6 +19,9 @@ interface WeeklyCapacityTableProps {
   onRefresh?: () => void;
   onProjectClick?: (projectId: string) => void;
   onAddResource?: () => void;
+  viewMode?: 'overview' | 'weekly' | 'monthly';
+  selectedMonth?: number;
+  selectedYear?: number;
 }
 
 interface WeekData {
@@ -27,7 +31,7 @@ interface WeekData {
   label: string;
 }
 
-export default function WeeklyCapacityTable({ capacityOverview, allocations, projects = [], organizationId, onWeekCellClick, onRefresh, onProjectClick, onAddResource }: WeeklyCapacityTableProps) {
+export default function WeeklyCapacityTable({ capacityOverview, allocations, projects = [], organizationId, onWeekCellClick, onRefresh, onProjectClick, onAddResource, viewMode = 'overview', selectedMonth = new Date().getMonth(), selectedYear = new Date().getFullYear() }: WeeklyCapacityTableProps) {
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -36,39 +40,149 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
   const [editingHours, setEditingHours] = useState<string>('');
   const [addProjectMemberId, setAddProjectMemberId] = useState<string | null>(null);
   const [addProjectMemberName, setAddProjectMemberName] = useState<string>('');
+  
+  // Local state for optimistic updates
+  const [localAllocations, setLocalAllocations] = useState<ResourceAllocation[]>([]);
+  const [localCapacityOverview, setLocalCapacityOverview] = useState<CapacityOverview[]>([]);
 
-  // Generate weeks data (showing 5 weeks starting from current week)
+  // Initialize local state when props change
+  useMemo(() => {
+    setLocalAllocations(allocations);
+    setLocalCapacityOverview(capacityOverview);
+  }, [allocations, capacityOverview]);
+
+  // Generate weeks data based on view mode and selected month/year
   const weeksData: WeekData[] = useMemo(() => {
     const weeks: WeekData[] = [];
-    const today = new Date();
     
-    // Get the start of the current week (Monday)
-    const currentWeekStart = new Date(today);
-    const dayOfWeek = today.getDay();
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Handle Sunday as 0
-    currentWeekStart.setDate(today.getDate() - daysToSubtract);
-
-    for (let i = 0; i < 5; i++) {
-      const weekStart = new Date(currentWeekStart);
-      weekStart.setDate(currentWeekStart.getDate() + (i * 7));
+    if (viewMode === 'monthly') {
+      // For monthly view, show weeks of the selected month
+      const monthStart = new Date(selectedYear, selectedMonth, 1);
+      const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
       
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
-
-      const weekNumber = `W${String(i + 1).padStart(2, '0')}`;
-      const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-      const startDateStr = `${String(weekStart.getDate()).padStart(2, '0')} ${monthNames[weekStart.getMonth()]}`;
-
-      weeks.push({
-        weekNumber,
-        startDate: weekStart.toISOString(),
-        endDate: weekEnd.toISOString(),
-        label: startDateStr
-      });
+      // Get the first Monday of the month (or previous Monday if month starts mid-week)
+      const firstMonday = new Date(monthStart);
+      const dayOfWeek = monthStart.getDay();
+      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      firstMonday.setDate(monthStart.getDate() - daysToSubtract);
+      
+      // Generate weeks for the month
+      let currentWeek = new Date(firstMonday);
+      let weekCount = 0;
+      
+      while (currentWeek <= monthEnd && weekCount < 6) {
+        const weekEnd = new Date(currentWeek);
+        weekEnd.setDate(currentWeek.getDate() + 6);
+        
+        const weekNumber = `W${String(weekCount + 1).padStart(2, '0')}`;
+        const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const startDateStr = `${String(currentWeek.getDate()).padStart(2, '0')} ${monthNames[currentWeek.getMonth()]}`;
+        
+        weeks.push({
+          weekNumber,
+          startDate: currentWeek.toISOString(),
+          endDate: weekEnd.toISOString(),
+          label: startDateStr
+        });
+        
+        currentWeek.setDate(currentWeek.getDate() + 7);
+        weekCount++;
+      }
+    } else if (viewMode === 'weekly') {
+      // For weekly view, show 4 weeks from the start of the selected month
+      const monthStart = new Date(selectedYear, selectedMonth, 1);
+      
+      for (let i = 0; i < 4; i++) {
+        const weekStart = new Date(monthStart);
+        weekStart.setDate(monthStart.getDate() + (i * 7));
+        
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        
+        const weekNumber = `W${String(i + 1).padStart(2, '0')}`;
+        const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const startDateStr = `${String(weekStart.getDate()).padStart(2, '0')} ${monthNames[weekStart.getMonth()]}`;
+        
+        weeks.push({
+          weekNumber,
+          startDate: weekStart.toISOString(),
+          endDate: weekEnd.toISOString(),
+          label: startDateStr
+        });
+      }
+    } else {
+      // For overview, show 5 weeks from current week
+      const today = new Date();
+      const currentWeekStart = new Date(today);
+      const dayOfWeek = today.getDay();
+      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      currentWeekStart.setDate(today.getDate() - daysToSubtract);
+      
+      for (let i = 0; i < 5; i++) {
+        const weekStart = new Date(currentWeekStart);
+        weekStart.setDate(currentWeekStart.getDate() + (i * 7));
+        
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        
+        const weekNumber = `W${String(i + 1).padStart(2, '0')}`;
+        const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+        const startDateStr = `${String(weekStart.getDate()).padStart(2, '0')} ${monthNames[weekStart.getMonth()]}`;
+        
+        weeks.push({
+          weekNumber,
+          startDate: weekStart.toISOString(),
+          endDate: weekEnd.toISOString(),
+          label: startDateStr
+        });
+      }
     }
-
+    
     return weeks;
-  }, []);
+  }, [viewMode, selectedMonth, selectedYear]);
+
+
+
+  // Optimistically remove allocation from local state
+  const removeAllocationOptimistically = (allocationId: string) => {
+    // Remove from local allocations
+    setLocalAllocations(prev => prev.filter(alloc => alloc.id !== allocationId));
+    
+    // Update local capacity overview to reflect the removal
+    setLocalCapacityOverview(prev => prev.map(overview => {
+      const updatedAllocations = (overview.allocations || []).filter(alloc => alloc.id !== allocationId);
+      if (updatedAllocations.length !== overview.allocations?.length) {
+        // Recalculate total allocated hours
+        const newTotalAllocated = updatedAllocations.reduce((sum, alloc) => sum + Number(alloc.hours_per_week || 0), 0);
+        return {
+          ...overview,
+          allocations: updatedAllocations,
+          totalAllocatedHours: newTotalAllocated,
+          availableHours: Math.max(0, overview.capacity - newTotalAllocated),
+          utilizationPercent: overview.capacity > 0 ? (newTotalAllocated / overview.capacity) * 100 : 0
+        };
+      }
+      return overview;
+    }));
+  };
+
+  // Restore allocation if API call fails
+  const restoreAllocation = (allocation: ResourceAllocation) => {
+    setLocalAllocations(prev => [...prev, allocation]);
+    
+    // Restore in capacity overview
+    setLocalCapacityOverview(prev => prev.map(overview => {
+      const updatedAllocations = [...(overview.allocations || []), allocation];
+      const newTotalAllocated = updatedAllocations.reduce((sum, alloc) => sum + Number(alloc.hours_per_week || 0), 0);
+      return {
+        ...overview,
+        allocations: updatedAllocations,
+        totalAllocatedHours: newTotalAllocated,
+        availableHours: Math.max(0, overview.capacity - newTotalAllocated),
+        utilizationPercent: overview.capacity > 0 ? (newTotalAllocated / overview.capacity) * 100 : 0
+      };
+    }));
+  };
 
   const toggleMemberExpansion = (memberId: string) => {
     const newExpanded = new Set(expandedMembers);
@@ -77,7 +191,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
     } else {
       newExpanded.add(memberId);
       // Lazy load tasks summary for this member across their allocation projects
-      const overview = capacityOverview.find(o => o.member?.user?.id === memberId);
+      const overview = localCapacityOverview.find(o => o.member?.user?.id === memberId);
       const projectIds = Array.from(new Set((overview?.allocations || []).map(a => a.project_id)));
       if (organizationId && projectIds.length > 0) {
         capacityAPI.getTasksSummary(organizationId, { user_id: memberId, project_ids: projectIds, include_tasks: false })
@@ -110,7 +224,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
 
   const getStatusLabel = (allocated: number, capacity: number) => {
     const percentage = (allocated / capacity) * 100;
-    if (percentage > 100) return '(25% over)';
+    if (percentage > 100) return `(${Math.round(percentage - 100)}% over)`;
     return '';
   };
 
@@ -126,7 +240,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
       orgMemberId?: string;
     }>();
 
-    capacityOverview.forEach(overview => {
+    localCapacityOverview.forEach(overview => {
       const userId = overview?.member?.user?.id || overview?.member?.id || crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
       if (!groups.has(userId)) {
         groups.set(userId, {
@@ -134,13 +248,12 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
           role: overview?.member?.role,
           capacity: overview?.capacity,
           allocations: [],
-          totalAllocated: overview.totalAllocatedHours,
+          totalAllocated: 0, // We'll calculate this from allocations
           entries: 1,
           orgMemberId: (overview as any)?.member?.organization_member_id
         });
       } else {
         const g = groups.get(userId)!;
-        g.totalAllocated += overview.totalAllocatedHours;
         g.capacity = Math.max(g.capacity, overview.capacity);
         g.entries += 1;
       }
@@ -152,18 +265,24 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
       if (g.orgMemberId) orgMemberIdToKey.set(String(g.orgMemberId), key);
     });
 
-    // Attach allocations using resource_allocations.organization_member_id
-    allocations.forEach(allocation => {
-      const orgMemberId = (allocation as any)?.resource_allocations?.organization_member_id;
+    // Attach allocations and calculate total allocated hours
+    localAllocations.forEach(allocation => {
+      // Try different possible paths for organization_member_id
+      const orgMemberId = (allocation as any)?.organization_member_id || 
+                         (allocation as any)?.resource_allocations?.organization_member_id ||
+                         (allocation as any)?.project_member_id;
+      
       const key = orgMemberId ? orgMemberIdToKey.get(String(orgMemberId)) : undefined;
       if (key && groups.has(key)) {
         const g = groups.get(key)!;
         g.allocations.push(allocation);
+        // Add to total allocated hours
+        g.totalAllocated += Number(allocation.hours_per_week || 0);
       }
     });
 
     return Array.from(groups.entries()).map(([id, g]) => ({ id, ...g }));
-  }, [capacityOverview, allocations]);
+  }, [localCapacityOverview, localAllocations]);
 
   const getAllocationForWeek = (memberAllocations: ResourceAllocation[], weekData: WeekData) => {
     const start = new Date(weekData.startDate);
@@ -183,12 +302,37 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
         isOpen={Boolean(deletingId)}
         onClose={() => setDeletingId(null)}
         onConfirm={async () => {
-          if (!deletingId || !organizationId) return;
+          if (!deletingId || !organizationId) {
+            console.log('Delete failed: missing deletingId or organizationId', { deletingId, organizationId });
+            return;
+          }
+          
+          console.log('Starting delete process for allocation:', deletingId);
           setIsDeleting(true);
+          
+          // Store the allocation to restore if API fails
+          const allocationToDelete = localAllocations.find(alloc => alloc.id === deletingId);
+          
+          // Optimistically remove from UI immediately
+          removeAllocationOptimistically(deletingId);
+          
           try {
+            console.log('Calling deleteAllocation API...');
             await capacityAPI.deleteAllocation(organizationId, deletingId);
+            console.log('Delete API call successful');
+            
             setDeletingId(null);
-            onRefresh?.();
+            // No need to refresh - UI is already updated optimistically
+          } catch (error) {
+            console.error('Error deleting allocation:', error);
+            
+            // Restore the allocation if API call failed
+            if (allocationToDelete) {
+              restoreAllocation(allocationToDelete);
+            }
+            
+            // Show error toast
+            toast.error('Failed to remove project allocation. Please try again.');
           } finally {
             setIsDeleting(false);
           }
@@ -220,7 +364,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
           {groupedMembers.map((member, idx) => {
             const memberId = member?.id ? String(member.id) : member?.user?.id ? String(member.user.id) : `member-${idx}`;
             const isExpanded = expandedMembers.has(memberId);
-            const overallUtilization = `${member?.totalAllocated}h / ${member?.capacity}h`;
+            const utilizationPercentage = (member?.totalAllocated / member?.capacity) * 100;
             const statusLabel = getStatusLabel(member?.totalAllocated, member?.capacity);
               
             return (
@@ -246,15 +390,26 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
                     </div>
                   </td>
                   <td className="px-4 py-4">
-                    <div className="flex items-center">
-                      <span className={`font-medium ${getUtilizationTextColor(member.totalAllocated, member.capacity)}`}>
-                        {overallUtilization}
-                      </span>
-                      {statusLabel && (
-                        <span className="ml-2 text-xs text-red-600">
-                          {statusLabel}
-                        </span>
-                      )}
+                    <div className="flex items-center space-x-3">
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className={`font-medium ${getUtilizationTextColor(member.totalAllocated, member.capacity)}`}>
+                            {member?.totalAllocated}h / {member?.capacity}h
+                          </span>
+                          {statusLabel && (
+                            <span className="text-xs text-red-600">
+                              {statusLabel}
+                            </span>
+                          )}
+                        </div>
+                        {/* Progress Bar */}
+                        <div className="mt-1 w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={`h-2 rounded-full ${getUtilizationColor(member.totalAllocated, member.capacity)}`}
+                            style={{ width: `${Math.min(utilizationPercentage, 100)}%` }}
+                          ></div>
+                        </div>
+                      </div>
                     </div>
                   </td>
                   {weeksData.map((week) => {
@@ -271,7 +426,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
                           {weekAllocation}h
                         </div>
                         {/* Tooltip */}
-                        <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                        <div className="invisible  group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
                           <div className="font-medium">Week {week.weekNumber}</div>
                           <div>Allocated: {weekAllocation}h</div>
                           <div>Capacity: {member.capacity}h</div>
@@ -287,7 +442,14 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
                   <tr key={allocation.id} className="bg-white">
                     <td className="px-6 py-3 pl-16">
                       <div className="flex items-center">
-                        <button className="text-red-600 hover:text-red-700 mr-2" title="Remove from project" onClick={() => setDeletingId(allocation.id)}>
+                        <button 
+                          className="text-red-600 hover:text-red-700 mr-2" 
+                          title="Remove from project" 
+                          onClick={() => {
+                            console.log('Delete button clicked for allocation:', allocation.id, allocation);
+                            setDeletingId(allocation.id);
+                          }}
+                        >
                           <X className="h-4 w-4" />
                         </button>
                         <button className="text-sm text-gray-700 cursor-pointer hover:underline" onClick={() => onProjectClick?.(allocation.project_id)}>
@@ -299,13 +461,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
                       <div className="text-sm text-gray-600">{allocation.hours_per_week}h / week</div>
                     </td>
                     {/* Tasks column */}
-                    <td className="px-4 py-3">
-                      <div className="text-sm text-gray-600">
-                        {memberTasks[memberId]?.[allocation.project_id]
-                          ? `${memberTasks[memberId][allocation.project_id].tasks_count} tasks – ${memberTasks[memberId][allocation.project_id].estimated_hours}h`
-                          : '—'}
-                      </div>
-                    </td>
+                   
                     {weeksData.map((week, i) => (
                       <td key={week.weekNumber} className="px-4 py-3 text-center">
                         {editingId === allocation.id && i === 0 ? (

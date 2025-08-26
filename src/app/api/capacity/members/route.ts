@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
+
+// Cache TTL: 15 days
+const CACHE_TTL = 1296000;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -26,10 +30,20 @@ export async function GET(req: NextRequest) {
     }, { status: validation.status })
   }
 
-  const supabase = await createClient()
-  const userContext = validation.context!
+  // Build cache key
+  const cacheKey = `capacity:members:${organizationId}:${projectMemberId || 'all'}:${projectId || 'all'}`;
 
   try {
+    // Try to get from cache first
+    const cachedData = await redisGetJSON(cacheKey);
+    if (cachedData) {
+      console.log('Cache hit for capacity members:', cacheKey);
+      return NextResponse.json(cachedData);
+    }
+
+    const supabase = await createClient()
+    const userContext = validation.context!
+
     let query = supabase
       .from('member_capacity')
       .select(`
@@ -74,10 +88,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ 
+    const response = { 
       member_capacities: memberCapacities || [],
       total: memberCapacities?.length || 0
-    });
+    };
+
+    // Cache the response
+    await redisSetJSON(cacheKey, response, CACHE_TTL);
+    console.log('Cached capacity members:', cacheKey);
+
+    return NextResponse.json(response);
 
   } catch (error) {
     console.error('Error in capacity members GET:', error);
@@ -201,6 +221,14 @@ export async function POST(req: NextRequest) {
       console.error('Error creating member capacity:', createError);
       return NextResponse.json({ error: createError.message }, { status: 500 });
     }
+
+    // Clear related caches
+    await redisDel(`capacity:members:${organizationId}:*`);
+    await redisDel(`capacity:overview:${organizationId}:*`);
+    await redisDel(`capacity:allocations:${organizationId}:*`);
+    await redisDel(`capacity:projects:${organizationId}:*`);
+    await redisDel(`capacity:resources:${organizationId}:*`);
+    console.log('Cleared capacity-related caches for organization:', organizationId);
 
     return NextResponse.json({ 
       success: true,

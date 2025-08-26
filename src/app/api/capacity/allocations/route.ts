@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
+
+// Cache TTL: 15 days
+const CACHE_TTL = 1296000;
 
 // Refactored: use new tables resource_allocations + project_assignments
 export async function GET(req: NextRequest) {
@@ -30,10 +34,20 @@ export async function GET(req: NextRequest) {
     }, { status: validation.status })
   }
 
-  const supabase = await createClient()
-  const userContext = validation.context!
+  // Build cache key
+  const cacheKey = `capacity:allocations:${organizationId}:${projectId || 'all'}:${startDate || 'all'}:${endDate || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterMemberIds.join(',') || 'all'}`;
 
   try {
+    // Try to get from cache first
+    const cachedData = await redisGetJSON(cacheKey);
+    if (cachedData) {
+      console.log('Cache hit for capacity allocations:', cacheKey);
+      return NextResponse.json(cachedData);
+    }
+
+    const supabase = await createClient()
+    const userContext = validation.context!
+
     // Fetch project assignments scoped to org via join through resource_allocations
     let query = supabase
       .from('project_assignments')
@@ -83,7 +97,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ allocations: data || [], total: data?.length || 0 });
+    const response = { allocations: data || [], total: data?.length || 0 };
+
+    // Cache the response
+    await redisSetJSON(cacheKey, response, CACHE_TTL);
+    console.log('Cached capacity allocations:', cacheKey);
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Error in capacity allocations GET:', error);
     return NextResponse.json({ 
@@ -191,6 +211,23 @@ export async function POST(req: NextRequest) {
       console.error('Error creating project assignment:', createError, { payload: allocationData, organizationId });
       return NextResponse.json({ error: createError.message }, { status: 500 });
     }
+
+    // Clear related caches
+    const cacheKeysToClear = [
+      `capacity:allocations:${organizationId}:*`,
+      `capacity:overview:${organizationId}:*`,
+      `capacity:members:${organizationId}:*`,
+      `capacity:projects:${organizationId}:*`,
+      `capacity:resources:${organizationId}:*`
+    ];
+
+    // Clear related caches - using pattern matching
+    await redisDel(`capacity:allocations:${organizationId}:*`);
+    await redisDel(`capacity:overview:${organizationId}:*`);
+    await redisDel(`capacity:members:${organizationId}:*`);
+    await redisDel(`capacity:projects:${organizationId}:*`);
+    await redisDel(`capacity:resources:${organizationId}:*`);
+    console.log('Cleared capacity-related caches for organization:', organizationId);
 
     return NextResponse.json({ success: true, allocation: assignment });
 

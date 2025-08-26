@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
+
+// Cache TTL: 15 days
+const CACHE_TTL = 1296000;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -24,9 +28,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: validation.error }, { status: validation.status });
   }
 
-  const supabase = await createClient();
+  // Build cache key
+  const cacheKey = `capacity:tasks:summary:${organizationId}:${userId || 'all'}:${projectId || 'all'}:${projectIds.join(',') || 'all'}:${startDate || 'all'}:${endDate || 'all'}:${includeTasks}`;
 
   try {
+    // Try to get from cache first
+    const cachedData = await redisGetJSON(cacheKey);
+    if (cachedData) {
+      console.log('Cache hit for capacity tasks summary:', cacheKey);
+      return NextResponse.json(cachedData);
+    }
+
+    const supabase = await createClient();
+
     // Build base query for tasks within organization projects
     let tasksQuery = supabase
       .from('tasks')
@@ -76,7 +90,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ summary: Array.from(byProject.values()) });
+    const response = { summary: Array.from(byProject.values()) };
+
+    // Cache the response
+    await redisSetJSON(cacheKey, response, CACHE_TTL);
+    console.log('Cached capacity tasks summary:', cacheKey);
+
+    return NextResponse.json(response);
   } catch (e) {
     console.error('Error in tasks summary route:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

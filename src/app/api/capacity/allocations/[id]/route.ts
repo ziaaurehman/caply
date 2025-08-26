@@ -3,6 +3,10 @@ import { createClient } from '@/utils/supabase/server';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
+
+// Cache TTL: 15 days
+const CACHE_TTL = 1296000;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: allocationId } = await params;
@@ -21,9 +25,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: validation.error }, { status: validation.status });
   }
 
-  const supabase = await createClient();
+  // Build cache key
+  const cacheKey = `capacity:allocation:${allocationId}:${organizationId}`;
 
   try {
+    // Try to get from cache first
+    const cachedData = await redisGetJSON(cacheKey);
+    if (cachedData) {
+      console.log('Cache hit for capacity allocation:', cacheKey);
+      return NextResponse.json(cachedData);
+    }
+
+    const supabase = await createClient();
+
     const { data: allocation, error } = await supabase
       .from('project_assignments')
       .select(`
@@ -58,7 +72,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Resource allocation not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ allocation });
+    const response = { allocation };
+
+    // Cache the response
+    await redisSetJSON(cacheKey, response, CACHE_TTL);
+    console.log('Cached capacity allocation:', cacheKey);
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Error fetching resource allocation:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -131,6 +151,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Clear related caches
+    await redisDel(`capacity:allocation:${allocationId}:${organizationId}`);
+    await redisDel(`capacity:allocations:${organizationId}:*`);
+    await redisDel(`capacity:overview:${organizationId}:*`);
+    await redisDel(`capacity:members:${organizationId}:*`);
+    await redisDel(`capacity:projects:${organizationId}:*`);
+    await redisDel(`capacity:resources:${organizationId}:*`);
+    console.log('Cleared capacity-related caches for organization:', organizationId);
+
     // No history table in rework
 
     return NextResponse.json({ allocation });
@@ -143,6 +172,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: allocationId } = await params;
   const organizationId = req.headers.get('x-organization-id');
+  
+  console.log('DELETE request for allocation:', allocationId, 'organization:', organizationId);
+  
   if (!organizationId) {
     return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
   }
@@ -153,29 +185,77 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // Verify assignment exists and belongs to user's organization
     const { data: allocation, error: verifyError } = await supabase
       .from('project_assignments')
-      .select('id, hours_per_week, resource_allocations ( organization_id )')
+      .select(`
+        id, 
+        hours_per_week, 
+        is_active, 
+        project_id,
+        resource_allocations ( 
+          id,
+          organization_id,
+          organization_member_id 
+        )
+      `)
       .eq('id', allocationId)
       .single();
 
+    console.log('Found allocation:', allocation, 'error:', verifyError);
+
     if (verifyError || !allocation) {
+      console.log('Allocation not found or error:', verifyError);
       return NextResponse.json({ error: 'Project assignment not found' }, { status: 404 });
     }
     if ((allocation as any)?.resource_allocations?.organization_id !== organizationId) {
+      console.log('Organization mismatch:', (allocation as any)?.resource_allocations?.organization_id, 'vs', organizationId);
       return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
     }
 
-    // Soft delete by setting is_active to false on project_assignments
+    console.log('Performing hard delete for allocation:', allocationId);
+    
+    // Check if there are any related records that might prevent deletion
+    console.log('Allocation details:', allocation);
+    
+    // Hard delete the project assignment record
     const { error } = await supabase
       .from('project_assignments')
-      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .delete()
       .eq('id', allocationId);
 
+    console.log('Hard delete result:', { error });
+
     if (error) {
+      console.error('Delete failed:', error);
+      
+      // If deletion fails due to foreign key constraints, try soft delete as fallback
+      if (error.message.includes('foreign key') || error.message.includes('constraint')) {
+        console.log('Trying soft delete as fallback...');
+        
+        const { error: softDeleteError } = await supabase
+          .from('project_assignments')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', allocationId);
+          
+        if (softDeleteError) {
+          return NextResponse.json({ error: `Delete failed: ${error.message}. Soft delete also failed: ${softDeleteError.message}` }, { status: 500 });
+        }
+        
+        console.log('Soft delete successful as fallback');
+        return NextResponse.json({ message: 'Resource allocation deactivated successfully (soft delete)' });
+      }
+      
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // No history table
+    // Clear related caches
+    await redisDel(`capacity:allocation:${allocationId}:${organizationId}`);
+    await redisDel(`capacity:allocations:${organizationId}:*`);
+    await redisDel(`capacity:overview:${organizationId}:*`);
+    await redisDel(`capacity:members:${organizationId}:*`);
+    await redisDel(`capacity:projects:${organizationId}:*`);
+    await redisDel(`capacity:resources:${organizationId}:*`);
+    console.log('Cleared capacity-related caches for organization:', organizationId);
 
+    console.log('Hard delete successful for allocation:', allocationId);
     return NextResponse.json({ message: 'Resource allocation deleted successfully' });
   } catch (error) {
     console.error('Error deleting resource allocation:', error);

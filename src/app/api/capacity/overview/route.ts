@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
+
+// Cache TTL: 15 days
+const CACHE_TTL = 1296000;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -31,10 +35,20 @@ export async function GET(req: NextRequest) {
     }, { status: validation.status })
   }
 
-  const supabase = await createClient()
-  const userContext = validation.context!
+  // Build cache key
+  const cacheKey = `capacity:overview:${organizationId}:${startDate || 'all'}:${endDate || 'all'}:${projectId || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterUserIds.join(',') || 'all'}:${showOnlyOverallocated}:${showOnlyActive}`;
 
   try {
+    // Try to get from cache first
+    const cachedData = await redisGetJSON(cacheKey);
+    if (cachedData) {
+      console.log('Cache hit for capacity overview:', cacheKey);
+      return NextResponse.json(cachedData);
+    }
+
+    const supabase = await createClient()
+    const userContext = validation.context!
+
     // Fetch all org members that are resources
     let resourcesQuery = supabase
       .from('resource_allocations')
@@ -90,7 +104,18 @@ export async function GET(req: NextRequest) {
     const capacityOverview = (filteredResources || []).map((res) => {
       const orgMember = (res as any).organization_members?.[0] || (res as any).organization_members;
       const user = orgMember?.users || null;
-      const memberAssignments = (assignments || []).filter(a => (a as any).resource_allocations?.id === (res as any).id);
+      const memberAssignments = (assignments || []).filter(a => (a as any).resource_allocations?.organization_member_id === (res as any).organization_member_id);
+      
+      // Debug logging
+      console.log('Resource:', (res as any).organization_member_id, 'User:', user?.full_name);
+      console.log('All assignments:', assignments?.length);
+      console.log('Member assignments:', memberAssignments?.length);
+      console.log('Assignment details:', memberAssignments?.map(a => ({ 
+        hours: a.hours_per_week, 
+        project: (a as any).projects?.name,
+        resource_id: (a as any).resource_allocations?.organization_member_id 
+      })));
+      
       const totalAllocatedHours = memberAssignments.reduce((sum, a) => sum + Number(a.hours_per_week || 0), 0);
       const capacity = Number((res as any).weekly_capacity_hours || 40);
       const utilizationPercent = capacity > 0 ? (totalAllocatedHours / capacity) * 100 : 0;
@@ -116,7 +141,7 @@ export async function GET(req: NextRequest) {
       ? capacityOverview.filter(m => m.utilizationPercent > 100)
       : capacityOverview;
 
-    return NextResponse.json({
+    const response = {
       capacityOverview: filteredOverview,
       summary: {
         totalMembers: filteredOverview?.length || 0,
@@ -127,7 +152,13 @@ export async function GET(req: NextRequest) {
         totalAllocated: filteredOverview.reduce((sum, m) => sum + m.totalAllocatedHours, 0),
         totalAvailable: filteredOverview.reduce((sum, m) => sum + m.availableHours, 0)
       }
-    });
+    };
+
+    // Cache the response
+    await redisSetJSON(cacheKey, response, CACHE_TTL);
+    console.log('Cached capacity overview:', cacheKey);
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Error fetching capacity overview:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
