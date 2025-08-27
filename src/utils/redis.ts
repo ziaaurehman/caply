@@ -68,6 +68,14 @@ export async function redisGetJSON<T>(key: string): Promise<T | null> {
 
 export async function redisDel(key: string): Promise<number> {
   const redis = await getRedis();
+  
+  // If key contains wildcard, use pattern-based deletion
+  if (key.includes('*')) {
+    const keys = await redis.keys(key);
+    if (keys.length === 0) return 0;
+    return redis.del(...keys);
+  }
+  
   return redis.del(key);
 }
 

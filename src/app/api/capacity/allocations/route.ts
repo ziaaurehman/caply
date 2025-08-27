@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Build cache key
-  const cacheKey = `capacity:allocations:${organizationId}:${projectId || 'all'}:${startDate || 'all'}:${endDate || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterMemberIds.join(',') || 'all'}`;
+  const cacheKey = `capacity:allocations:${organizationId}:${projectId || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterMemberIds.join(',') || 'all'}:${startDate || 'all'}:${endDate || 'all'}`;
 
   try {
     // Try to get from cache first
@@ -47,7 +47,6 @@ export async function GET(req: NextRequest) {
 
     const supabase = await createClient()
     const userContext = validation.context!
-
     // Fetch project assignments scoped to org via join through resource_allocations
     let query = supabase
       .from('project_assignments')
@@ -213,20 +212,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Clear related caches
-    const cacheKeysToClear = [
-      `capacity:allocations:${organizationId}:*`,
-      `capacity:overview:${organizationId}:*`,
-      `capacity:members:${organizationId}:*`,
-      `capacity:projects:${organizationId}:*`,
-      `capacity:resources:${organizationId}:*`
-    ];
-
-    // Clear related caches - using pattern matching
     await redisDel(`capacity:allocations:${organizationId}:*`);
     await redisDel(`capacity:overview:${organizationId}:*`);
     await redisDel(`capacity:members:${organizationId}:*`);
     await redisDel(`capacity:projects:${organizationId}:*`);
     await redisDel(`capacity:resources:${organizationId}:*`);
+    await redisDel(`capacity:tasks:summary:${organizationId}:*`);
     console.log('Cleared capacity-related caches for organization:', organizationId);
 
     return NextResponse.json({ success: true, allocation: assignment });

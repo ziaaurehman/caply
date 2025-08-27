@@ -158,9 +158,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     await redisDel(`capacity:members:${organizationId}:*`);
     await redisDel(`capacity:projects:${organizationId}:*`);
     await redisDel(`capacity:resources:${organizationId}:*`);
+    await redisDel(`capacity:tasks:summary:${organizationId}:*`);
     console.log('Cleared capacity-related caches for organization:', organizationId);
-
-    // No history table in rework
 
     return NextResponse.json({ allocation });
   } catch (error) {
@@ -239,6 +238,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
           return NextResponse.json({ error: `Delete failed: ${error.message}. Soft delete also failed: ${softDeleteError.message}` }, { status: 500 });
         }
         
+        // Clear related caches after successful soft delete
+        await redisDel(`capacity:allocation:${allocationId}:${organizationId}`);
+        await redisDel(`capacity:allocations:${organizationId}:*`);
+        await redisDel(`capacity:overview:${organizationId}:*`);
+        await redisDel(`capacity:members:${organizationId}:*`);
+        await redisDel(`capacity:projects:${organizationId}:*`);
+        await redisDel(`capacity:resources:${organizationId}:*`);
+        await redisDel(`capacity:tasks:summary:${organizationId}:*`);
+        console.log('Cleared capacity-related caches after soft delete for organization:', organizationId);
+
         console.log('Soft delete successful as fallback');
         return NextResponse.json({ message: 'Resource allocation deactivated successfully (soft delete)' });
       }
@@ -246,14 +255,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Clear related caches
+    // Clear related caches after successful delete
     await redisDel(`capacity:allocation:${allocationId}:${organizationId}`);
     await redisDel(`capacity:allocations:${organizationId}:*`);
     await redisDel(`capacity:overview:${organizationId}:*`);
     await redisDel(`capacity:members:${organizationId}:*`);
     await redisDel(`capacity:projects:${organizationId}:*`);
     await redisDel(`capacity:resources:${organizationId}:*`);
-    console.log('Cleared capacity-related caches for organization:', organizationId);
+    await redisDel(`capacity:tasks:summary:${organizationId}:*`);
+    console.log('Cleared capacity-related caches after delete for organization:', organizationId);
 
     console.log('Hard delete successful for allocation:', allocationId);
     return NextResponse.json({ message: 'Resource allocation deleted successfully' });

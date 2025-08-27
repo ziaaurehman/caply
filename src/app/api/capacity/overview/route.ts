@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Build cache key
-  const cacheKey = `capacity:overview:${organizationId}:${startDate || 'all'}:${endDate || 'all'}:${projectId || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterUserIds.join(',') || 'all'}:${showOnlyOverallocated}:${showOnlyActive}`;
+  const cacheKey = `capacity:overview:${organizationId}:${projectId || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterUserIds.join(',') || 'all'}:${startDate || 'all'}:${endDate || 'all'}:${showOnlyOverallocated}:${showOnlyActive}`;
 
   try {
     // Try to get from cache first
@@ -48,7 +48,6 @@ export async function GET(req: NextRequest) {
 
     const supabase = await createClient()
     const userContext = validation.context!
-
     // Fetch all org members that are resources
     let resourcesQuery = supabase
       .from('resource_allocations')

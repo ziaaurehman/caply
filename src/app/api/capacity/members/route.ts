@@ -228,6 +228,7 @@ export async function POST(req: NextRequest) {
     await redisDel(`capacity:allocations:${organizationId}:*`);
     await redisDel(`capacity:projects:${organizationId}:*`);
     await redisDel(`capacity:resources:${organizationId}:*`);
+    await redisDel(`capacity:tasks:summary:${organizationId}:*`);
     console.log('Cleared capacity-related caches for organization:', organizationId);
 
     return NextResponse.json({ 
