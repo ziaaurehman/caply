@@ -285,7 +285,7 @@ export default function CapacityPlanningPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
-        <div className="max-w-7xl mx-auto">
+        <div className=" mx-auto">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="text-center">
               <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
@@ -310,7 +310,7 @@ export default function CapacityPlanningPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
+      <div className=" mx-auto">
         {/* Header Section */}
           <div className="mb-6">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
