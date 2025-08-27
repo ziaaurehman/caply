@@ -390,7 +390,7 @@ export default function ProjectCreationPage() {
 
   return (
     <div className="bg-gray-50 p-2">
-      <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-8">
+      <div className=" mx-auto bg-white rounded-lg shadow-md p-8">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-semibold text-gray-800">Create New Project</h1>

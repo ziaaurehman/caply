@@ -196,7 +196,7 @@ export default function ProjectsPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 p-2">
-        <div className="max-w-6xl mx-auto">
+        <div className="mx-auto">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="text-center">
               <p className="text-red-600 mb-4">{error}</p>
@@ -219,7 +219,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto">
+      <div className=" mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-semibold text-gray-800">Projects</h1>

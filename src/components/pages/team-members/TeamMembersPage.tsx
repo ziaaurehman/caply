@@ -177,7 +177,7 @@ const TeamMembersPage: React.FC = () => {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="mx-auto space-y-6">
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Team Members</h1>
@@ -208,7 +208,7 @@ const TeamMembersPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-6xl mx-auto">
+      <div className=" mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-semibold text-gray-800">Team Members</h1>

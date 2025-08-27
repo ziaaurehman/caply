@@ -3,7 +3,7 @@ import React from "react";
 export default function ProjectsSkeleton() {
   return (
     <div className="min-h-screen bg-gray-50 animate-pulse p-4">
-      <div className="max-w-6xl mx-auto">
+      <div className="mx-auto">
         <div className="h-8 w-1/3 bg-gray-200 rounded mb-6" />
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="h-6 w-1/4 bg-gray-200 rounded mb-4" />
