@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react"
 import { toast } from "sonner"
 import { 
   X, Calendar, CheckSquare, Paperclip, MessageSquare, User, Plus, Edit3, Tag, 
-  Copy, Archive, Trash, Clock, Image, Eye, MoreHorizontal, ChevronDown,
+  Copy, Archive, ArchiveRestore, Trash, Clock, Image, Eye, MoreHorizontal, ChevronDown,
   FileText, Download, Settings, Bell, Volume2, Save, EyeOff
 } from "lucide-react"
 import { kanbanAPI } from "@/utils/api/kanban"
@@ -240,13 +240,11 @@ export default function CardDetailModal({
       })
       
       // Update the card state
-      setEditedCard(prev => ({
-        ...prev,
-        is_archived: true
-      }))
+      const archivedCard = { ...editedCard, is_archived: true }
+      setEditedCard(archivedCard)
       
       // Call the parent callback to update the card in the main view
-      onCardUpdate({...editedCard, is_archived: true})
+      onCardUpdate(archivedCard)
       
       toast.success('Card archived successfully!')
       setShowDropdownMenu(false)
@@ -254,6 +252,31 @@ export default function CardDetailModal({
     } catch (error) {
       console.error("Error archiving card:", error)
       toast.error('Failed to archive card')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleUnarchiveCard = async () => {
+    try {
+      setIsSubmitting(true)
+      await kanbanAPI.updateCard(card.id, {
+        is_archived: false,
+        organizationId
+      })
+      
+      // Update the card state
+      const unarchivedCard = { ...editedCard, is_archived: false }
+      setEditedCard(unarchivedCard)
+      
+      // Call the parent callback to update the card in the main view
+      onCardUpdate(unarchivedCard)
+      
+      toast.success('Card unarchived successfully!')
+      setShowDropdownMenu(false)
+    } catch (error) {
+      console.error("Error unarchiving card:", error)
+      toast.error('Failed to unarchive card')
     } finally {
       setIsSubmitting(false)
     }
@@ -671,14 +694,25 @@ export default function CardDetailModal({
                 {showDropdownMenu && (
                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
                     <div className="py-1">
-                      <button
-                        onClick={handleArchiveCard}
-                        disabled={isSubmitting}
-                        className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-                      >
-                        <Archive className="h-4 w-4" />
-                        Archive Card
-                      </button>
+                      {editedCard.is_archived ? (
+                        <button
+                          onClick={handleUnarchiveCard}
+                          disabled={isSubmitting}
+                          className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                        >
+                          <ArchiveRestore className="h-4 w-4" />
+                          Unarchive Card
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleArchiveCard}
+                          disabled={isSubmitting}
+                          className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                        >
+                          <Archive className="h-4 w-4" />
+                          Archive Card
+                        </button>
+                      )}
                 </div>
               </div>
                 )}

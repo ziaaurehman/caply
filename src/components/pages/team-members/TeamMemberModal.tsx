@@ -6,6 +6,8 @@ import { X, Mail, Users, DollarSign, Clock, User, Shield, ChevronDown } from 'lu
 import Button from '@/components/ui/Button';
 import { teamAPI, type Role, type Permission, type TeamMember } from '@/utils/api';
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 
 interface TeamMemberModalProps {
   isOpen: boolean;
@@ -174,14 +176,12 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Email Address
               </label>
-              <input
+              <Input
                 type="email"
                 {...register('email', { required: 'Email is required' })}
                 disabled={isEditing}
-                className={`block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm ${
-                  isEditing ? 'bg-gray-50 cursor-not-allowed' : ''
-                }`}
                 placeholder="member@company.com"
+                error={!!errors.email}
               />
               {errors.email && (
                 <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
@@ -210,25 +210,20 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Role
               </label>
-              <div className="relative">
-                <select
-                  {...register('roleId', { required: 'Role is required' })}
-                  disabled={loadingRoles}
-                  className="block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md appearance-none"
-                >
-                  <option value="">
-                    {loadingRoles ? 'Loading roles...' : 'Select a role'}
+              <Select
+                {...register('roleId', { required: 'Role is required' })}
+                disabled={loadingRoles}
+                error={!!errors.roleId}
+              >
+                <option value="">
+                  {loadingRoles ? 'Loading roles...' : 'Select a role'}
+                </option>
+                {roles.map((role) => (
+                  <option key={role.id} value={role.id}>
+                    {role.display_name}
                   </option>
-                  {roles.map((role) => (
-                    <option key={role.id} value={role.id}>
-                      {role.display_name}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
-                  <ChevronDown className="h-4 w-4" />
-                </div>
-              </div>
+                ))}
+              </Select>
               {errors.roleId && (
                 <p className="mt-1 text-sm text-red-600">{errors.roleId.message}</p>
               )}

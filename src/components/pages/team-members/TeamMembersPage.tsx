@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { Plus, Pencil, Trash2, Mail, Clock, Shield, AlertCircle } from "lucide-react"
+import { Plus, Pencil, Trash2, Mail, Clock, Shield, AlertCircle, Search } from "lucide-react"
 import Image from "next/image"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
@@ -14,6 +14,8 @@ import { teamAPI, type TeamMember, type PendingInvitation, type CreateTeamMember
 import TeamMemberModal from "./TeamMemberModal"
 import TeamMembersSkeleton from "./TeamMembersSkeleton"
 import { useOrganizationStore } from "@/lib/stores/organizationStore"
+import Pagination from "@/components/ui/Pagination"
+import { Input } from "@/components/ui/Input"
 
 const TeamMembersPage: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([])
@@ -21,34 +23,90 @@ const TeamMembersPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null)
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const [itemsPerPage] = useState(10)
+  const [searchTerm, setSearchTerm] = useState('')
   
   const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation()
   const { currentOrganization } = useOrganizationStore()
 
   useEffect(() => {
     if (currentOrganization?.id) {
-      fetchTeamMembers()
+      // Initial load or pagination change
+      const isInitialLoad = currentPage === 1 && searchTerm === ''
+      fetchTeamMembers(isInitialLoad)
     }
-  }, [currentOrganization?.id])
+  }, [currentOrganization?.id, currentPage])
 
-  const fetchTeamMembers = async () => {
+  // Optimized search with minimal delay
+  useEffect(() => {
+    // For empty search, load immediately
+    if (searchTerm === '') {
+      if (currentPage !== 1) {
+        setCurrentPage(1)
+      } else if (currentOrganization?.id) {
+        fetchTeamMembers(false) // Not initial load
+      }
+      return
+    }
+
+    // For search terms, use minimal debounce
+    const timeoutId = setTimeout(() => {
+      if (currentPage !== 1) {
+        setCurrentPage(1) // Reset to first page on search
+      } else if (currentOrganization?.id) {
+        fetchTeamMembers(false) // Not initial load
+      }
+    }, 100) // Reduced to 100ms for even faster response
+
+    return () => clearTimeout(timeoutId)
+  }, [searchTerm])
+
+  const fetchTeamMembers = async (isInitialLoad = false) => {
     if (!currentOrganization?.id) return
     
-    setIsLoading(true)
+    // Use different loading states based on operation type
+    if (isInitialLoad) {
+      setIsLoading(true)
+    } else {
+      setIsSearching(true)
+    }
+    
     setError(null)
     try {
-      const data = await teamAPI.getTeamMembers(currentOrganization.id)
-      setMembers(data.members)
-      setInvitations(data.invitations)
+      const data = await teamAPI.getTeamMembers(currentOrganization.id, {
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchTerm,
+        status: 'active'
+      })
+      
+      setMembers(data.members || [])
+      setInvitations(data.invitations || [])
+      
+      // Update pagination metadata
+      if (data.pagination) {
+        setTotalPages(data.pagination.totalPages)
+        setTotalItems(data.pagination.total)
+      }
     } catch (error: any) {
       console.error('Error fetching team members:', error)
       const errorMessage = error.message || 'Failed to connect to server'
       setError(errorMessage)
       toast.error(errorMessage)
     } finally {
-      setIsLoading(false)
+      if (isInitialLoad) {
+        setIsLoading(false)
+      } else {
+        setIsSearching(false)
+      }
     }
   }
 
@@ -71,7 +129,7 @@ const TeamMembersPage: React.FC = () => {
             throw new Error('No organization selected')
           }
           await teamAPI.deleteTeamMember(id, currentOrganization.id)
-          await fetchTeamMembers() // Refresh the list
+          await fetchTeamMembers(false) // Refresh the list
         } catch (error: any) {
           // Handle specific error messages
           if (error.message.includes('organization owner')) {
@@ -128,7 +186,7 @@ const TeamMembersPage: React.FC = () => {
         toast.success('Team member invitation sent successfully')
       }
 
-      await fetchTeamMembers() // Refresh the list
+      await fetchTeamMembers(false) // Refresh the list
     } catch (error: any) {
       console.error('Error saving member:', error)
       toast.error(error.message || 'Failed to save team member')
@@ -191,7 +249,7 @@ const TeamMembersPage: React.FC = () => {
               <p>{error}</p>
             </div>
             <button
-              onClick={fetchTeamMembers}
+              onClick={() => fetchTeamMembers(false)}
               className="mt-4 px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
             >
               Try Again
@@ -209,18 +267,42 @@ const TeamMembersPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className=" mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-800">Team Members</h1>
-            <p className="text-sm text-gray-500">Manage your team members and their permissions</p>
+        {/* Title */}
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold text-gray-800">Team Members</h1>
+          <p className="text-sm text-gray-500">Manage your team members and their permissions</p>
+        </div>
+
+        {/* Search and Invite Button Row */}
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              type="text"
+              placeholder="Search team members..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
           </div>
-          <button
-            onClick={handleAddNew}
-            className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Invite Member
-          </button>
+          
+          <div className="flex items-center gap-3">
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+            <button
+              onClick={handleAddNew}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors whitespace-nowrap h-10"
+            >
+              <Plus className="h-4 w-4" />
+              Invite Member
+            </button>
+          </div>
         </div>
 
         {/* Pending Invitations */}
@@ -289,7 +371,7 @@ const TeamMembersPage: React.FC = () => {
                             try {
                               await teamAPI.cancelInvitation(invitation.id)
                               toast.success('Invitation cancelled successfully!')
-                              await fetchTeamMembers() // Refresh the list
+                              await fetchTeamMembers(false) // Refresh the list
                             } catch (error: any) {
                               console.error('Error cancelling invitation:', error)
                               toast.error(error.message || 'Failed to cancel invitation')
@@ -315,24 +397,45 @@ const TeamMembersPage: React.FC = () => {
 
         {/* Team Members */}
         <div className="bg-white rounded-lg shadow-md p-6">
-          {isLoading ? (
+          {isSearching ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
-              <span className="ml-2 text-gray-600">Loading team members...</span>
+              <span className="ml-2 text-gray-600">
+                {searchTerm ? 'Searching team members...' : 'Loading team members...'}
+              </span>
             </div>
           ) : members.length === 0 ? (
             <div className="text-center py-8">
               <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                <Plus className="h-6 w-6 text-gray-400" />
+                {searchTerm ? (
+                  <Search className="h-6 w-6 text-gray-400" />
+                ) : (
+                  <Plus className="h-6 w-6 text-gray-400" />
+                )}
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No team members yet</h3>
-              <p className="text-gray-500 mb-4">Start building your team by inviting your first member.</p>
-              <button
-                onClick={handleAddNew}
-                className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-              >
-                Invite Your First Member
-              </button>
+              {searchTerm ? (
+                <>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No results found</h3>
+                  <p className="text-gray-500 mb-4">No team members match your search criteria for "{searchTerm}".</p>
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                  >
+                    Clear Search
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No team members yet</h3>
+                  <p className="text-gray-500 mb-4">Start building your team by inviting your first member.</p>
+                  <button
+                    onClick={handleAddNew}
+                    className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                  >
+                    Invite Your First Member
+                  </button>
+                </>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -459,6 +562,17 @@ const TeamMembersPage: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* Pagination */}
+        {!isLoading && members.length > 0 && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+          />
+        )}
 
         <TeamMemberModal
           isOpen={isModalOpen}

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Shield, Users, Settings, Eye } from 'lucide-react'
+import { Plus, Edit, Trash2, Shield, Users, Settings, Eye, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { rolesApi, permissionsApi } from '@/utils/api/roles'
 import { Role, Permission } from '@/lib/types'
@@ -9,6 +9,8 @@ import CreateRoleModal from '@/components/modals/CreateRoleModal'
 import EditRoleModal from '@/components/modals/EditRoleModal'
 import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal'
 import { useOrganizationStore } from '@/lib/stores/organizationStore'
+import Pagination from '@/components/ui/Pagination'
+import { Input } from '@/components/ui/Input'
 
 export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([])
@@ -16,6 +18,13 @@ export default function RolesPage() {
   const [loading, setLoading] = useState(true)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const [itemsPerPage] = useState(10)
+  const [searchTerm, setSearchTerm] = useState('')
 
   // Modal states
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -32,12 +41,36 @@ export default function RolesPage() {
   const canUpdateRoles = hasRole('admin') || hasPermission('roles', 'update') || hasPermission('roles', 'manage')
   const canDeleteRoles = hasRole('admin') || hasPermission('roles', 'delete') || hasPermission('roles', 'manage')
 
-  // Load data when organization changes
+  // Load data when organization or pagination changes
   useEffect(() => {
     if (currentOrganization?.id && hasAdminAccess) {
       loadData()
     }
-  }, [currentOrganization?.id, hasAdminAccess])
+  }, [currentOrganization?.id, hasAdminAccess, currentPage])
+
+  // Optimized search with minimal delay
+  useEffect(() => {
+    // For empty search, load immediately
+    if (searchTerm === '') {
+      if (currentPage !== 1) {
+        setCurrentPage(1)
+      } else if (currentOrganization?.id && hasAdminAccess) {
+        loadData()
+      }
+      return
+    }
+
+    // For search terms, use minimal debounce
+    const timeoutId = setTimeout(() => {
+      if (currentPage !== 1) {
+        setCurrentPage(1) // Reset to first page on search
+      } else if (currentOrganization?.id && hasAdminAccess) {
+        loadData()
+      }
+    }, 100) // Reduced to 100ms for even faster response
+
+    return () => clearTimeout(timeoutId)
+  }, [searchTerm])
 
   const loadData = async () => {
     if (!currentOrganization?.id) return
@@ -46,14 +79,24 @@ export default function RolesPage() {
       setLoading(true)
       setError(null)
 
-      // Load roles and permissions in parallel
+      // Load roles with pagination and permissions in parallel
       const [rolesResponse, permissionsResponse] = await Promise.all([
-        rolesApi.getAll(currentOrganization.id),
+        rolesApi.getAll(currentOrganization.id, {
+          page: currentPage,
+          limit: itemsPerPage,
+          search: searchTerm
+        }),
         permissionsApi.getAll(currentOrganization.id)
       ])
 
-      setRoles(rolesResponse.data || rolesResponse.roles || [])
+      setRoles(rolesResponse.roles || [])
       setPermissions(permissionsResponse.data || permissionsResponse.permissions || {})
+      
+      // Update pagination metadata
+      if (rolesResponse.pagination) {
+        setTotalPages(rolesResponse.pagination.totalPages)
+        setTotalItems(rolesResponse.pagination.total)
+      }
     } catch (err) {
       console.error('Error loading data:', err)
       setError('Failed to load roles and permissions')
@@ -213,20 +256,46 @@ export default function RolesPage() {
   return (
     <div className="p-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
+      <div className="mb-8">
+        {/* Title */}
+        <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900">Roles & Permissions</h1>
           <p className="text-gray-600 mt-2">Manage user roles and their permissions for {currentOrganization?.name}</p>
         </div>
-        {canCreateRoles && (
-          <button
-            onClick={() => setCreateModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Create Role
-          </button>
-        )}
+        
+        {/* Search and Create Button Row */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Input
+              type="text"
+              placeholder="Search roles..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          
+          <div className="flex items-center gap-3">
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+            {canCreateRoles && (
+              <button
+                onClick={() => setCreateModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors whitespace-nowrap text-sm font-medium h-10"
+              >
+                <Plus className="w-4 h-4" />
+                Create Role
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Roles Table */}
@@ -360,6 +429,17 @@ export default function RolesPage() {
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {!loading && roles.length > 0 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+        />
+      )}
 
       {/* Modals */}
       <CreateRoleModal

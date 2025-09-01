@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import Image from "next/image"
-import { ChevronDown, Plus, Settings, Users, Filter, Search, Bell } from "lucide-react"
+import { ChevronDown, Plus, Settings, Users, Filter, Search, Bell, X } from "lucide-react"
 import { toast } from "sonner"
 import { kanbanAPI } from "@/utils/api/kanban"
 import { projectAPI } from "@/utils/api/project"
@@ -59,6 +59,10 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     sourceListId: null,
     targetListId: null
   });
+  
+  // Search state
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showArchived, setShowArchived] = useState<boolean>(false);
 
   const [cardModal, setCardModal] = useState<CardModalState>({
     isOpen: false,
@@ -74,7 +78,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // Filters and search
   const [filters, setFilters] = useState<KanbanFilters>({});
-  const [searchTerm, setSearchTerm] = useState("");
   const [selectedAssignee, setSelectedAssignee] = useState("all");
 
   // Background customization
@@ -108,7 +111,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     try {
       setKanbanState(prev => ({ ...prev, isLoading: true, error: null }));
 
-      // Fetch project details and members
+      // Step 1: Fetch project details and members (show project info immediately)
       const projectResponse = await projectAPI.getProject(projectId, currentOrganization.id);
       const project = projectResponse.project;
       setProjectName(project.name);
@@ -133,7 +136,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         return;
       }
 
-      // Fetch boards for the project
+      // Step 2: Fetch boards for the project (show board header immediately)
       const boardsResponse = await kanbanAPI.getBoards(projectId, currentOrganization.id);
       const boards = boardsResponse.boards;
 
@@ -146,23 +149,31 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           background_color: "#0079bf",
           organizationId: currentOrganization.id
         });
+        
+        // Show board immediately (even before lists load)
         setKanbanState(prev => ({
           ...prev,
           boards: [newBoard.board],
           currentBoard: newBoard.board,
-          isLoading: false
+          isLoading: false,
+          lists: [] // Empty lists initially
         }));
-        await loadBoardData(newBoard.board.id);
+        
+        // Load board data progressively
+        loadBoardData(newBoard.board.id);
       } else {
-        // Use the first board
+        // Use the first board - show it immediately
         const currentBoard = boards[0];
         setKanbanState(prev => ({
           ...prev,
           boards,
           currentBoard,
-          isLoading: false
+          isLoading: false,
+          lists: [] // Empty lists initially
         }));
-        await loadBoardData(currentBoard.id);
+        
+        // Load board data progressively
+        loadBoardData(currentBoard.id);
       }
     } catch (error) {
       console.error("Error initializing Kanban data:", error);
@@ -188,6 +199,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     }
   }, [initializeKanbanData, currentOrganization?.id]);
 
+
+
   // Close dropdown on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -199,15 +212,61 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Reload board data when showArchived changes
+  useEffect(() => {
+    if (kanbanState.currentBoard) {
+      loadBoardData(kanbanState.currentBoard.id);
+    }
+  }, [showArchived]);
+
   const loadBoardData = async (boardId: string) => {
     if (!currentOrganization?.id) return;
     
     try {
-      const listsResponse = await kanbanAPI.getLists(boardId, currentOrganization.id);
+      // Step 1: Load basic list structure (show lists immediately)
+      const listsResponse = await kanbanAPI.getLists(boardId, currentOrganization.id, showArchived);
+      const basicLists = listsResponse.lists.map(list => ({
+        ...list,
+        cards: [], // Initialize with empty cards array
+        isLoadingCards: true // Add loading state for cards
+      }));
+      
+      // Show lists immediately (even without cards)
       setKanbanState(prev => ({
         ...prev,
-        lists: listsResponse.lists
+        lists: basicLists
       }));
+
+      // Step 2: Load cards for each list progressively (show cards as they load)
+      basicLists.forEach(async (list) => {
+        try {
+          const cardsResponse = await kanbanAPI.getCardsByList(list.id, currentOrganization.id, searchTerm, showArchived);
+          
+          // Update this specific list with its cards immediately when they load
+          setKanbanState(prev => ({
+            ...prev,
+            lists: prev.lists.map(prevList => 
+              prevList.id === list.id 
+                ? { ...prevList, cards: cardsResponse.cards, isLoadingCards: false }
+                : prevList
+            )
+          }));
+          
+        } catch (error) {
+          console.error(`Error loading cards for list ${list.id}:`, error);
+          
+          // Mark this list as failed to load cards
+          setKanbanState(prev => ({
+            ...prev,
+            lists: prev.lists.map(prevList => 
+              prevList.id === list.id 
+                ? { ...prevList, cards: [], isLoadingCards: false }
+                : prevList
+            )
+          }));
+        }
+      });
+
     } catch (error) {
       console.error("Error loading board data:", error);
       setKanbanState(prev => ({
@@ -375,6 +434,168 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     }
   };
 
+  // List Drag & Drop State
+  const [listDragState, setListDragState] = useState<{
+    isDragging: boolean;
+    draggedListId: string | null;
+    dragOverListId: string | null;
+  }>({
+    isDragging: false,
+    draggedListId: null,
+    dragOverListId: null
+  });
+
+  // List Drag & Drop Handlers
+  const handleListDragStart = useCallback((e: React.DragEvent, list: List) => {
+    console.log('List drag start:', list.name);
+    setListDragState({
+      isDragging: true,
+      draggedListId: list.id,
+      dragOverListId: null
+    });
+    e.dataTransfer.setData("listId", list.id);
+    e.dataTransfer.setData("listPosition", list.position.toString());
+    e.dataTransfer.effectAllowed = "move";
+  }, []);
+
+  const handleListDragOver = useCallback((e: React.DragEvent, targetListId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    
+    setListDragState(prev => ({
+      ...prev,
+      dragOverListId: targetListId
+    }));
+  }, []);
+
+  const handleListDragLeave = useCallback(() => {
+    setListDragState(prev => ({
+      ...prev,
+      dragOverListId: null
+    }));
+  }, []);
+
+  const handleListDrop = useCallback(async (e: React.DragEvent, targetListId: string) => {
+    e.preventDefault();
+    
+    const draggedListId = e.dataTransfer.getData("listId");
+    if (!draggedListId || draggedListId === targetListId || !currentOrganization?.id) {
+      setListDragState({
+        isDragging: false,
+        draggedListId: null,
+        dragOverListId: null
+      });
+      return;
+    }
+
+    try {
+      console.log(`Moving list ${draggedListId} to position of ${targetListId}`);
+      
+      // Find current positions
+      const lists = kanbanState.lists;
+      const draggedList = lists.find(l => l.id === draggedListId);
+      const targetList = lists.find(l => l.id === targetListId);
+      
+      if (!draggedList || !targetList) return;
+
+      // Create new list order with optimistic update
+      const newLists = [...lists];
+      const draggedIndex = newLists.findIndex(l => l.id === draggedListId);
+      const targetIndex = newLists.findIndex(l => l.id === targetListId);
+      
+      // Remove dragged list and insert at target position
+      const [removed] = newLists.splice(draggedIndex, 1);
+      newLists.splice(targetIndex, 0, removed);
+      
+      // Update positions
+      const updatedLists = newLists.map((list, index) => ({
+        ...list,
+        position: index
+      }));
+
+      // Optimistic UI update
+      setKanbanState(prev => ({
+        ...prev,
+        lists: updatedLists
+      }));
+
+      // Prepare API payload
+      const listPositions = updatedLists.map(list => ({
+        list_id: list.id,
+        position: list.position
+      }));
+
+      // Make API call
+      await kanbanAPI.reorderLists(
+        kanbanState.currentBoard!.id, 
+        listPositions, 
+        currentOrganization.id
+      );
+      
+      toast.success('List reordered successfully!');
+      console.log('List reorder API call successful');
+      
+    } catch (error) {
+      console.error("Error reordering lists:", error);
+      toast.error('Failed to reorder list');
+      
+      // Rollback on error - reload board data
+      if (kanbanState.currentBoard) {
+        await loadBoardData(kanbanState.currentBoard.id);
+      }
+    } finally {
+      setListDragState({
+        isDragging: false,
+        draggedListId: null,
+        dragOverListId: null
+      });
+    }
+  }, [kanbanState.lists, kanbanState.currentBoard, currentOrganization?.id]);
+
+  const handleListArchive = useCallback(async (listId: string, isArchived: boolean) => {
+    if (!currentOrganization?.id) return;
+
+    try {
+      console.log(`${isArchived ? 'Archiving' : 'Unarchiving'} list:`, listId);
+      
+      // Optimistic update
+      setKanbanState(prev => ({
+        ...prev,
+        lists: prev.lists.map(list => 
+          list.id === listId 
+            ? { ...list, is_archived: isArchived }
+            : list
+        )
+      }));
+
+      // API call
+      await kanbanAPI.updateList(listId, {
+        is_archived: isArchived,
+        organizationId: currentOrganization.id
+      });
+
+      // Refresh board data to get updated cards status
+      if (kanbanState.currentBoard) {
+        await loadBoardData(kanbanState.currentBoard.id);
+      }
+
+      toast.success(`List ${isArchived ? 'archived' : 'unarchived'} successfully!`);
+    } catch (error) {
+      console.error("Error archiving/unarchiving list:", error);
+      toast.error(`Failed to ${isArchived ? 'archive' : 'unarchive'} list`);
+      
+      // Rollback optimistic update
+      setKanbanState(prev => ({
+        ...prev,
+        lists: prev.lists.map(list => 
+          list.id === listId 
+            ? { ...list, is_archived: !isArchived }
+            : list
+        )
+      }));
+    }
+  }, [currentOrganization?.id, kanbanState.currentBoard]);
+
   // List management
   const handleAddList = async () => {
     if (!kanbanState.currentBoard || !currentOrganization?.id) return;
@@ -449,6 +670,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   // Filter cards based on current filters
   const getFilteredCards = (cards: Card[]): Card[] => {
     return cards.filter(card => {
+      // Archive filter - if showArchived is false, exclude archived cards
+      if (!showArchived && card.is_archived) {
+        return false;
+      }
+      
       // Search filter
       if (searchTerm && !card.title.toLowerCase().includes(searchTerm.toLowerCase()) && 
           !card.description?.toLowerCase().includes(searchTerm.toLowerCase())) {
@@ -536,6 +762,20 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
+              </div>
+
+              {/* Show Archived Toggle */}
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="showArchived"
+                  checked={showArchived}
+                  onChange={(e) => setShowArchived(e.target.checked)}
+                  className="w-4 h-4 text-orange-600 bg-gray-100 border-gray-300 rounded focus:ring-orange-500 focus:ring-2"
+                />
+                <label htmlFor="showArchived" className="text-sm font-medium text-gray-700">
+                  Show Archived
+                </label>
               </div>
 
               {/* Assignee Filter */}
@@ -676,11 +916,19 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   list={list}
                   cards={getFilteredCards(list.cards || [])}
                   projectMembers={projectMembers}
+                  isLoadingCards={(list as any).isLoadingCards}
                   onDragStart={handleDragStart}
                   onDragOver={handleDragOver}
                   onDrop={handleDrop}
                   onAddCard={handleAddCard}
                   onCardClick={handleCardClick}
+                  onListDragStart={handleListDragStart}
+                  onListDragOver={handleListDragOver}
+                  onListDragLeave={handleListDragLeave}
+                  onListDrop={handleListDrop}
+                  onListArchive={handleListArchive}
+                  isDraggedOver={listDragState.dragOverListId === list.id}
+                  isBeingDragged={listDragState.draggedListId === list.id}
                 />
               </div>
             ))}
@@ -727,7 +975,15 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               }))
             }));
             
-            // Refresh board data to ensure consistency
+            // If card was archived and we're not showing archived items, 
+            // close the modal and don't reload (card will be filtered out by getFilteredCards)
+            if (updatedCard.is_archived && !showArchived) {
+              setCardModal({ isOpen: false, card: null, mode: 'view' });
+              toast.success('Card archived and removed from view');
+              return;
+            }
+            
+            // Refresh board data to ensure consistency for other updates
             if (kanbanState.currentBoard) {
               loadBoardData(kanbanState.currentBoard.id);
             }

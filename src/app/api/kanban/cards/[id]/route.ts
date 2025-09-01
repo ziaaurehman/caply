@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
-import { redisGetJSON, redisSetJSON } from '@/utils/redis';
+import { redisGetJSON, redisSetJSON, redisDeleteByPattern } from '@/utils/redis';
 
 export async function GET(
   req: NextRequest,
@@ -648,6 +648,24 @@ export async function PATCH(
       console.warn('Failed to refresh kanban card cache after update:', e);
     }
 
+    // Invalidate project progress cache since a card was updated
+    try {
+      const boardId = (existingCard.lists as any).board_id;
+      const { data: board } = await supabase
+        .from('boards')
+        .select('project_id')
+        .eq('id', boardId)
+        .single();
+      
+      if (board) {
+        const progressCacheKey = `project_progress:${board.project_id}:${organizationId}`;
+        await redisDeleteByPattern(progressCacheKey);
+        console.log('🔄 Invalidated project progress cache after card update');
+      }
+    } catch (e) {
+      console.warn('Failed to invalidate project progress cache:', e);
+    }
+
     return NextResponse.json({ card });
   } catch (error) {
     console.error('Error in PATCH /api/kanban/cards/[id]:', error);
@@ -858,6 +876,24 @@ export async function DELETE(
       await redisSetJSON(boardCacheKey, { cards: transformedBoard }, 1296000);
     } catch (e) {
       console.warn('Failed to refresh kanban cards cache after delete:', e);
+    }
+
+    // Invalidate project progress cache since a card was deleted
+    try {
+      const boardId = (existingCard.lists as any).board_id;
+      const { data: board } = await supabase
+        .from('boards')
+        .select('project_id')
+        .eq('id', boardId)
+        .single();
+      
+      if (board) {
+        const progressCacheKey = `project_progress:${board.project_id}:${organizationId}`;
+        await redisDeleteByPattern(progressCacheKey);
+        console.log('🔄 Invalidated project progress cache after card deletion');
+      }
+    } catch (e) {
+      console.warn('Failed to invalidate project progress cache:', e);
     }
 
     return NextResponse.json({ success: true });

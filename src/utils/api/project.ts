@@ -21,6 +21,13 @@ interface Project {
   created_by?: string;
   created_at: string;
   updated_at: string;
+  progress?: number;
+  progress_details?: {
+    totalCards: number;
+    completedCards: number;
+    inProgressCards: number;
+    todoCards: number;
+  };
   project_members?: Array<{
     id: string;
     organization_member_id: string;
@@ -110,6 +117,17 @@ interface ProjectDocumentDownloadResponse {
 
 interface ProjectsResponse {
   projects: Project[];
+  user_role?: string;
+  total_projects?: number;
+  access_level?: string;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
 }
 
 interface ProjectResponse {
@@ -118,44 +136,70 @@ interface ProjectResponse {
 
 // Projects API
 export const projectAPI = {
-  // Get all projects
-  getProjects: async (organizationId: string, filters?: { capacity_planning_enabled?: boolean }): Promise<ProjectsResponse> => {
+  // Get all projects with pagination and search
+  getProjects: async (organizationId: string, params?: { 
+    page?: number; 
+    limit?: number; 
+    search?: string; 
+    status?: string;
+    capacity_planning_enabled?: boolean;
+  }): Promise<ProjectsResponse> => {
+    const { deduplicateRequest, createRequestKey } = await import('@/utils/requestDeduplication')
+    
     let url = '/api/projects';
     
     // Use the capacity-specific endpoint if filtering by capacity planning
-    if (filters?.capacity_planning_enabled) {
+    if (params?.capacity_planning_enabled) {
       url = '/api/capacity/projects';
     }
     
-    // Add organization ID as query parameter
-    url += `?organizationId=${organizationId}`;
-    
-    const response = await fetch(url, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch projects');
+    const requestParams = {
+      organizationId,
+      ...(params?.page && { page: params.page.toString() }),
+      ...(params?.limit && { limit: params.limit.toString() }),
+      ...(params?.search && { search: params.search }),
+      ...(params?.status && { status: params.status }),
+      ...(params?.capacity_planning_enabled && { capacity_planning_enabled: 'true' })
     }
-    const data = await response.json();
-    return { projects: data.projects || [] };
+    
+    const requestKey = createRequestKey(url, requestParams)
+    
+    return deduplicateRequest(requestKey, async () => {
+      const searchParams = new URLSearchParams(requestParams)
+      const fullUrl = `${url}?${searchParams.toString()}`
+      
+      const response = await fetch(fullUrl, {
+        headers: {
+          'x-organization-id': organizationId,
+        },
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch projects');
+      }
+      return await response.json();
+    })
   },
 
   // Get single project by ID
   getProject: async (id: string, organizationId: string): Promise<ProjectResponse> => {
-    const response = await fetch(`/api/projects/${id}?organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch project');
-    }
-    const data = await response.json();
-    return { project: data.project };
+    const { deduplicateRequest, createRequestKey } = await import('@/utils/requestDeduplication')
+    
+    const requestKey = createRequestKey(`/api/projects/${id}`, { organizationId })
+    
+    return deduplicateRequest(requestKey, async () => {
+      const response = await fetch(`/api/projects/${id}?organizationId=${organizationId}`, {
+        headers: {
+          'x-organization-id': organizationId,
+        },
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch project');
+      }
+      const data = await response.json();
+      return { project: data.project };
+    })
   },
 
   // Create new project

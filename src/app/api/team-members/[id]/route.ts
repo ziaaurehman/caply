@@ -5,6 +5,9 @@ import { authConfig } from '@/auth'
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 import { redisDel, redisSetJSON } from '@/utils/redis'
 
+// Cache TTL - 7 days for page 1 only (most frequently accessed)
+const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
+
 // PUT /api/team-members/[id] - Update team member
 export async function PUT(
   request: NextRequest,
@@ -98,126 +101,102 @@ export async function PUT(
       return NextResponse.json({ error: 'Failed to update member' }, { status: 500 })
     }
 
-    // Refresh caches related to this member and user (15 days)
+    // Refresh page 1 cache after updating team member
     try {
-      // Update single member cache
-      await redisSetJSON(
-        `organization:member:${headerOrgId}:${member.user_id}`,
-        updatedMember,
-        1296000
-      )
-
-      // Refresh organization members list cache
-      const { data: allMembers } = await supabase
-        .from('organization_members')
-        .select(`
-          id,
-          user_id,
-          role_id,
-          hourly_rate,
-          weekly_capacity,
-          department,
-          hire_date,
-          status,
-          joined_at,
-          users:user_id (
-            id,
-            email,
-            full_name,
-            avatar_url,
-            position,
-            phone,
-            is_active
-          ),
-          roles:role_id (
-            id,
-            name,
-            display_name,
-            description
-          )
-        `)
-        .eq('organization_id', headerOrgId)
-        .order('joined_at', { ascending: false })
-
-      if (allMembers) {
-        await redisSetJSON(`organization:members:${headerOrgId}`, allMembers, 1296000)
-      }
-
-      // Refresh user's organizations list cache
-      const { data: userOrgs } = await supabase
-        .from('organization_members')
-        .select(`
-          id,
-          organization_id,
-          user_id,
-          role_id,
-          status,
-          hourly_rate,
-          weekly_capacity,
-          department,
-          hire_date,
-          joined_at,
-          organizations!inner(
-            id,
-            name,
-            slug,
-            description,
-            logo_url,
-            owner_id,
-            created_at
-          ),
-          roles!inner(
-            id,
-            name,
-            display_name,
-            description,
-            role_permissions!inner(
-              permissions!inner(
-                module,
-                action
+      const cacheKeysToInvalidate = [
+        `team_members:page1:${headerOrgId}::`, // Empty search, no status filter
+        `team_members:page1:${headerOrgId}::active`, // Active status filter
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Refresh cache with new data
+          const { data: members } = await supabase
+            .from('organization_members')
+            .select(`
+              id,
+              user_id,
+              role_id,
+              status,
+              hourly_rate,
+              weekly_capacity,
+              department,
+              hire_date,
+              joined_at,
+              users!inner(
+                id,
+                email,
+                full_name,
+                avatar_url
+              ),
+              roles!inner(
+                id,
+                name,
+                display_name
               )
-            )
-          )
-        `)
-        .eq('user_id', member.user_id)
-        .eq('status', 'active')
+            `)
+            .eq('organization_id', headerOrgId)
+            .eq('status', key.includes('active') ? 'active' : undefined)
+            .order('joined_at', { ascending: false })
+            .range(0, 9) // First 10 items for page 1
 
-      const transformedUserOrgs = (userOrgs || []).map((org: any) => ({
-        id: org.organizations.id,
-        name: org.organizations.name,
-        slug: org.organizations.slug,
-        description: org.organizations.description,
-        logo_url: org.organizations.logo_url,
-        is_owner: org.organizations.owner_id === member.user_id,
-        created_at: org.organizations.created_at,
-        membership_status: org.status,
-        membership: {
-          id: org.id,
-          organization_id: org.organization_id,
-          user_id: org.user_id,
-          role_id: org.role_id,
-          status: org.status,
-          hourly_rate: org.hourly_rate,
-          weekly_capacity: org.weekly_capacity,
-          department: org.department,
-          hire_date: org.hire_date,
-          joined_at: org.joined_at,
-          role: {
-            id: org.roles.id,
-            name: org.roles.name,
-            display_name: org.roles.display_name,
-            description: org.roles.description,
-            permissions: org.roles.role_permissions?.map((rp: any) => ({
-              resource: rp.permissions.module,
-              action: rp.permissions.action
-            })) || []
+          // Get invitations for page 1
+          const { data: invitations } = await supabase
+            .from('organization_invitations')
+            .select(`
+              id,
+              email,
+              role_id,
+              status,
+              expires_at,
+              created_at,
+              user_id,
+              roles:role_id (
+                id,
+                name,
+                display_name
+              )
+            `)
+            .eq('organization_id', headerOrgId)
+            .order('created_at', { ascending: false })
+            .range(0, 9) // First 10 items
+
+          // Get total counts
+          const { count: totalMembers } = await supabase
+            .from('organization_members')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', headerOrgId)
+            .eq('status', key.includes('active') ? 'active' : undefined)
+
+          const { count: totalInvitations } = await supabase
+            .from('organization_invitations')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', headerOrgId)
+
+          const totalCount = (totalMembers || 0) + (totalInvitations || 0)
+          const totalPages = Math.ceil(totalCount / 10)
+
+          const refreshedResult = {
+            members: members || [],
+            invitations: invitations || [],
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
+            }
           }
-        }
-      }))
 
-      await redisSetJSON(`user:organizations:${member.user_id}`, transformedUserOrgs, 1296000)
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed team members page 1 cache after member update')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
+        }
+      }
     } catch (e) {
-      console.warn('Failed to refresh caches after member update:', e)
+      console.warn('Failed to refresh team members page 1 cache after update:', e)
     }
 
     return NextResponse.json({ 
@@ -313,15 +292,102 @@ export async function DELETE(
       return NextResponse.json({ error: 'Failed to remove member' }, { status: 500 })
     }
 
-    // Invalidate related Redis caches
+    // Refresh page 1 cache after deleting team member
     try {
-      await Promise.all([
-        redisDel(`user:organizations:${member.user_id}`),
-        redisDel(`organization:members:${headerOrgId}`),
-        redisDel(`organization:member:${headerOrgId}:${member.user_id}`),
-      ])
+      const cacheKeysToInvalidate = [
+        `team_members:page1:${headerOrgId}::`, // Empty search, no status filter
+        `team_members:page1:${headerOrgId}::active`, // Active status filter
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Refresh cache with new data
+          const { data: members } = await supabase
+            .from('organization_members')
+            .select(`
+              id,
+              user_id,
+              role_id,
+              status,
+              hourly_rate,
+              weekly_capacity,
+              department,
+              hire_date,
+              joined_at,
+              users!inner(
+                id,
+                email,
+                full_name,
+                avatar_url
+              ),
+              roles!inner(
+                id,
+                name,
+                display_name
+              )
+            `)
+            .eq('organization_id', headerOrgId)
+            .eq('status', key.includes('active') ? 'active' : undefined)
+            .order('joined_at', { ascending: false })
+            .range(0, 9) // First 10 items for page 1
+
+          // Get invitations for page 1
+          const { data: invitations } = await supabase
+            .from('organization_invitations')
+            .select(`
+              id,
+              email,
+              role_id,
+              status,
+              expires_at,
+              created_at,
+              user_id,
+              roles:role_id (
+                id,
+                name,
+                display_name
+              )
+            `)
+            .eq('organization_id', headerOrgId)
+            .order('created_at', { ascending: false })
+            .range(0, 9) // First 10 items
+
+          // Get total counts
+          const { count: totalMembers } = await supabase
+            .from('organization_members')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', headerOrgId)
+            .eq('status', key.includes('active') ? 'active' : undefined)
+
+          const { count: totalInvitations } = await supabase
+            .from('organization_invitations')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', headerOrgId)
+
+          const totalCount = (totalMembers || 0) + (totalInvitations || 0)
+          const totalPages = Math.ceil(totalCount / 10)
+
+          const refreshedResult = {
+            members: members || [],
+            invitations: invitations || [],
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
+            }
+          }
+
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed team members page 1 cache after member deletion')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
+        }
+      }
     } catch (e) {
-      console.warn('Failed to invalidate caches after member delete:', e)
+      console.warn('Failed to refresh team members page 1 cache after delete:', e)
     }
 
     return NextResponse.json({ 

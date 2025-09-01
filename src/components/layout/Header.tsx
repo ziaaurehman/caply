@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, Dispatch, SetStateAction, useEffect } from "react"
+import { useState, Dispatch, SetStateAction, useEffect, useCallback } from "react"
 import { Bell, Search, Menu, ChevronDown, User, Settings, LogOut, PanelLeftClose, PanelLeftOpen, CreditCard, Building2, Check } from "lucide-react"
 import { useSession, signOut } from "next-auth/react"
 import { getInitials } from "@/lib/utils"
-import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { useSubscriptionModal } from "@/lib/hooks/useSubscriptionModal"
-import { useOrganizationStore } from "@/lib/stores/organizationStore"
+import { useOrganizationStore, useCurrentOrganization } from "@/lib/stores/organizationStore"
 
 interface HeaderProps {
   setSidebarOpen: Dispatch<SetStateAction<boolean>>
@@ -22,35 +21,57 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
   const [showOrgDropdown, setShowOrgDropdown] = useState(false)
   const { openSubscriptionModal } = useSubscriptionModal()
   
+  // Use optimized store hooks
+  const { currentOrganization, loading } = useCurrentOrganization()
   const {
-    currentOrganization,
     userOrganizations,
-    loading,
     fetchUserOrganizations,
     switchOrganization,
-    clearOrganizationData
+    clearOrganizationData,
+    fetchOrganizationContext,
+    warmCaches
   } = useOrganizationStore()
 
-  // Fetch organizations when session is available
+  // Initialize data with progressive loading
   useEffect(() => {
-    if (session?.user?.id && userOrganizations.length === 0) {
-      fetchUserOrganizations()
-    }
-  }, [session?.user?.id, fetchUserOrganizations, userOrganizations.length])
+    if (!session?.user?.id) return
 
-  const handleLogout = async () => {
+    const initializeData = async () => {
+      // First, fetch organizations (lightweight)
+      await fetchUserOrganizations()
+      
+      // Warm caches for likely organizations in background
+      warmCaches()
+      
+      // Then, if we have a current organization, fetch its context
+      const selectedOrgId = typeof window !== 'undefined' 
+        ? localStorage.getItem('selectedOrganizationId')
+        : null
+
+      if (selectedOrgId) {
+        await fetchOrganizationContext(selectedOrgId)
+      } else if (userOrganizations.length > 0 && !currentOrganization) {
+        // Auto-select first organization and fetch its context
+        await switchOrganization(userOrganizations[0].id)
+      }
+    }
+
+    initializeData()
+  }, [session?.user?.id, fetchUserOrganizations, fetchOrganizationContext, switchOrganization, warmCaches, userOrganizations.length, currentOrganization])
+
+  const handleLogout = useCallback(async () => {
     setShowProfileMenu(false)
     clearOrganizationData()
     await signOut({ 
       callbackUrl: '/',
       redirect: true 
     })
-  }
+  }, [clearOrganizationData])
 
-  const handleOrganizationSwitch = async (organizationId: string) => {
+  const handleOrganizationSwitch = useCallback(async (organizationId: string) => {
     await switchOrganization(organizationId)
     setShowOrgDropdown(false)
-  }
+  }, [switchOrganization])
 
   const user = session?.user
   const showOrgSelector = userOrganizations.length > 1
@@ -92,7 +113,7 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
         </div>
 
         <div className="flex items-center space-x-6 flex-shrink-0 mx-1">
-          {/* Organization Display/Selector */}
+          {/* Organization Display/Selector with loading state */}
           {showOrgDisplay && (
             <div className="relative">
               {showOrgSelector ? (
@@ -183,7 +204,7 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
                                 {org.name}
                               </p>
                               <p className="text-xs text-gray-500 truncate">
-                                {org.membership.role.display_name}
+                                {org.role}
                                 {org.is_owner && " • Owner"}
                               </p>
                             </div>
@@ -199,6 +220,14 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Loading indicator for organizations */}
+          {loading && !currentOrganization && (
+            <div className="flex items-center space-x-2 px-3 py-2 rounded-md bg-gray-50 border border-gray-200">
+              <div className="h-6 w-6 rounded-full bg-gray-200 animate-pulse"></div>
+              <div className="h-4 w-24 bg-gray-200 rounded animate-pulse"></div>
             </div>
           )}
 

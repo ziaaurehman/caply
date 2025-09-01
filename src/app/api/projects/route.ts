@@ -3,131 +3,320 @@ import { createClient } from '@/utils/supabase/server';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { redisGetJSON, redisSetJSON } from '@/utils/redis';
+
+// Cache TTL - 7 days for page 1 only (most frequently accessed)
+const PAGE_ONE_CACHE_TTL = 604800; // 7 days in seconds
 
 export async function GET(req: NextRequest) {
-  console.log('Fetching projects for user');
+  console.log('🔍 GET /api/projects - Starting request');
   
-  // Get organization ID from query params or headers
-  const url = new URL(req.url)
-  const organizationId = url.searchParams.get('organizationId') || req.headers.get('x-organization-id')
-  
-  if (!organizationId) {
-    return NextResponse.json({ 
-      error: 'Organization ID is required' 
-    }, { status: 400 })
-  }
-
-  // Validate organization access and permissions
-  const validation = await validateOrganizationAccessWithId(
-    organizationId,
-    { resource: 'projects', action: 'read' }
-  )
-
-  if (!validation.success) {
-    return NextResponse.json({ 
-      error: validation.error 
-    }, { status: validation.status })
-  }
-
-  const supabase = await createClient()
-  const userContext = validation.context!
-  
-  console.log('✅ Organization access validated for:', organizationId)
-  
-  // Check if user has admin/manager role or projects.manage permission for full access
-  const hasFullAccess = userContext.membership.role.name === 'admin' || 
-                       userContext.membership.role.name === 'manager' ||
-                       userContext.membership.role.permissions.some(p => 
-                         p.resource === 'projects' && p.action === 'manage'
-                       )
-  
-  let data, error;
-
-  if (hasFullAccess) {
-    // User with full access can see all projects in organization
-    const response = await supabase
-      .from('projects')
-      .select(`
-        *,
-        project_members (
-          id,
-          organization_member_id,
-          role,
-          joined_at,
-          organization_members!organization_member_id (
-            id,
-            user_id,
-            users!user_id (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
-          )
-        )
-      `)
-      .eq('organization_id', organizationId)
-      .order('created_at', { ascending: false });
+  try {
+    // Get organization ID from query params or headers
+    const url = new URL(req.url)
+    const organizationId = url.searchParams.get('organizationId') || req.headers.get('x-organization-id')
     
-    data = response.data;
-    error = response.error;
-  } else {
-    // Regular users can only see projects they are members of
-    // First get the project IDs where user is a member
-    const { data: memberProjectIds, error: memberError } = await supabase
-      .from('project_members')
-      .select('project_id')
-      .eq('organization_member_id', userContext.membership.id);
-
-    if (memberError) {
-      return NextResponse.json({ error: memberError.message }, { status: 500 });
+    // Get pagination parameters
+    const page = parseInt(url.searchParams.get('page') || '1')
+    const limit = parseInt(url.searchParams.get('limit') || '10')
+    const search = url.searchParams.get('search') || ''
+    const status = url.searchParams.get('status') || ''
+    
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
     }
 
-    if (!memberProjectIds || memberProjectIds.length === 0) {
-      data = [];
-    } else {
-      const projectIds = memberProjectIds.map(p => p.project_id);
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'projects', action: 'read' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
+
+    // Check if user has admin/manager role or projects.manage permission for full access
+    const userContext = validation.context!
+    const hasFullAccess = userContext.membership.role.name === 'admin' || 
+                         userContext.membership.role.name === 'manager' ||
+                         userContext.membership.role.permissions.some(p => 
+                           p.resource === 'projects' && p.action === 'manage'
+                         )
+
+    // Only cache page 1 with 10 items for 7 days (most frequently accessed)
+    const shouldCache = page === 1 && limit === 10
+    const cacheKey = shouldCache ? `projects:page1:${organizationId}:${search}:${status}:${hasFullAccess ? 'all' : userContext.userId}` : null
+    
+    // Try to get cached result first (only for page 1)
+    if (shouldCache && cacheKey) {
+      try {
+        const cached = await redisGetJSON<any>(cacheKey)
+        if (cached) {
+          console.log('📋 Returning cached projects page 1 result')
+          return NextResponse.json(cached)
+        }
+      } catch (cacheError) {
+        console.log('⚠️ Cache read failed, proceeding with database query:', cacheError)
+      }
+    }
+
+    const supabase = await createClient()
+    console.log('✅ Organization access validated for:', organizationId)
+
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit
+
+    let totalCount = 0
+    let projects: any[] = []
+
+    if (hasFullAccess) {
+      // User with full access can see all projects in organization
       
-      const response = await supabase
+      // First, get total count for pagination
+      let countQuery = supabase
+        .from('projects')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+
+      // Add search filter to count query if search term provided
+      if (search) {
+        countQuery = countQuery.or(`name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`)
+      }
+
+      // Add status filter to count query if status provided
+      if (status) {
+        countQuery = countQuery.eq('status', status)
+      }
+
+      const { count, error: countError } = await countQuery
+
+      if (countError) {
+        console.error('Error counting projects:', countError)
+        return NextResponse.json({ error: 'Failed to count projects' }, { status: 500 })
+      }
+
+      totalCount = count || 0
+
+      // Build main query for project data
+      let projectsQuery = supabase
         .from('projects')
         .select(`
-          *,
-          project_members (
-            id,
-            organization_member_id,
-            role,
-            joined_at,
-            organization_members!organization_member_id (
-              id,
-              user_id,
-              users!user_id (
-                id,
-                full_name,
-                email,
-                avatar_url
-              )
-            )
-          )
+          id,
+          name,
+          code,
+          description,
+          project_type,
+          billing_rate,
+          budget_hours,
+          budget_amount,
+          start_date,
+          end_date,
+          status,
+          created_at,
+          updated_at,
+          kanban_enabled,
+          timesheet_enabled,
+          team_availability_enabled,
+          capacity_planning_enabled,
+          state,
+          organization_id,
+          client_id,
+          created_by
         `)
         .eq('organization_id', organizationId)
-        .in('id', projectIds)
-        .order('created_at', { ascending: false });
+
+      // Add search filter if search term provided
+      if (search) {
+        projectsQuery = projectsQuery.or(`name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`)
+      }
+
+      // Add status filter if status provided
+      if (status) {
+        projectsQuery = projectsQuery.eq('status', status)
+      }
+
+      // Add pagination and ordering
+      const { data: projectsData, error: projectsError } = await projectsQuery
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1)
+
+      if (projectsError) {
+        console.error('Error fetching projects:', projectsError)
+        return NextResponse.json({ error: projectsError.message }, { status: 500 })
+      }
+
+      projects = projectsData || []
+
+    } else {
+      // Regular users can only see projects they are members of
       
-      data = response.data;
-      error = response.error;
+      // First get the project IDs where user is a member
+      const { data: memberProjectIds, error: memberError } = await supabase
+        .from('project_members')
+        .select('project_id')
+        .eq('organization_member_id', userContext.membership.id)
+
+      if (memberError) {
+        console.error('Error fetching member projects:', memberError)
+        return NextResponse.json({ error: memberError.message }, { status: 500 })
+      }
+
+      if (!memberProjectIds || memberProjectIds.length === 0) {
+        totalCount = 0
+        projects = []
+      } else {
+        const projectIds = memberProjectIds.map(p => p.project_id)
+        
+        // Get count for user's projects with search
+        let countQuery = supabase
+          .from('projects')
+          .select('id', { count: 'exact', head: true })
+          .eq('organization_id', organizationId)
+          .in('id', projectIds)
+
+        if (search) {
+          countQuery = countQuery.or(`name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`)
+        }
+
+        // Add status filter to count query if status provided
+        if (status) {
+          countQuery = countQuery.eq('status', status)
+        }
+
+        const { count, error: countError } = await countQuery
+        totalCount = count || 0
+
+        if (countError) {
+          console.error('Error counting member projects:', countError)
+          return NextResponse.json({ error: 'Failed to count projects' }, { status: 500 })
+        }
+
+        // Get paginated projects data
+        let projectsQuery = supabase
+          .from('projects')
+          .select(`
+            id,
+            name,
+            code,
+            description,
+            project_type,
+            billing_rate,
+            budget_hours,
+            budget_amount,
+            start_date,
+            end_date,
+            status,
+            created_at,
+            updated_at,
+            kanban_enabled,
+            timesheet_enabled,
+            team_availability_enabled,
+            capacity_planning_enabled,
+            state,
+            organization_id,
+            client_id,
+            created_by
+          `)
+          .eq('organization_id', organizationId)
+          .in('id', projectIds)
+
+        if (search) {
+          projectsQuery = projectsQuery.or(`name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`)
+        }
+
+        // Add status filter if status provided
+        if (status) {
+          projectsQuery = projectsQuery.eq('status', status)
+        }
+
+        const { data: projectsData, error: projectsError } = await projectsQuery
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1)
+
+        if (projectsError) {
+          console.error('Error fetching member projects:', projectsError)
+          return NextResponse.json({ error: projectsError.message }, { status: 500 })
+        }
+
+        projects = projectsData || []
+      }
     }
+
+    // Calculate progress for each project (parallel processing for performance)
+    const projectsWithProgress = await Promise.all(
+      projects.map(async (project) => {
+        try {
+          const progressData = await calculateProjectProgress(project.id, organizationId)
+          return {
+            ...project,
+            progress: progressData.progress,
+            progress_details: {
+              totalCards: progressData.totalCards,
+              completedCards: progressData.completedCards,
+              inProgressCards: progressData.inProgressCards,
+              todoCards: progressData.todoCards
+            }
+          }
+        } catch (error) {
+          console.error(`Failed to calculate progress for project ${project.id}:`, error)
+          // Return project with 0 progress if calculation fails
+          return {
+            ...project,
+            progress: 0,
+            progress_details: {
+              totalCards: 0,
+              completedCards: 0,
+              inProgressCards: 0,
+              todoCards: 0
+            }
+          }
+        }
+      })
+    )
+
+    const totalPages = Math.ceil(totalCount / limit)
+
+    const result = {
+      projects: projectsWithProgress,
+      user_role: hasFullAccess ? 'admin' : 'member',
+      total_projects: totalCount,
+      access_level: hasFullAccess ? 'all_organization_projects' : 'member_projects_only',
+      pagination: {
+        page,
+        limit,
+        total: totalCount,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    }
+
+    console.log('✅ Returning successful response:', {
+      projectsCount: result.projects.length,
+      pagination: result.pagination
+    })
+
+    // Cache the result for future requests (only page 1 for 7 days)
+    if (shouldCache && cacheKey) {
+      try {
+        await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL)
+        console.log('💾 Cached projects page 1 result for 7 days')
+      } catch (cacheError) {
+        console.log('⚠️ Failed to cache result:', cacheError)
+      }
+    }
+
+    return NextResponse.json(result)
+
+  } catch (error) {
+    console.error('💥 Unexpected error in projects API:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
-  
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-  
-  return NextResponse.json({ 
-    projects: data || [],
-    user_role: hasFullAccess ? 'admin' : 'member',
-    total_projects: data?.length || 0,
-    access_level: hasFullAccess ? 'all_organization_projects' : 'member_projects_only'
-  });
 }
 
 export async function POST(req: NextRequest) {
@@ -162,6 +351,9 @@ export async function POST(req: NextRequest) {
     team_availability_enabled, capacity_planning_enabled, state, documents
   } = body;
   
+  // Set default status if not provided
+  const projectStatus = status || 'active';
+  
   try {
     // Create the project
   const { data: project, error } = await supabase
@@ -178,7 +370,7 @@ export async function POST(req: NextRequest) {
       budget_amount,
       start_date,
       end_date,
-      status,
+      status: projectStatus,
       task_categories,
       kanban_enabled,
       timesheet_enabled,
@@ -282,6 +474,118 @@ export async function POST(req: NextRequest) {
   // Capacity planning: do not auto-create resource allocations here.
   // Member-level default capacity is initialized via DB trigger on project_members (see supabase migration).
 
+    // Invalidate page 1 cache after creating new project
+    try {
+      const cacheKeysToInvalidate = [
+        `projects:page1:${organizationId}:::all`, // Admin/Manager empty search, no status
+        `projects:page1:${organizationId}:::${userContext.userId}`, // Regular user empty search, no status
+        // Note: We could implement more sophisticated cache invalidation
+        // but for now, we'll clear the main page 1 caches
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Determine if this cache key is for full access or regular user
+          const hasFullAccess = key.includes(':all')
+          
+          // Refresh cache with new data
+          let projectsQuery = supabase
+            .from('projects')
+            .select(`
+              id,
+              name,
+              code,
+              description,
+              project_type,
+              billing_rate,
+              budget_hours,
+              budget_amount,
+              start_date,
+              end_date,
+              status,
+              created_at,
+              updated_at,
+              kanban_enabled,
+              timesheet_enabled,
+              team_availability_enabled,
+              capacity_planning_enabled,
+              state,
+              organization_id,
+              client_id,
+              created_by
+            `)
+            .eq('organization_id', organizationId)
+
+          if (!hasFullAccess) {
+            // For regular users, only show projects they are members of
+            const { data: memberProjectIds } = await supabase
+              .from('project_members')
+              .select('project_id')
+              .eq('organization_member_id', userContext.membership.id)
+
+            if (memberProjectIds && memberProjectIds.length > 0) {
+              const projectIds = memberProjectIds.map(p => p.project_id)
+              projectsQuery = projectsQuery.in('id', projectIds)
+            } else {
+              // No projects for this user
+              continue
+            }
+          }
+
+          const { data: projects } = await projectsQuery
+            .order('created_at', { ascending: false })
+            .range(0, 9) // First 10 items for page 1
+
+          // Get total count
+          let countQuery = supabase
+            .from('projects')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+
+          if (!hasFullAccess) {
+            // For regular users, only count projects they are members of
+            const { data: userMemberProjectIds } = await supabase
+              .from('project_members')
+              .select('project_id')
+              .eq('organization_member_id', userContext.membership.id)
+
+            if (userMemberProjectIds && userMemberProjectIds.length > 0) {
+              const projectIds = userMemberProjectIds.map((p: any) => p.project_id)
+              countQuery = countQuery.in('id', projectIds)
+            } else {
+              // No projects for this user, skip this cache refresh
+              continue
+            }
+          }
+
+          const { count: totalCount } = await countQuery
+          const totalPages = Math.ceil((totalCount || 0) / 10)
+
+          const refreshedResult = {
+            projects: projects || [],
+            user_role: hasFullAccess ? 'admin' : 'member',
+            total_projects: totalCount || 0,
+            access_level: hasFullAccess ? 'all_organization_projects' : 'member_projects_only',
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount || 0,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
+            }
+          }
+
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed projects page 1 cache after project creation')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to refresh projects page 1 cache after create:', e)
+    }
+
     return NextResponse.json({ 
       success: true,
       project: {
@@ -299,7 +603,7 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   const body = await req.json();
-  const { id: projectId, organizationId, ...updateData } = body;
+  const { id: projectId, organizationId, team_member_ids, ...updateData } = body;
   
   if (!projectId) {
     return NextResponse.json({ error: 'Project ID is required' }, { status: 400 });
@@ -339,18 +643,198 @@ export async function PUT(req: NextRequest) {
   }
   
   try {
-  // Update project
-  const { data: updatedProject, error: updateError } = await supabase
-    .from('projects')
+    // Validate status if provided
+    if (updateData.status) {
+      const validStatuses = ['active', 'on_hold', 'completed', 'cancelled'];
+      if (!validStatuses.includes(updateData.status)) {
+        return NextResponse.json({ 
+          error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` 
+        }, { status: 400 });
+      }
+    }
+
+    // Update project data (excluding team_member_ids which we handle separately)
+    const { data: updatedProject, error: updateError } = await supabase
+      .from('projects')
       .update(updateData)
-    .eq('id', projectId)
-    .select()
-    .single();
-    
-  if (updateError) {
-    console.error('Error updating project:', updateError);
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
-  }
+      .eq('id', projectId)
+      .select()
+      .single();
+      
+    if (updateError) {
+      console.error('Error updating project:', updateError);
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
+
+    // Handle team member updates if provided
+    if (team_member_ids !== undefined && Array.isArray(team_member_ids)) {
+      // Remove existing team members
+      const { error: removeError } = await supabase
+        .from('project_members')
+        .delete()
+        .eq('project_id', projectId);
+
+      if (removeError) {
+        console.error('Error removing existing team members:', removeError);
+        // Continue without failing
+      }
+
+      // Add new team members if any provided
+      if (team_member_ids.length > 0) {
+        // Validate that all team_member_ids are valid organization members
+        const { data: validMembers, error: membersError } = await supabase
+          .from('organization_members')
+          .select('id, user_id')
+          .eq('organization_id', organizationId)
+          .eq('status', 'active')
+          .in('id', team_member_ids);
+          
+        if (membersError) {
+          console.error('Error validating team members:', membersError);
+          // Continue without failing - just log the error
+        } else if (validMembers && validMembers.length > 0) {
+          // Create project_members entries
+          const projectMembersData = validMembers.map(member => ({
+            project_id: projectId,
+            organization_member_id: member.id,
+            added_by: userContext.userId
+          }));
+          
+          const { error: projectMembersError } = await supabase
+            .from('project_members')
+            .insert(projectMembersData);
+            
+          if (projectMembersError) {
+            console.error('Error adding team members to project:', projectMembersError);
+            // Continue without failing - project is updated, just members weren't added
+          } else {
+            console.log(`Team members updated for project ${updatedProject.name}`);
+          }
+        }
+      }
+    }
+
+    // Handle Kanban board creation/deletion based on kanban_enabled changes
+    if (updateData.kanban_enabled !== undefined) {
+      if (updateData.kanban_enabled && !existingProject.kanban_enabled) {
+        // Kanban was enabled, create default board
+        console.log('Creating default Kanban board for project:', projectId);
+        
+        const { data: kanbanBoard, error: kanbanError } = await supabase
+          .from('kanban_boards')
+          .insert({
+            project_id: projectId,
+            name: `${updatedProject.name} Board`,
+            created_by: userContext.userId
+          })
+          .select()
+          .single();
+
+        if (kanbanError) {
+          console.error('Error creating Kanban board:', kanbanError);
+        } else {
+          // Create default columns
+          const defaultColumns = [
+            { name: 'To Do', position: 0, color: '#e2e8f0' },
+            { name: 'In Progress', position: 1, color: '#fbbf24' },
+            { name: 'Review', position: 2, color: '#f59e0b' },
+            { name: 'Done', position: 3, color: '#10b981' }
+          ];
+
+          const columnsData = defaultColumns.map(col => ({
+            board_id: kanbanBoard.id,
+            name: col.name,
+            position: col.position,
+            color: col.color
+          }));
+
+          const { error: columnsError } = await supabase
+            .from('kanban_columns')
+            .insert(columnsData);
+
+          if (columnsError) {
+            console.error('Error creating default Kanban columns:', columnsError);
+          }
+        }
+      } else if (!updateData.kanban_enabled && existingProject.kanban_enabled) {
+        // Kanban was disabled, optionally clean up boards
+        console.log('Kanban disabled for project:', projectId);
+        // Note: We might want to soft-delete or archive boards instead of hard delete
+      }
+    }
+
+    // Invalidate page 1 cache after updating project
+    try {
+      const cacheKeysToInvalidate = [
+        `projects:page1:${organizationId}:::all`, // Admin/Manager empty search, no status
+        // Note: For projects, we'll only refresh the admin cache for simplicity
+        // Individual user caches can be added if needed
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Refresh cache with new data for admins/managers only
+          const { data: projects } = await supabase
+            .from('projects')
+            .select(`
+              id,
+              name,
+              code,
+              description,
+              project_type,
+              billing_rate,
+              budget_hours,
+              budget_amount,
+              start_date,
+              end_date,
+              status,
+              created_at,
+              updated_at,
+              kanban_enabled,
+              timesheet_enabled,
+              team_availability_enabled,
+              capacity_planning_enabled,
+              state,
+              organization_id,
+              client_id,
+              created_by
+            `)
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false })
+            .range(0, 9) // First 10 items for page 1
+
+          // Get total count
+          const { count: totalCount } = await supabase
+            .from('projects')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+
+          const totalPages = Math.ceil((totalCount || 0) / 10)
+
+          const refreshedResult = {
+            projects: projects || [],
+            user_role: 'admin',
+            total_projects: totalCount || 0,
+            access_level: 'all_organization_projects',
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount || 0,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
+            }
+          }
+
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed projects page 1 cache after project update')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to refresh projects page 1 cache after update:', e)
+    }
   
     return NextResponse.json({ 
       success: true,
@@ -362,4 +846,147 @@ export async function PUT(req: NextRequest) {
       error: 'Internal server error' 
     }, { status: 500 });
   }
+}
+
+/**
+ * Calculate project progress based on Kanban cards completion status
+ */
+async function calculateProjectProgress(projectId: string, organizationId: string) {
+  const supabase = await createClient()
+
+  // Get all boards and their lists/cards for this project
+  const { data: boards, error: boardsError } = await supabase
+    .from('boards')
+    .select(`
+      id,
+      name,
+      lists!inner (
+        id,
+        name,
+        position,
+        cards (
+          id,
+          title,
+          is_completed,
+          checklists (
+            id,
+            checklist_items (
+              id,
+              is_completed
+            )
+          )
+        )
+      )
+    `)
+    .eq('project_id', projectId)
+    .eq('lists.is_archived', false)
+    .eq('cards.is_archived', false)
+
+  if (boardsError || !boards || boards.length === 0) {
+    return {
+      progress: 0,
+      totalCards: 0,
+      completedCards: 0,
+      inProgressCards: 0,
+      todoCards: 0
+    }
+  }
+
+  let totalCards = 0
+  let totalProgress = 0
+  let completedCards = 0
+  let inProgressCards = 0
+  let todoCards = 0
+
+  for (const board of boards) {
+    if (!board.lists || board.lists.length === 0) continue
+
+    const lists = board.lists.sort((a, b) => a.position - b.position)
+
+    // Analyze each list and calculate list status weights
+    for (let i = 0; i < lists.length; i++) {
+      const list = lists[i]
+      const listWeight = calculateListWeight(list.name, i, lists.length)
+
+      if (list.cards) {
+        for (const card of list.cards) {
+          totalCards++
+          const cardProgress = calculateCardProgress(card, listWeight)
+          totalProgress += cardProgress
+
+          // Categorize cards
+          if (cardProgress >= 100) {
+            completedCards++
+          } else if (cardProgress > 0) {
+            inProgressCards++
+          } else {
+            todoCards++
+          }
+        }
+      }
+    }
+  }
+
+  const overallProgress = totalCards > 0 ? Math.round(totalProgress / totalCards) : 0
+
+  return {
+    progress: overallProgress,
+    totalCards,
+    completedCards,
+    inProgressCards,
+    todoCards
+  }
+}
+
+/**
+ * Calculate the weight/completion percentage for a list based ONLY on its position
+ * Last position = highest weight (100%), first position = lowest weight (0%)
+ */
+function calculateListWeight(listName: string, position: number, totalLists: number): number {
+  // Use ONLY position-based logic (no name-based detection)
+  if (totalLists === 1) return 50 // Single list = in progress
+  
+  if (position === totalLists - 1) return 100  // Last list = complete (100%)
+  if (position === 0) return 0                 // First list = todo (0%)
+  
+  // Middle lists = scaled progress based on position
+  // Each step increases progress evenly across all positions
+  const progressStep = 100 / (totalLists - 1)
+  return Math.round(position * progressStep)
+}
+
+/**
+ * Calculate the progress percentage for a specific card
+ */
+function calculateCardProgress(card: any, listWeight: number): number {
+  // If card is explicitly marked as completed, it's 100% regardless of list
+  if (card.is_completed) {
+    return 100
+  }
+  
+  // If card has checklists, calculate based on checklist completion
+  if (card.checklists && card.checklists.length > 0) {
+    let totalChecklistItems = 0
+    let completedChecklistItems = 0
+    
+    card.checklists.forEach((checklist: any) => {
+      if (checklist.checklist_items) {
+        checklist.checklist_items.forEach((item: any) => {
+          totalChecklistItems++
+          if (item.is_completed) {
+            completedChecklistItems++
+          }
+        })
+      }
+    })
+    
+    if (totalChecklistItems > 0) {
+      const checklistProgress = (completedChecklistItems / totalChecklistItems) * 100
+      // Combine checklist progress with list weight
+      return Math.round((checklistProgress * listWeight) / 100)
+    }
+  }
+  
+  // Default: Use list weight
+  return listWeight
 }

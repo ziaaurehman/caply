@@ -5,6 +5,7 @@ import { X, Check } from 'lucide-react'
 import { rolesApi } from '@/utils/api/roles'
 import { Permission, CreateRoleRequest } from '@/lib/types'
 import { useOrganizationStore } from '@/lib/stores/organizationStore'
+import { Input } from '@/components/ui/Input'
 
 interface CreateRoleModalProps {
   isOpen: boolean
@@ -120,11 +121,10 @@ export default function CreateRoleModal({
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Role Name *
                   </label>
-                  <input
+                  <Input
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                     placeholder="e.g., project_lead"
                     required
                   />
@@ -137,11 +137,10 @@ export default function CreateRoleModal({
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Display Name *
                   </label>
-                  <input
+                  <Input
                     type="text"
                     value={formData.display_name}
                     onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                     placeholder="e.g., Project Lead"
                     required
                   />
@@ -155,7 +154,7 @@ export default function CreateRoleModal({
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors"
                   rows={3}
                   placeholder="Brief description of this role's responsibilities"
                 />

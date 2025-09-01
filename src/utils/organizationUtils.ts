@@ -1,6 +1,10 @@
 import { createClient } from '@/utils/supabase/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis'
+
+// Cache TTL in seconds (5 minutes)
+const CACHE_TTL = 300
 
 interface Permission {
   resource: string
@@ -30,16 +34,55 @@ interface UserOrganizationContext {
   membership: OrganizationMembership
 }
 
+interface CachedUserContext {
+  userId: string
+  organizationId: string
+  roleId: string
+  roleName: string
+  permissions: Permission[]
+  status: string
+  cached_at: number
+}
+
 /**
- * Get user's organization context - membership and role data
+ * Get user's organization context - membership and role data with Redis caching
  */
 export async function getUserOrganizationContext(
   userId: string,
-  organizationId: string
+  organizationId: string,
+  useCache: boolean = true
 ): Promise<UserOrganizationContext | null> {
+  const cacheKey = `user_org_context:${userId}:${organizationId}`
+  
   try {
+    // Try cache first if enabled
+    if (useCache) {
+      const cached = await redisGetJSON<CachedUserContext>(cacheKey)
+      if (cached && (Date.now() - cached.cached_at) < (CACHE_TTL * 1000)) {
+        return {
+          userId: cached.userId,
+          organizationId: cached.organizationId,
+          membership: {
+            id: '', // Not needed for most operations
+            organization_id: cached.organizationId,
+            user_id: cached.userId,
+            role_id: cached.roleId,
+            status: cached.status,
+            role: {
+              id: cached.roleId,
+              name: cached.roleName,
+              display_name: cached.roleName,
+              description: '',
+              permissions: cached.permissions
+            }
+          }
+        }
+      }
+    }
+
     const supabase = await createClient()
 
+    // Optimized query with selective fields
     const { data: membership, error } = await supabase
       .from('organization_members')
       .select(`
@@ -51,14 +94,7 @@ export async function getUserOrganizationContext(
         roles!inner(
           id,
           name,
-          display_name,
-          description,
-          role_permissions!inner(
-            permissions!inner(
-              module,
-              action
-            )
-          )
+          display_name
         )
       `)
       .eq('user_id', userId)
@@ -70,7 +106,10 @@ export async function getUserOrganizationContext(
       return null
     }
 
-    return {
+    // Get permissions separately for better caching
+    const permissions = await getRolePermissions(membership.role_id, useCache)
+
+    const context: UserOrganizationContext = {
       userId,
       organizationId,
       membership: {
@@ -83,17 +122,83 @@ export async function getUserOrganizationContext(
           id: (membership as any).roles.id,
           name: (membership as any).roles.name,
           display_name: (membership as any).roles.display_name,
-          description: (membership as any).roles.description,
-          permissions: (membership as any).roles.role_permissions?.map((rp: any) => ({
-            resource: rp.permissions.module,
-            action: rp.permissions.action
-          })) || []
+          description: '',
+          permissions
         }
       }
     }
+
+    // Cache the result
+    if (useCache) {
+      const cacheData: CachedUserContext = {
+        userId,
+        organizationId,
+        roleId: membership.role_id,
+        roleName: (membership as any).roles.name,
+        permissions,
+        status: membership.status,
+        cached_at: Date.now()
+      }
+      await redisSetJSON(cacheKey, cacheData, CACHE_TTL)
+    }
+
+    return context
+
   } catch (error) {
     console.error('Error getting user organization context:', error)
     return null
+  }
+}
+
+/**
+ * Get role permissions with caching
+ */
+async function getRolePermissions(
+  roleId: string, 
+  useCache: boolean = true
+): Promise<Permission[]> {
+  const cacheKey = `role_permissions:${roleId}`
+  
+  try {
+    if (useCache) {
+      const cached = await redisGetJSON<Permission[]>(cacheKey)
+      if (cached) {
+        return cached
+      }
+    }
+
+    const supabase = await createClient()
+    
+    const { data: permissions, error } = await supabase
+      .from('role_permissions')
+      .select(`
+        permissions!inner(
+          module,
+          action
+        )
+      `)
+      .eq('role_id', roleId)
+
+    if (error) {
+      console.error('Error fetching role permissions:', error)
+      return []
+    }
+
+    const permissionList = permissions?.map((rp: any) => ({
+      resource: rp.permissions.module,
+      action: rp.permissions.action
+    })) || []
+
+    // Cache permissions for 30 minutes (they change less frequently)
+    if (useCache) {
+      await redisSetJSON(cacheKey, permissionList, 1800)
+    }
+
+    return permissionList
+
+  } catch (error) {
+    console.error('Error getting role permissions:', error)
+    return []
   }
 }
 
@@ -306,4 +411,109 @@ export async function validateOrganizationAccessWithId(
       status: 500
     }
   }
-} 
+}
+
+/**
+ * Get user's organizations with minimal data (for header dropdown)
+ */
+export async function getUserOrganizationsLite(userId: string): Promise<Array<{
+  id: string
+  name: string
+  logo_url?: string
+  role: string
+  is_owner: boolean
+}>> {
+  const cacheKey = `user_orgs_lite:${userId}`
+  
+  try {
+    // Check cache first
+    const cached = await redisGetJSON<any[]>(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    const supabase = await createClient()
+
+    const { data: memberships, error } = await supabase
+      .from('organization_members')
+      .select(`
+        organization_id,
+        role_id,
+        organizations!inner(
+          id,
+          name,
+          logo_url,
+          owner_id
+        ),
+        roles!inner(
+          name,
+          display_name
+        )
+      `)
+      .eq('user_id', userId)
+      .eq('status', 'active')
+
+    if (error || !memberships) {
+      return []
+    }
+
+    const orgs = memberships.map((m: any) => ({
+      id: m.organizations.id,
+      name: m.organizations.name,
+      logo_url: m.organizations.logo_url,
+      role: m.roles.display_name,
+      is_owner: m.organizations.owner_id === userId
+    }))
+
+    // Cache for 24 hours (organizations rarely change)
+    await redisSetJSON(cacheKey, orgs, 86400)
+
+    return orgs
+
+  } catch (error) {
+    console.error('Error getting user organizations:', error)
+    return []
+  }
+}
+
+/**
+ * Prefetch organization context for faster switching
+ * Call this when you know user might switch to this organization
+ */
+export async function prefetchOrganizationContext(
+  userId: string,
+  organizationId: string
+): Promise<void> {
+  try {
+    // This will cache the data for future use
+    await getUserOrganizationContext(userId, organizationId, true)
+  } catch (error) {
+    // Silent fail for prefetching
+    console.debug('Prefetch failed for organization context:', error)
+  }
+}
+
+/**
+ * Warm cache for user's most likely organizations
+ * Call this after login or when user becomes active
+ */
+export async function warmOrganizationCaches(userId: string): Promise<void> {
+  try {
+    // First get the organizations list
+    const orgs = await getUserOrganizationsLite(userId)
+    
+    // Prefetch context for first 3 organizations (most likely to be used)
+    const prefetchPromises = orgs.slice(0, 3).map(org => 
+      prefetchOrganizationContext(userId, org.id)
+    )
+    
+    // Don't await - let these run in background
+    Promise.all(prefetchPromises).catch(error => 
+      console.debug('Cache warming failed:', error)
+    )
+  } catch (error) {
+    console.debug('Cache warming failed:', error)
+  }
+}
+
+ 

@@ -5,11 +5,20 @@ import { authConfig } from '@/auth'
 import { validateOrganizationAccess, validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 import { redisGetJSON, redisSetJSON } from '@/utils/redis'
 
-// GET /api/roles - Get organization-specific roles
+// Cache TTL - 7 days for page 1 only (most frequently accessed)
+const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
+
+// GET /api/roles - Get organization-specific roles with pagination
 export async function GET(request: NextRequest) {
   try {
     // Get organization ID from headers or use session-based validation
     const headerOrgId = request.headers.get('x-organization-id')
+    const url = new URL(request.url)
+    
+    // Get pagination parameters
+    const page = parseInt(url.searchParams.get('page') || '1')
+    const limit = parseInt(url.searchParams.get('limit') || '10')
+    const search = url.searchParams.get('search') || ''
     
     let validation;
     if (headerOrgId) {
@@ -35,19 +44,49 @@ export async function GET(request: NextRequest) {
 
     console.log('User organization:', organizationId)
 
-    // Try Redis cache first (15 days TTL elsewhere when we set)
-    const cached = await redisGetJSON<any[]>(`organization:roles:${organizationId}`)
-    if (cached && Array.isArray(cached)) {
-      return NextResponse.json({ 
-        roles: cached,
-        organization_id: organizationId,
-        count: cached.length 
-      })
+    // Only cache page 1 with 10 items for 7 days (most frequently accessed)
+    const shouldCache = page === 1 && limit === 10
+    const cacheKey = shouldCache ? `roles:page1:${organizationId}:${search}` : null
+    
+    // Try to get cached result first (only for page 1)
+    if (shouldCache && cacheKey) {
+      try {
+        const cached = await redisGetJSON<any>(cacheKey)
+        if (cached) {
+          console.log('📋 Returning cached roles page 1 result')
+          return NextResponse.json(cached)
+        }
+      } catch (cacheError) {
+        console.log('⚠️ Cache read failed, proceeding with database query:', cacheError)
+      }
     }
 
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit
+
     const supabase = await createClient()
-    // Get organization-specific roles only (exclude system roles)
-    const { data: roles, error } = await supabase
+    
+    // First, get total count for pagination
+    let countQuery = supabase
+      .from('roles')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', organizationId)
+      .eq('is_system_role', false)
+
+    // Add search filter to count query if search term provided
+    if (search) {
+      countQuery = countQuery.or(`name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`)
+    }
+
+    const { count: totalCount, error: countError } = await countQuery
+
+    if (countError) {
+      console.error('Error counting roles:', countError)
+      return NextResponse.json({ error: 'Failed to count roles' }, { status: 500 })
+    }
+
+    // Build main query for data
+    let query = supabase
       .from('roles')
       .select(`
         id,
@@ -71,7 +110,16 @@ export async function GET(request: NextRequest) {
       `)
       .eq('organization_id', organizationId)
       .eq('is_system_role', false)
+
+    // Add search filter if search term provided
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`)
+    }
+
+    // Add pagination and ordering
+    const { data: roles, error } = await query
       .order('name')
+      .range(offset, offset + limit - 1)
 
     if (error) {
       console.error('Error fetching roles:', error)
@@ -93,18 +141,32 @@ export async function GET(request: NextRequest) {
       permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
     })) || []
 
-    // Cache the transformed roles list (15 days)
-    try {
-      await redisSetJSON(`organization:roles:${organizationId}`, transformedRoles, 1296000)
-    } catch (e) {
-      console.warn('Failed to cache roles list:', e)
-    }
+    const totalPages = Math.ceil((totalCount || 0) / limit)
 
-    return NextResponse.json({ 
+    const result = { 
       roles: transformedRoles,
       organization_id: organizationId,
-      count: transformedRoles.length 
-    })
+      pagination: {
+        page,
+        limit,
+        total: totalCount || 0,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    }
+
+    // Cache the result for future requests (only page 1 for 7 days)
+    if (shouldCache && cacheKey) {
+      try {
+        await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL)
+        console.log('💾 Cached roles page 1 result for 7 days')
+      } catch (cacheError) {
+        console.log('⚠️ Failed to cache result:', cacheError)
+      }
+    }
+
+    return NextResponse.json(result)
 
   } catch (error) {
     console.error('Error in roles API:', error)
@@ -214,50 +276,88 @@ export async function POST(request: NextRequest) {
       console.log('Role permissions created:', rolePermissions.length)
     }
 
-    // Update cache for roles list (15 days)
+    // Invalidate page 1 cache after creating new role
     try {
-      // fetch latest roles to ensure cache consistency
-      const { data: roles } = await supabase
-        .from('roles')
-        .select(`
-          id,
-          name,
-          display_name,
-          description,
-          is_system_role,
-          organization_id,
-          created_at,
-          updated_at,
-          role_permissions:role_permissions(
-            permissions:permission_id(
+      // Clear page 1 cache for both empty search and any search terms
+      // We clear multiple possible cache keys since we can't predict search terms
+      const cacheKeysToInvalidate = [
+        `roles:page1:${finalOrganizationId}:`, // Empty search
+        // Note: We could implement a more sophisticated cache invalidation strategy
+        // but for now, we'll clear the main page 1 cache
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Instead of deleting, we'll refresh with new data
+          const { data: roles } = await supabase
+            .from('roles')
+            .select(`
               id,
               name,
               display_name,
               description,
-              module,
-              action
-            )
-          )
-        `)
-        .eq('organization_id', finalOrganizationId)
-        .eq('is_system_role', false)
-        .order('name')
+              is_system_role,
+              organization_id,
+              created_at,
+              updated_at,
+              role_permissions:role_permissions(
+                permissions:permission_id(
+                  id,
+                  name,
+                  display_name,
+                  description,
+                  module,
+                  action
+                )
+              )
+            `)
+            .eq('organization_id', finalOrganizationId)
+            .eq('is_system_role', false)
+            .order('name')
+            .range(0, 9) // First 10 items for page 1
 
-      const transformed = (roles || []).map((role: any) => ({
-        id: role.id,
-        name: role.name,
-        display_name: role.display_name,
-        description: role.description,
-        is_system_role: role.is_system_role,
-        organization_id: role.organization_id,
-        created_at: role.created_at,
-        updated_at: role.updated_at,
-        permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
-      }))
+          const transformedRoles = (roles || []).map((role: any) => ({
+            id: role.id,
+            name: role.name,
+            display_name: role.display_name,
+            description: role.description,
+            is_system_role: role.is_system_role,
+            organization_id: role.organization_id,
+            created_at: role.created_at,
+            updated_at: role.updated_at,
+            permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
+          }))
 
-      await redisSetJSON(`organization:roles:${finalOrganizationId}`, transformed, 1296000)
+          // Get total count for pagination
+          const { count: totalCount } = await supabase
+            .from('roles')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', finalOrganizationId)
+            .eq('is_system_role', false)
+
+          const totalPages = Math.ceil((totalCount || 0) / 10)
+
+          const refreshedResult = {
+            roles: transformedRoles,
+            organization_id: finalOrganizationId,
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount || 0,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
+            }
+          }
+
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed page 1 cache after role creation')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
+        }
+      }
     } catch (e) {
-      console.warn('Failed to refresh roles cache after create:', e)
+      console.warn('Failed to refresh roles page 1 cache after create:', e)
     }
 
     return NextResponse.json({ 

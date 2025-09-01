@@ -49,61 +49,29 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Kanban is not enabled for this project' }, { status: 403 });
   }
 
-  // Try cache first (15 days)
+  // Try cache first (1 hour for board info)
   const cacheKey = `kanban:boards:${projectId}:${organizationId}`;
   const cached = await redisGetJSON<any>(cacheKey);
   if (cached) {
     return NextResponse.json(cached);
   }
 
-  // Get boards for the project
+  // Get ONLY basic board information (no nested data)
   const { data: boards, error } = await supabase
     .from('boards')
     .select(`
-      *,
-      lists (
-        id,
-        name,
-        position,
-        is_archived,
-        cards (
-          id,
-          title,
-          position,
-          is_completed,
-          is_archived,
-          due_date,
-          cover_color,
-          cover_image,
-          card_members (
-            project_member_id,
-            project_members!inner (
-              id,
-              organization_member_id,
-              role,
-              joined_at,
-              organization_members!inner (
-                id,
-                user_id,
-                users!organization_members_user_id_fkey!inner (
-                  id,
-                  full_name,
-                  email,
-                  avatar_url
-                )
-              )
-            )
-          ),
-          card_labels (
-            label_id,
-            labels (
-              id,
-              name,
-              color
-            )
-          )
-        )
-      )
+      id,
+      project_id,
+      name,
+      description,
+      background_color,
+      background_image,
+      is_closed,
+      visibility,
+      position,
+      created_by,
+      created_at,
+      updated_at
     `)
     .eq('project_id', projectId)
     .eq('is_closed', false)
@@ -115,7 +83,8 @@ export async function GET(req: NextRequest) {
 
   const result = { boards: boards || [] };
   try {
-    await redisSetJSON(cacheKey, result, 1296000);
+    // Cache for 1 hour (3600 seconds) instead of 15 days
+    await redisSetJSON(cacheKey, result, 3600);
   } catch (e) {
     console.warn('Failed to cache kanban boards:', e);
   }
@@ -210,62 +179,30 @@ export async function POST(req: NextRequest) {
       details: { board_name: name }
     }]);
 
-  // Refresh boards cache for this project
+  // Refresh boards cache for this project (lightweight cache refresh)
   try {
     const { data: freshBoards } = await supabase
       .from('boards')
       .select(`
-        *,
-        lists (
-          id,
-          name,
-          position,
-          is_archived,
-          cards (
-            id,
-            title,
-            position,
-            is_completed,
-            is_archived,
-            due_date,
-            cover_color,
-            cover_image,
-            card_members (
-              project_member_id,
-              project_members!inner (
-                id,
-                organization_member_id,
-                role,
-                joined_at,
-                organization_members!inner (
-                  id,
-                  user_id,
-                  users!organization_members_user_id_fkey!inner (
-                    id,
-                    full_name,
-                    email,
-                    avatar_url
-                  )
-                )
-              )
-            ),
-            card_labels (
-              label_id,
-              labels (
-                id,
-                name,
-                color
-              )
-            )
-          )
-        )
+        id,
+        project_id,
+        name,
+        description,
+        background_color,
+        background_image,
+        is_closed,
+        visibility,
+        position,
+        created_by,
+        created_at,
+        updated_at
       `)
       .eq('project_id', project_id)
       .eq('is_closed', false)
       .order('position', { ascending: true });
 
     const cacheKey = `kanban:boards:${project_id}:${organizationId}`;
-    await redisSetJSON(cacheKey, { boards: freshBoards || [] }, 1296000);
+    await redisSetJSON(cacheKey, { boards: freshBoards || [] }, 3600);
   } catch (e) {
     console.warn('Failed to refresh kanban boards cache after create:', e);
   }

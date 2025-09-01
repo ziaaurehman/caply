@@ -533,8 +533,9 @@ export const kanbanAPI = {
   // ===== LISTS =====
 
   // Get lists by board
-  getLists: async (boardId: string, organizationId: string): Promise<ListsResponse> => {
-    const response = await fetch(`/api/kanban/lists?board_id=${boardId}&organizationId=${organizationId}`, {
+  getLists: async (boardId: string, organizationId: string, includeArchived?: boolean): Promise<ListsResponse> => {
+    const archivedParam = includeArchived ? '&include_archived=true' : '';
+    const response = await fetch(`/api/kanban/lists?board_id=${boardId}&organizationId=${organizationId}${archivedParam}`, {
       headers: {
         'x-organization-id': organizationId,
       },
@@ -616,7 +617,7 @@ export const kanbanAPI = {
         'Content-Type': 'application/json',
         'x-organization-id': organizationId,
       },
-      body: JSON.stringify({ board_id: boardId, list_positions: listPositions })
+      body: JSON.stringify({ board_id: boardId, list_positions: listPositions, organizationId })
     });
     if (!response.ok) {
       const errorData = await response.json();
@@ -627,9 +628,11 @@ export const kanbanAPI = {
 
   // ===== CARDS =====
 
-  // Get cards by list
-  getCardsByList: async (listId: string, organizationId: string): Promise<CardsResponse> => {
-    const response = await fetch(`/api/kanban/cards?list_id=${listId}&organizationId=${organizationId}`, {
+  // Get cards by list with optional search
+  getCardsByList: async (listId: string, organizationId: string, search?: string, includeArchived?: boolean): Promise<CardsResponse> => {
+    const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
+    const archivedParam = includeArchived ? '&include_archived=true' : '';
+    const response = await fetch(`/api/kanban/cards?list_id=${listId}&organizationId=${organizationId}${searchParam}${archivedParam}`, {
       headers: {
         'x-organization-id': organizationId,
       },
@@ -642,9 +645,11 @@ export const kanbanAPI = {
     return { cards: data.cards || [] };
   },
 
-  // Get cards by board
-  getCardsByBoard: async (boardId: string, organizationId: string): Promise<CardsResponse> => {
-    const response = await fetch(`/api/kanban/cards?board_id=${boardId}&organizationId=${organizationId}`, {
+  // Get cards by board with optional search
+  getCardsByBoard: async (boardId: string, organizationId: string, search?: string, includeArchived?: boolean): Promise<CardsResponse> => {
+    const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
+    const archivedParam = includeArchived ? '&include_archived=true' : '';
+    const response = await fetch(`/api/kanban/cards?board_id=${boardId}&organizationId=${organizationId}${searchParam}${archivedParam}`, {
       headers: {
         'x-organization-id': organizationId,
       },

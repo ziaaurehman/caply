@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2, Filter, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, Trash2, Filter, ChevronDown, Search, X } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { projectAPI, type Project } from '@/utils/api';
@@ -10,16 +10,32 @@ import { useConfirmation } from '@/lib/hooks/useConfirmation';
 import { createDeleteConfirmation } from '@/utils/confirmations';
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import ProjectModal from './ProjectModal';
+import ProjectDetailsDialog from './ProjectDetailsDialog';
 import ProjectsSkeleton from "./ProjectsSkeleton";
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
+import { Input } from '@/components/ui/Input';
+import Pagination from '@/components/ui/Pagination';
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  
+  // Project details dialog state
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [itemsPerPage] = useState(10);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation();
   const { 
@@ -29,21 +45,43 @@ export default function ProjectsPage() {
     userOrganizations 
   } = useOrganizationStore();
   
-  const fetchProjects = async () => {
+  const fetchProjects = async (isInitialLoad = false) => {
     if (!currentOrganization?.id) return;
     
-    setLoading(true);
+    // Use different loading states based on operation type
+    if (isInitialLoad) {
+      setLoading(true);
+    } else {
+      setIsSearching(true);
+    }
+    
     setError(null);
     try {
-      const data = await projectAPI.getProjects(currentOrganization.id);
-      setProjects(data.projects);
+      const data = await projectAPI.getProjects(currentOrganization.id, {
+        page: currentPage,
+        limit: itemsPerPage,
+        search: searchTerm,
+        status: statusFilter !== 'all' ? statusFilter : undefined
+      });
+      
+      setProjects(data.projects || []);
+      
+      // Update pagination metadata
+      if (data.pagination) {
+        setTotalPages(data.pagination.totalPages);
+        setTotalItems(data.pagination.total);
+      }
     } catch (err: any) {
       console.error('Error fetching projects:', err);
       const errorMessage = err.message || 'Failed to load projects';
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {
-      setLoading(false);
+      if (isInitialLoad) {
+        setLoading(false);
+      } else {
+        setIsSearching(false);
+      }
     }
   };
 
@@ -54,11 +92,50 @@ export default function ProjectsPage() {
     }
   }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
 
+  // Handle clicking outside the status dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const dropdown = document.getElementById('status-dropdown')
+      if (dropdown && !dropdown.contains(event.target as Node)) {
+        setIsStatusDropdownOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, []);
+
   useEffect(() => {
     if (currentOrganization?.id) {
-      fetchProjects();
+      // Initial load or pagination change
+      const isInitialLoad = currentPage === 1 && searchTerm === ''
+      fetchProjects(isInitialLoad)
     }
-  }, [currentOrganization?.id]);
+  }, [currentOrganization?.id, currentPage, statusFilter])
+
+  // Optimized search with minimal delay
+  useEffect(() => {
+    // For empty search, load immediately
+    if (searchTerm === '') {
+      if (currentPage !== 1) {
+        setCurrentPage(1)
+      } else if (currentOrganization?.id) {
+        fetchProjects(false) // Not initial load
+      }
+      return
+    }
+
+    // For search terms, use minimal debounce
+    const timeoutId = setTimeout(() => {
+      if (currentPage !== 1) {
+        setCurrentPage(1) // Reset to first page on search
+      } else if (currentOrganization?.id) {
+        fetchProjects(false) // Not initial load
+      }
+    }, 100) // Reduced to 100ms for fast response
+
+    return () => clearTimeout(timeoutId)
+  }, [searchTerm])
   
   const handleEdit = (project: Project) => {
     setSelectedProject(project);
@@ -79,7 +156,7 @@ export default function ProjectsPage() {
         try {
           await projectAPI.deleteProject(id, currentOrganization.id);
           toast.success(`Project "${projectName}" deleted successfully`);
-          await fetchProjects();
+          await fetchProjects(false);
         } catch (err: any) {
           console.error('Error deleting project:', err);
           toast.error(err.message || 'Failed to delete project');
@@ -93,6 +170,36 @@ export default function ProjectsPage() {
   const handleAddNew = () => {
     setSelectedProject(null);
     setIsModalOpen(true);
+  };
+
+  const handleProjectDetails = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setIsDetailsDialogOpen(true);
+  };
+
+  const handleCloseDetailsDialog = () => {
+    setIsDetailsDialogOpen(false);
+    setSelectedProjectId(null);
+  };
+
+  // Status filter options
+  const statusOptions = [
+    { value: 'all', label: 'All Status' },
+    { value: 'active', label: 'Active' },
+    { value: 'on_hold', label: 'On Hold' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' }
+  ];
+
+  const getStatusLabel = (status: string) => {
+    const option = statusOptions.find(opt => opt.value === status);
+    return option ? option.label : 'All Status';
+  };
+
+  const handleStatusFilter = (status: string) => {
+    setStatusFilter(status);
+    setIsStatusDropdownOpen(false);
+    setCurrentPage(1); // Reset to first page when filtering
   };
   
   const getStatusIcon = (status: string) => {
@@ -189,25 +296,27 @@ export default function ProjectsPage() {
     return { label: 'On Track', color: 'bg-blue-100 text-blue-800' };
   };
   
-  const filteredProjects = projects.filter(project => 
-    statusFilter === 'all' ? true : project.status === statusFilter
-  );
+  // Projects are already filtered by API, no need for client-side filtering
   
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 p-2">
-        <div className="mx-auto">
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="text-center">
-              <p className="text-red-600 mb-4">{error}</p>
-              <button
-                onClick={fetchProjects}
-                className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600"
-              >
-                Try Again
-              </button>
+      <div className="p-8">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+              <Plus className="w-4 h-4 text-red-600" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-red-900">Error Loading Projects</h3>
+              <p className="text-red-700">{error}</p>
             </div>
           </div>
+          <button
+            onClick={() => fetchProjects(false)}
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );
@@ -218,49 +327,131 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className=" mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-800">Projects</h1>
-            <p className="text-sm text-gray-500">Manage your projects and track their progress</p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className="relative">
-              <button className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200">
+    <div className="p-8">
+      {/* Header */}
+      <div className="mb-8">
+        {/* Title */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900">Projects</h1>
+          <p className="text-gray-600 mt-2">Manage your projects and track their progress for {currentOrganization?.name}</p>
+        </div>
+        
+        {/* Search, Filter and Create Button Row */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 flex-1">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                type="text"
+                placeholder="Search projects..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+
+            {/* Status Filter Dropdown */}
+            <div className="relative" id="status-dropdown">
+              <button
+                onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+                className="flex items-center px-4 py-2.5 h-10 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200"
+              >
                 <Filter className="h-4 w-4 mr-2" />
-                All Status
+                {getStatusLabel(statusFilter)}
                 <ChevronDown className="h-4 w-4 ml-2" />
               </button>
+
+              {isStatusDropdownOpen && (
+                <div className="absolute z-10 mt-1 w-48 bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm">
+                  {statusOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => handleStatusFilter(option.value)}
+                      className={`${
+                        statusFilter === option.value
+                          ? 'bg-orange-50 text-orange-900'
+                          : 'text-gray-900'
+                      } group relative cursor-pointer select-none py-2 pl-3 pr-9 hover:bg-orange-50 hover:text-orange-900 w-full text-left`}
+                    >
+                      <span className="block truncate font-normal">
+                        {option.label}
+                      </span>
+                      {statusFilter === option.value && (
+                        <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-orange-600">
+                          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            {(searchTerm || statusFilter !== 'all') && (
+              <button
+                onClick={() => {
+                  setSearchTerm('')
+                  setStatusFilter('all')
+                }}
+                className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                Clear All
+              </button>
+            )}
             <Link href="/projects/new">
-              <button className="flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500">
-                <Plus className="h-4 w-4 mr-2" />
+              <button className="flex items-center gap-2 px-4 py-2.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors whitespace-nowrap text-sm font-medium h-10">
+                <Plus className="w-4 h-4" />
                 New Project
               </button>
             </Link>
           </div>
         </div>
+      </div>
 
         <div className="bg-white rounded-lg shadow-md p-6">
-        
-          {loading ? (
+          {isSearching ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
-              <span className="ml-2 text-gray-600">Loading projects...</span>
+              <span className="ml-2 text-gray-600">
+                {searchTerm ? 'Searching projects...' : 'Loading projects...'}
+              </span>
             </div>
           ) : projects.length === 0 ? (
             <div className="text-center py-8">
               <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                <Plus className="h-6 w-6 text-gray-400" />
+                {searchTerm ? (
+                  <Search className="h-6 w-6 text-gray-400" />
+                ) : (
+                  <Plus className="h-6 w-6 text-gray-400" />
+                )}
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No projects yet</h3>
-              <p className="text-gray-500 mb-4">Get started by creating your first project.</p>
-              <Link href="/projects/new">
-                <button className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600">
-                  Create Your First Project
-                </button>
-              </Link>
+              {searchTerm ? (
+                <>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No results found</h3>
+                  <p className="text-gray-500 mb-4">No projects match your search criteria for "{searchTerm}".</p>
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                  >
+                    Clear Search
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No projects yet</h3>
+                  <p className="text-gray-500 mb-4">Get started by creating your first project.</p>
+                  <Link href="/projects/new">
+                    <button className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600">
+                      Create Your First Project
+                    </button>
+                  </Link>
+                </>
+              )}
             </div>
           ) : (
           <div className="overflow-x-auto">
@@ -306,7 +497,7 @@ export default function ProjectsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredProjects.map(project => {
+                {projects.map(project => {
                   const timeProgress = calculateTimeProgress(project);
                   const budgetUtilization = getBudgetUtilization(project);
                   const remainingDays = getRemainingDays(project.end_date);
@@ -314,7 +505,11 @@ export default function ProjectsPage() {
                   const statusIcon = getStatusIcon(project.status);
                   
                   return (
-                    <tr key={project.id}>
+                    <tr 
+                      key={project.id}
+                      onClick={() => handleProjectDetails(project.id)}
+                      className="hover:bg-gray-50 cursor-pointer"
+                    >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div className={`h-3 w-3 rounded-full border-2 ${statusIcon} mr-3`}></div>
@@ -331,11 +526,21 @@ export default function ProjectsPage() {
                         <div className="flex items-center">
                           <div className="w-24 bg-gray-200 rounded-full h-2.5 mr-2">
                             <div
-                              className="bg-orange-500 h-2.5 rounded-full"
-                              style={{ width: `${Math.round(budgetUtilization)}%` }}
+                              className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
+                              style={{ width: `${project.progress || 0}%` }}
                             ></div>
                           </div>
-                          <span className="text-sm text-gray-900">{Math.round(budgetUtilization)}% / 100%</span>
+                          <span className="text-sm text-gray-900">{project.progress || 0}%</span>
+                          {project.progress_details && project.progress_details.totalCards > 0 && (
+                            <div className="ml-2 text-xs text-gray-500">
+                              ({project.progress_details.completedCards}/{project.progress_details.totalCards} cards)
+                            </div>
+                          )}
+                          {(!project.progress_details || project.progress_details.totalCards === 0) && (
+                            <div className="ml-2 text-xs text-gray-400">
+                              (No Kanban data)
+                            </div>
+                          )}
                         </div>
                       </td>
                                              <td className="px-6 py-4 whitespace-nowrap">
@@ -380,13 +585,19 @@ export default function ProjectsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button
-                          onClick={() => handleEdit(project)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEdit(project);
+                          }}
                           className="text-gray-600 hover:text-gray-900 mr-3"
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
                         <button 
-                          onClick={() => handleDelete(project.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(project.id);
+                          }}
                           className="text-red-600 hover:text-red-900"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -399,8 +610,20 @@ export default function ProjectsPage() {
             </table>
           </div>
           )}
+          
+          {/* Pagination */}
+          {!isSearching && projects.length > 0 && totalPages > 1 && (
+            <div className="mt-6">
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+              />
+            </div>
+          )}
         </div>
-      </div>
       
       {isModalOpen && (
         <ProjectModal
@@ -420,6 +643,12 @@ export default function ProjectsPage() {
         cancelText={confirmation.cancelText}
         type={confirmation.type}
         isLoading={confirmation.isLoading}
+      />
+
+      <ProjectDetailsDialog
+        isOpen={isDetailsDialogOpen}
+        onClose={handleCloseDetailsDialog}
+        projectId={selectedProjectId}
       />
     </div>
   );

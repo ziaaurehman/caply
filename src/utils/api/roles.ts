@@ -5,16 +5,35 @@ import { CreateRoleRequest, UpdateRoleRequest } from '@/lib/types'
 // Roles API
 export const rolesApi = {
   // Get all organization roles
-  getAll: async (organizationId: string) => {
-    const response = await fetch('/api/roles', {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    })
-    if (!response.ok) {
-      throw new Error('Failed to fetch roles')
+  getAll: async (organizationId: string, params?: { page?: number; limit?: number; search?: string }) => {
+    const { deduplicateRequest, createRequestKey } = await import('@/utils/requestDeduplication')
+    
+    const requestParams = {
+      organizationId,
+      ...(params?.page && { page: params.page.toString() }),
+      ...(params?.limit && { limit: params.limit.toString() }),
+      ...(params?.search && { search: params.search })
     }
-    return response.json()
+    
+    const requestKey = createRequestKey('/api/roles', requestParams)
+    
+    return deduplicateRequest(requestKey, async () => {
+      const url = new URL('/api/roles', window.location.origin)
+      
+      if (params?.page) url.searchParams.set('page', params.page.toString())
+      if (params?.limit) url.searchParams.set('limit', params.limit.toString())
+      if (params?.search) url.searchParams.set('search', params.search)
+      
+      const response = await fetch(url.toString(), {
+        headers: {
+          'x-organization-id': organizationId,
+        },
+      })
+      if (!response.ok) {
+        throw new Error('Failed to fetch roles')
+      }
+      return response.json()
+    })
   },
 
   // Get specific role by ID
@@ -81,14 +100,20 @@ export const rolesApi = {
 export const permissionsApi = {
   // Get all permissions grouped by module
   getAll: async (organizationId: string) => {
-    const response = await fetch('/api/permissions', {
-      headers: {
-        'x-organization-id': organizationId,
-      },
+    const { deduplicateRequest, createRequestKey } = await import('@/utils/requestDeduplication')
+    
+    const requestKey = createRequestKey('/api/permissions', { organizationId })
+    
+    return deduplicateRequest(requestKey, async () => {
+      const response = await fetch('/api/permissions', {
+        headers: {
+          'x-organization-id': organizationId,
+        },
+      })
+      if (!response.ok) {
+        throw new Error('Failed to fetch permissions')
+      }
+      return response.json()
     })
-    if (!response.ok) {
-      throw new Error('Failed to fetch permissions')
-    }
-    return response.json()
   },
 }

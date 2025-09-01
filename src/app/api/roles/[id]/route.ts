@@ -5,6 +5,9 @@ import { authConfig } from '@/auth'
 import { validateOrganizationAccess, validateOrganizationAccessWithId } from '@/utils/organizationUtils'
 import { redisSetJSON } from '@/utils/redis'
 
+// Cache TTL - 7 days for page 1 only (most frequently accessed)
+const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
+
 interface Params {
   id: string
 }
@@ -166,8 +169,11 @@ export async function PUT(
       }
     }
 
-    // Refresh cached roles list for this organization (15 days)
+    // Refresh page 1 cache after updating role
     try {
+      const cacheKey = `roles:page1:${organizationId}:` // Empty search
+      
+      // Refresh with new data
       const { data: roles } = await supabase
         .from('roles')
         .select(`
@@ -193,8 +199,9 @@ export async function PUT(
         .eq('organization_id', organizationId)
         .eq('is_system_role', false)
         .order('name')
+        .range(0, 9) // First 10 items for page 1
 
-      const transformed = (roles || []).map((role: any) => ({
+      const transformedRoles = (roles || []).map((role: any) => ({
         id: role.id,
         name: role.name,
         display_name: role.display_name,
@@ -206,9 +213,32 @@ export async function PUT(
         permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
       }))
 
-      await redisSetJSON(`organization:roles:${organizationId}`, transformed, 1296000)
+      // Get total count for pagination
+      const { count: totalCount } = await supabase
+        .from('roles')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+        .eq('is_system_role', false)
+
+      const totalPages = Math.ceil((totalCount || 0) / 10)
+
+      const refreshedResult = {
+        roles: transformedRoles,
+        organization_id: organizationId,
+        pagination: {
+          page: 1,
+          limit: 10,
+          total: totalCount || 0,
+          totalPages,
+          hasNext: 1 < totalPages,
+          hasPrev: false
+        }
+      }
+
+      await redisSetJSON(cacheKey, refreshedResult, PAGE_ONE_CACHE_TTL)
+      console.log('🔄 Refreshed page 1 cache after role update')
     } catch (e) {
-      console.warn('Failed to refresh roles cache after update:', e)
+      console.warn('Failed to refresh roles page 1 cache after update:', e)
     }
 
     return NextResponse.json({ message: 'Role updated successfully' })
@@ -301,8 +331,11 @@ export async function DELETE(
       return NextResponse.json({ error: 'Failed to delete role' }, { status: 500 })
     }
 
-    // Refresh cached roles after deletion (15 days)
+    // Refresh page 1 cache after deleting role
     try {
+      const cacheKey = `roles:page1:${organizationId}:` // Empty search
+      
+      // Refresh with new data
       const { data: roles } = await supabase
         .from('roles')
         .select(`
@@ -328,8 +361,9 @@ export async function DELETE(
         .eq('organization_id', organizationId)
         .eq('is_system_role', false)
         .order('name')
+        .range(0, 9) // First 10 items for page 1
 
-      const transformed = (roles || []).map((role: any) => ({
+      const transformedRoles = (roles || []).map((role: any) => ({
         id: role.id,
         name: role.name,
         display_name: role.display_name,
@@ -341,9 +375,32 @@ export async function DELETE(
         permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
       }))
 
-      await redisSetJSON(`organization:roles:${organizationId}`, transformed, 1296000)
+      // Get total count for pagination
+      const { count: totalCount } = await supabase
+        .from('roles')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+        .eq('is_system_role', false)
+
+      const totalPages = Math.ceil((totalCount || 0) / 10)
+
+      const refreshedResult = {
+        roles: transformedRoles,
+        organization_id: organizationId,
+        pagination: {
+          page: 1,
+          limit: 10,
+          total: totalCount || 0,
+          totalPages,
+          hasNext: 1 < totalPages,
+          hasPrev: false
+        }
+      }
+
+      await redisSetJSON(cacheKey, refreshedResult, PAGE_ONE_CACHE_TTL)
+      console.log('🔄 Refreshed page 1 cache after role deletion')
     } catch (e) {
-      console.warn('Failed to refresh roles cache after delete:', e)
+      console.warn('Failed to refresh roles page 1 cache after delete:', e)
     }
 
     return NextResponse.json({ message: 'Role deleted successfully' })

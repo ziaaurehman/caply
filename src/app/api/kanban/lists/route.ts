@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
-import { redisGetJSON, redisSetJSON } from '@/utils/redis';
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const boardId = searchParams.get('board_id');
+    const includeArchived = searchParams.get('include_archived') === 'true';
     const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
     if (!boardId) {
@@ -50,115 +51,44 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Board not found' }, { status: 404 });
     }
 
-    // Try cache first (15 days)
-    const cacheKey = `kanban:lists:${boardId}:${organizationId}`;
+    // Try cache first (30 minutes for list info, include archived status in cache key)
+    const archiveKey = includeArchived ? ':archived' : '';
+    const cacheKey = `kanban:lists:${boardId}:${organizationId}${archiveKey}`;
     const cached = await redisGetJSON<any>(cacheKey);
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    // Get lists for the board
-    const { data: lists, error } = await supabase
+    // Get ONLY basic list information (no nested cards data for better performance)
+    let query = supabase
       .from('lists')
       .select(`
-        *,
-        cards (
-          id,
-          title,
-          description,
-          position,
-          due_date,
-          is_completed,
-          is_archived,
-          cover_color,
-          cover_image,
-          created_by,
-          created_at,
-          updated_at,
-          card_members (
-            project_member_id,
-            project_members!inner (
-              id,
-              organization_member_id,
-              role,
-              joined_at,
-              organization_members!inner (
-                id,
-                user_id,
-                users!organization_members_user_id_fkey!inner (
-                  id,
-                  full_name,
-                  email,
-                  avatar_url
-                )
-              )
-            )
-          ),
-          card_labels (
-            label_id,
-            labels (
-              id,
-              name,
-              color
-            )
-          ),
-          checklists (
-            id,
-            name,
-            position,
-            checklist_items (
-              id,
-              content,
-              is_completed,
-              position,
-              due_date,
-              assigned_to_project_member_id,
-              project_members (
-                id,
-                organization_member_id,
-                role,
-                joined_at,
-                organization_members (
-                  id,
-                  user_id,
-                  users!organization_members_user_id_fkey (
-                    id,
-                    full_name,
-                    email,
-                    avatar_url
-                  )
-                )
-              )
-            )
-          )
-        )
+        id,
+        board_id,
+        name,
+        position,
+        is_archived,
+        created_at,
+        updated_at
       `)
-      .eq('board_id', boardId)
-      .eq('is_archived', false)
-      .order('position', { ascending: true });
+      .eq('board_id', boardId);
+
+    // Only filter out archived lists if includeArchived is false
+    if (!includeArchived) {
+      query = query.eq('is_archived', false);
+    }
+
+    const { data: lists, error } = await query.order('position', { ascending: true });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Transform card_labels to labels and cover data for frontend compatibility
-    const transformedLists = lists?.map(list => ({
-      ...list,
-      cards: list.cards?.map((card: any) => ({
-        ...card,
-        labels: card.card_labels?.map((cl: any) => cl.labels).filter(Boolean) || [],
-        cover: {
-          color: card.cover_color,
-          image: card.cover_image,
-          size: card.cover_color || card.cover_image ? 'small' : undefined
-        },
-        card_labels: undefined // Remove the original card_labels to avoid confusion
-      })) || []
-    })) || [];
-
-    const result = { lists: transformedLists };
+    // Return basic list information only (cards will be loaded separately)
+    const result = { lists: lists || [] };
     try {
-      await redisSetJSON(cacheKey, result, 1296000);
+      // Cache for 30 minutes (1800 seconds) since lists structure changes less frequently
+      await redisSetJSON(cacheKey, result, 1800);
     } catch (e) {
       console.warn('Failed to cache kanban lists:', e);
     }
@@ -256,6 +186,36 @@ export async function POST(req: NextRequest) {
         entity_id: list.id,
         details: { list_name: name }
       }]);
+
+    // *** CRITICAL FIX: Refresh cache after list creation ***
+    try {
+      // Invalidate and refresh the lists cache for this board
+      const cacheKey = `kanban:lists:${board_id}:${organizationId}`;
+      
+      // Get fresh lists data
+      const { data: freshLists } = await supabase
+        .from('lists')
+        .select(`
+          id,
+          board_id,
+          name,
+          position,
+          is_archived,
+          created_at,
+          updated_at
+        `)
+        .eq('board_id', board_id)
+        .eq('is_archived', false)
+        .order('position', { ascending: true });
+
+      // Update cache with fresh data including the new list
+      const result = { lists: freshLists || [] };
+      await redisSetJSON(cacheKey, result, 1800); // 30 minutes cache
+      
+      console.log(`🔄 Refreshed lists cache after creating new list: ${name}`);
+    } catch (e) {
+      console.warn('Failed to refresh lists cache after creation:', e);
+    }
 
     return NextResponse.json({ list });
   } catch (error: any) {

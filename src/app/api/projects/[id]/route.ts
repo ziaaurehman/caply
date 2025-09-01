@@ -3,6 +3,9 @@ import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 import { redisGetJSON, redisSetJSON } from '@/utils/redis';
 
+// Cache TTL - 7 days for page 1 only (most frequently accessed)
+const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -171,161 +174,77 @@ export async function PUT(
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
-    // Refresh project cache and projects list cache (15 days)
+    // Refresh page 1 cache after updating project
     try {
-      // Refresh individual project cache for all users who might have access
-      const { data: allMembers } = await supabase
-        .from('organization_members')
-        .select('id, user_id, role_id, roles!role_id(name)')
-        .eq('organization_id', organizationId)
-        .eq('status', 'active');
+      const cacheKeysToInvalidate = [
+        `projects:page1:${organizationId}:::all`, // Admin/Manager empty search, no status
+        // Note: For projects, we'll only refresh the admin cache for simplicity
+        // Individual user caches can be added if needed
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Refresh cache with new data for admins/managers only
+          const { data: projects } = await supabase
+            .from('projects')
+            .select(`
+              id,
+              name,
+              code,
+              description,
+              project_type,
+              billing_rate,
+              budget_hours,
+              budget_amount,
+              start_date,
+              end_date,
+              status,
+              created_at,
+              updated_at,
+              kanban_enabled,
+              timesheet_enabled,
+              team_availability_enabled,
+              capacity_planning_enabled,
+              state,
+              organization_id,
+              client_id,
+              created_by
+            `)
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false })
+            .range(0, 9) // First 10 items for page 1
 
-      if (allMembers) {
-        for (const member of allMembers) {
-          const hasFullAccess = member.roles?.[0]?.name === 'admin' || 
-                               member.roles?.[0]?.name === 'manager';
-          
-          // Refresh individual project cache
-          const projectCacheKey = `project:${projectId}:${organizationId}:${hasFullAccess ? 'all' : member.user_id}`;
-          
-          // Check if user has access to this specific project
-          let hasProjectAccess = hasFullAccess;
-          if (!hasFullAccess) {
-            const { data: memberCheck } = await supabase
-              .from('project_members')
-              .select('id')
-              .eq('project_id', projectId)
-              .eq('organization_member_id', member.id)
-              .single();
-            hasProjectAccess = !!memberCheck;
-          }
+          // Get total count
+          const { count: totalCount } = await supabase
+            .from('projects')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
 
-          if (hasProjectAccess) {
-            // Fetch fresh project data
-            const { data: freshProject } = await supabase
-              .from('projects')
-              .select(`
-                *,
-                project_members (
-                  id,
-                  organization_member_id,
-                  role,
-                  joined_at,
-                  organization_members!organization_member_id (
-                    id,
-                    user_id,
-                    users!user_id (
-                      id,
-                      full_name,
-                      email,
-                      avatar_url
-                    )
-                  )
-                )
-              `)
-              .eq('id', projectId)
-              .eq('organization_id', organizationId)
-              .single();
+          const totalPages = Math.ceil((totalCount || 0) / 10)
 
-            if (freshProject) {
-              await redisSetJSON(projectCacheKey, {
-                project: freshProject,
-                user_access: hasFullAccess ? 'full' : 'member'
-              }, 1296000);
+          const refreshedResult = {
+            projects: projects || [],
+            user_role: 'admin',
+            total_projects: totalCount || 0,
+            access_level: 'all_organization_projects',
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount || 0,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
             }
           }
 
-          // Refresh projects list cache
-          const projectsListCacheKey = `organization:projects:${organizationId}:${hasFullAccess ? 'all' : member.user_id}`;
-          
-          // Fetch fresh projects list data
-          let freshProjectsData;
-          if (hasFullAccess) {
-            const { data: projects } = await supabase
-              .from('projects')
-              .select(`
-                *,
-                project_members (
-                  id,
-                  organization_member_id,
-                  role,
-                  joined_at,
-                  organization_members!organization_member_id (
-                    id,
-                    user_id,
-                    users!user_id (
-                      id,
-                      full_name,
-                      email,
-                      avatar_url
-                    )
-                  )
-                )
-              `)
-              .eq('organization_id', organizationId)
-              .order('created_at', { ascending: false });
-            
-            freshProjectsData = {
-              projects: projects || [],
-              user_role: 'admin',
-              total_projects: projects?.length || 0,
-              access_level: 'all_organization_projects'
-            };
-          } else {
-            // Get user's project memberships
-            const { data: memberProjectIds } = await supabase
-              .from('project_members')
-              .select('project_id')
-              .eq('organization_member_id', member.id);
-
-            if (memberProjectIds && memberProjectIds.length > 0) {
-              const projectIds = memberProjectIds.map(p => p.project_id);
-              const { data: projects } = await supabase
-                .from('projects')
-                .select(`
-                  *,
-                  project_members (
-                    id,
-                    organization_member_id,
-                    role,
-                    joined_at,
-                    organization_members!organization_member_id (
-                      id,
-                      user_id,
-                      users!user_id (
-                        id,
-                        full_name,
-                        email,
-                        avatar_url
-                      )
-                    )
-                  )
-                `)
-                .eq('organization_id', organizationId)
-                .in('id', projectIds)
-                .order('created_at', { ascending: false });
-              
-              freshProjectsData = {
-                projects: projects || [],
-                user_role: 'member',
-                total_projects: projects?.length || 0,
-                access_level: 'member_projects_only'
-              };
-            } else {
-              freshProjectsData = {
-                projects: [],
-                user_role: 'member',
-                total_projects: 0,
-                access_level: 'member_projects_only'
-              };
-            }
-          }
-          
-          await redisSetJSON(projectsListCacheKey, freshProjectsData, 1296000);
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed projects page 1 cache after project update')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
         }
       }
     } catch (e) {
-      console.warn('Failed to refresh project cache after update:', e);
+      console.warn('Failed to refresh projects page 1 cache after update:', e);
     }
     
     return NextResponse.json({ 
@@ -395,110 +314,77 @@ export async function DELETE(
       return NextResponse.json({ error: deleteError.message }, { status: 500 });
     }
 
-    // Refresh projects list cache after deletion (15 days)
+    // Refresh page 1 cache after deleting project
     try {
-      const { data: allMembers } = await supabase
-        .from('organization_members')
-        .select('id, user_id, role_id, roles!role_id(name)')
-        .eq('organization_id', organizationId)
-        .eq('status', 'active');
+      const cacheKeysToInvalidate = [
+        `projects:page1:${organizationId}:::all`, // Admin/Manager empty search, no status
+        // Note: For projects, we'll only refresh the admin cache for simplicity
+        // Individual user caches can be added if needed
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Refresh cache with new data for admins/managers only
+          const { data: projects } = await supabase
+            .from('projects')
+            .select(`
+              id,
+              name,
+              code,
+              description,
+              project_type,
+              billing_rate,
+              budget_hours,
+              budget_amount,
+              start_date,
+              end_date,
+              status,
+              created_at,
+              updated_at,
+              kanban_enabled,
+              timesheet_enabled,
+              team_availability_enabled,
+              capacity_planning_enabled,
+              state,
+              organization_id,
+              client_id,
+              created_by
+            `)
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false })
+            .range(0, 9) // First 10 items for page 1
 
-      if (allMembers) {
-        for (const member of allMembers) {
-          const hasFullAccess = member.roles?.[0]?.name === 'admin' || 
-                               member.roles?.[0]?.name === 'manager';
-          
-          // Refresh projects list cache
-          const projectsListCacheKey = `organization:projects:${organizationId}:${hasFullAccess ? 'all' : member.user_id}`;
-          
-          // Fetch fresh projects list data
-          let freshProjectsData;
-          if (hasFullAccess) {
-            const { data: projects } = await supabase
-              .from('projects')
-              .select(`
-                *,
-                project_members (
-                  id,
-                  organization_member_id,
-                  role,
-                  joined_at,
-                  organization_members!organization_member_id (
-                    id,
-                    user_id,
-                    users!user_id (
-                      id,
-                      full_name,
-                      email,
-                      avatar_url
-                    )
-                  )
-                )
-              `)
-              .eq('organization_id', organizationId)
-              .order('created_at', { ascending: false });
-            
-            freshProjectsData = {
-              projects: projects || [],
-              user_role: 'admin',
-              total_projects: projects?.length || 0,
-              access_level: 'all_organization_projects'
-            };
-          } else {
-            // Get user's project memberships
-            const { data: memberProjectIds } = await supabase
-              .from('project_members')
-              .select('project_id')
-              .eq('organization_member_id', member.id);
+          // Get total count
+          const { count: totalCount } = await supabase
+            .from('projects')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
 
-            if (memberProjectIds && memberProjectIds.length > 0) {
-              const projectIds = memberProjectIds.map(p => p.project_id);
-              const { data: projects } = await supabase
-                .from('projects')
-                .select(`
-                  *,
-                  project_members (
-                    id,
-                    organization_member_id,
-                    role,
-                    joined_at,
-                    organization_members!organization_member_id (
-                      id,
-                      user_id,
-                      users!user_id (
-                        id,
-                        full_name,
-                        email,
-                        avatar_url
-                      )
-                    )
-                  )
-                `)
-                .eq('organization_id', organizationId)
-                .in('id', projectIds)
-                .order('created_at', { ascending: false });
-              
-              freshProjectsData = {
-                projects: projects || [],
-                user_role: 'member',
-                total_projects: projects?.length || 0,
-                access_level: 'member_projects_only'
-              };
-            } else {
-              freshProjectsData = {
-                projects: [],
-                user_role: 'member',
-                total_projects: 0,
-                access_level: 'member_projects_only'
-              };
+          const totalPages = Math.ceil((totalCount || 0) / 10)
+
+          const refreshedResult = {
+            projects: projects || [],
+            user_role: 'admin',
+            total_projects: totalCount || 0,
+            access_level: 'all_organization_projects',
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount || 0,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
             }
           }
-          
-          await redisSetJSON(projectsListCacheKey, freshProjectsData, 1296000);
+
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed projects page 1 cache after project deletion')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
         }
       }
     } catch (e) {
-      console.warn('Failed to refresh projects cache after delete:', e);
+      console.warn('Failed to refresh projects page 1 cache after delete:', e);
     }
     
     return NextResponse.json({ 

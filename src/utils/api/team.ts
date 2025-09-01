@@ -79,6 +79,14 @@ interface UpdateTeamMemberData {
 interface TeamMembersResponse {
   members: TeamMember[];
   invitations: PendingInvitation[];
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
 }
 
 interface RolesResponse {
@@ -92,17 +100,40 @@ interface EmailProviderResponse {
 // Team Members API
 export const teamAPI = {
   // Get all team members and pending invitations
-  getTeamMembers: async (organizationId: string): Promise<TeamMembersResponse> => {
-    const response = await fetch(`/api/team-members?organizationId=${encodeURIComponent(organizationId)}`);
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch team members');
+  getTeamMembers: async (organizationId: string, params?: { page?: number; limit?: number; search?: string; status?: string }): Promise<TeamMembersResponse> => {
+    const { deduplicateRequest, createRequestKey } = await import('@/utils/requestDeduplication')
+    
+    const requestParams = {
+      organizationId,
+      ...(params?.page && { page: params.page.toString() }),
+      ...(params?.limit && { limit: params.limit.toString() }),
+      ...(params?.search && { search: params.search }),
+      ...(params?.status && { status: params.status })
     }
-    const data = await response.json();
-    return {
-      members: data.members || [],
-      invitations: data.invitations || []
-    };
+    
+    const requestKey = createRequestKey('/api/team-members', requestParams)
+    
+    return deduplicateRequest(requestKey, async () => {
+      const url = new URL('/api/team-members', window.location.origin)
+      url.searchParams.set('organizationId', organizationId)
+      
+      if (params?.page) url.searchParams.set('page', params.page.toString())
+      if (params?.limit) url.searchParams.set('limit', params.limit.toString())
+      if (params?.search) url.searchParams.set('search', params.search)
+      if (params?.status) url.searchParams.set('status', params.status)
+      
+      const response = await fetch(url.toString());
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch team members');
+      }
+      const data = await response.json();
+      return {
+        members: data.members || [],
+        invitations: data.invitations || [],
+        pagination: data.pagination
+      };
+    })
   },
 
   // Create new team member invitation

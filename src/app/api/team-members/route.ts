@@ -4,9 +4,12 @@ import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { sendInvitationEmail } from '@/lib/email'
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
-import { redisSetJSON } from '@/utils/redis'
+import { redisSetJSON, redisGetJSON } from '@/utils/redis'
 
-// GET /api/team-members - List all team members in the organization
+// Cache TTL - 7 days for page 1 only (most frequently accessed)
+const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
+
+// GET /api/team-members - List all team members in the organization with pagination
 export async function GET(request: NextRequest) {
   console.log('🔍 GET /api/team-members - Starting request')
   
@@ -14,6 +17,12 @@ export async function GET(request: NextRequest) {
     // Get organization ID from query params or headers
     const url = new URL(request.url)
     const organizationId = url.searchParams.get('organizationId') || request.headers.get('x-organization-id')
+    
+    // Get pagination parameters
+    const page = parseInt(url.searchParams.get('page') || '1')
+    const limit = parseInt(url.searchParams.get('limit') || '10')
+    const search = url.searchParams.get('search') || ''
+    const status = url.searchParams.get('status') || 'active'
     
     if (!organizationId) {
       return NextResponse.json({ 
@@ -33,12 +42,99 @@ export async function GET(request: NextRequest) {
       }, { status: validation.status })
     }
 
+    // Only cache page 1 with 10 items for 7 days (most frequently accessed)
+    const shouldCache = page === 1 && limit === 10
+    const cacheKey = shouldCache ? `team_members:page1:${organizationId}:${search}:${status}` : null
+    
+    // Try to get cached result first (only for page 1)
+    if (shouldCache && cacheKey) {
+      try {
+        const cached = await redisGetJSON<any>(cacheKey)
+        if (cached) {
+          console.log('📋 Returning cached team members page 1 result')
+          return NextResponse.json(cached)
+        }
+      } catch (cacheError) {
+        console.log('⚠️ Cache read failed, proceeding with database query:', cacheError)
+      }
+    }
+
     const supabase = await createClient()
     console.log('✅ Organization access validated for:', organizationId)
 
-    // Get all team members with their roles and user info
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit
+
+    // For search queries, we need to get the actual count after filtering
+    // because count queries with complex joins don't work well with head: true
+    let totalCount = 0
+    let countError = null
+
+    if (search) {
+      console.log('🔍 Running optimized search count query for term:', search)
+      
+      // Single optimized query with joins for counting
+      let searchCountQuery = supabase
+        .from('organization_members')
+        .select(`
+          id,
+          users!inner(email, full_name)
+        `, { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+
+      // Add status filter
+      if (status !== 'all') {
+        searchCountQuery = searchCountQuery.eq('status', status)
+      }
+
+      // Use PostgreSQL's text search for better performance
+      const searchPattern = `%${search.toLowerCase()}%`
+      searchCountQuery = searchCountQuery.or(
+        `department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern}`
+      )
+
+      const { count, error: searchCountError } = await searchCountQuery
+      totalCount = count || 0
+      countError = searchCountError
+      
+      console.log('📊 Optimized search count result:', {
+        searchTerm: search,
+        totalCount,
+        hasError: !!searchCountError,
+        errorMessage: searchCountError?.message
+      })
+    } else {
+      console.log('📊 Running simple count query (no search)')
+      // For non-search queries, use simple count
+      let countQuery = supabase
+        .from('organization_members')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+
+      // Add status filter
+      if (status !== 'all') {
+        countQuery = countQuery.eq('status', status)
+      }
+
+      const { count, error } = await countQuery
+      totalCount = count || 0
+      countError = error
+      
+      console.log('📊 Simple count result:', {
+        totalCount,
+        hasError: !!error,
+        errorMessage: error?.message
+      })
+    }
+
+    if (countError) {
+      console.error('Error counting team members:', countError)
+      return NextResponse.json({ error: 'Failed to count team members' }, { status: 500 })
+    }
+
+    // Get team members with their roles and user info
     console.log('🔍 Fetching team members for organization:', organizationId)
-    const { data: members, error } = await supabase
+    let membersQuery = supabase
       .from('organization_members')
       .select(`
         id,
@@ -67,7 +163,27 @@ export async function GET(request: NextRequest) {
         )
       `)
       .eq('organization_id', organizationId)
+
+    // Add status filter
+    if (status !== 'all') {
+      membersQuery = membersQuery.eq('status', status)
+    }
+
+    // Add search filter if search term provided
+    if (search) {
+      console.log('🔍 Applying optimized search filter to members query for term:', search)
+      
+      // Use the same optimized search pattern as count query
+      const searchPattern = `%${search.toLowerCase()}%`
+      membersQuery = membersQuery.or(
+        `department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern}`
+      )
+    }
+
+    // Add pagination and ordering
+    const { data: members, error } = await membersQuery
       .order('joined_at', { ascending: false })
+      .range(offset, offset + limit - 1)
 
     console.log('📊 Members query result:', {
       membersCount: members?.length || 0,
@@ -109,15 +225,36 @@ export async function GET(request: NextRequest) {
       errorMessage: inviteError?.message
     })
 
+    const totalPages = Math.ceil((totalCount || 0) / limit)
+
     const result = {
       members: members || [],
-      invitations: invitations || []
+      invitations: invitations || [],
+      pagination: {
+        page,
+        limit,
+        total: totalCount || 0,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
     }
 
     console.log('✅ Returning successful response:', {
       membersCount: result.members.length,
-      invitationsCount: result.invitations.length
+      invitationsCount: result.invitations.length,
+      pagination: result.pagination
     })
+
+    // Cache the result for future requests (only page 1 for 7 days)
+    if (shouldCache && cacheKey) {
+      try {
+        await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL)
+        console.log('💾 Cached team members page 1 result for 7 days')
+      } catch (cacheError) {
+        console.log('⚠️ Failed to cache result:', cacheError)
+      }
+    }
 
     return NextResponse.json(result)
 
@@ -383,6 +520,106 @@ export async function POST(request: NextRequest) {
       }
     } catch (e) {
       console.warn('Failed to refresh invited user organizations cache:', e)
+    }
+
+    // Invalidate page 1 cache after creating invitation
+    try {
+      const cacheKeysToInvalidate = [
+        `team_members:page1:${organizationId}::`, // Empty search, no status filter
+        `team_members:page1:${organizationId}::active`, // Active status filter
+        // Note: We could implement more sophisticated cache invalidation
+        // but for now, we'll clear the main page 1 caches
+      ]
+      
+      for (const key of cacheKeysToInvalidate) {
+        try {
+          // Refresh cache with new data
+          const { data: members } = await supabase
+            .from('organization_members')
+            .select(`
+              id,
+              user_id,
+              role_id,
+              status,
+              hourly_rate,
+              weekly_capacity,
+              department,
+              hire_date,
+              joined_at,
+              users!inner(
+                id,
+                email,
+                full_name,
+                avatar_url
+              ),
+              roles!inner(
+                id,
+                name,
+                display_name
+              )
+            `)
+            .eq('organization_id', organizationId)
+            .eq('status', key.includes('active') ? 'active' : undefined)
+            .order('joined_at', { ascending: false })
+            .range(0, 9) // First 10 items for page 1
+
+          // Get invitations for page 1
+          const { data: invitations } = await supabase
+            .from('organization_invitations')
+            .select(`
+              id,
+              email,
+              role_id,
+              status,
+              expires_at,
+              created_at,
+              user_id,
+              roles:role_id (
+                id,
+                name,
+                display_name
+              )
+            `)
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false })
+            .range(0, 9) // First 10 items
+
+          // Get total counts
+          const { count: totalMembers } = await supabase
+            .from('organization_members')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .eq('status', key.includes('active') ? 'active' : undefined)
+
+          const { count: totalInvitations } = await supabase
+            .from('organization_invitations')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+
+          const totalCount = (totalMembers || 0) + (totalInvitations || 0)
+          const totalPages = Math.ceil(totalCount / 10)
+
+          const refreshedResult = {
+            members: members || [],
+            invitations: invitations || [],
+            pagination: {
+              page: 1,
+              limit: 10,
+              total: totalCount,
+              totalPages,
+              hasNext: 1 < totalPages,
+              hasPrev: false
+            }
+          }
+
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+          console.log('🔄 Refreshed team members page 1 cache after invitation')
+        } catch (cacheError) {
+          console.warn('Failed to refresh specific cache key:', key, cacheError)
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to refresh team members page 1 cache after invitation:', e)
     }
 
     return NextResponse.json({ 

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
-import { redisGetJSON, redisSetJSON } from '@/utils/redis';
+import { redisGetJSON, redisSetJSON, redisDeleteByPattern } from '@/utils/redis';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const listId = searchParams.get('list_id');
     const boardId = searchParams.get('board_id');
+    const search = searchParams.get('search');
+    const includeArchived = searchParams.get('include_archived') === 'true';
     const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
 
     if (!listId && !boardId) {
@@ -33,9 +35,11 @@ export async function GET(req: NextRequest) {
     const { context: userContext } = validation;
     const supabase = await createClient();
 
-  // Try cache first for list or board aggregation
+  // Try cache first for list or board aggregation (include search and archive status in cache key)
   const scope = listId ? `list:${listId}` : `board:${boardId}`;
-  const cacheKey = `kanban:cards:${scope}:${organizationId}`;
+  const searchKey = search ? `:search:${search}` : '';
+  const archiveKey = includeArchived ? ':archived' : '';
+  const cacheKey = `kanban:cards:${scope}:${organizationId}${searchKey}${archiveKey}`;
   const cached = await redisGetJSON<any>(cacheKey);
   if (cached) {
     return NextResponse.json(cached);
@@ -142,13 +146,22 @@ export async function GET(req: NextRequest) {
         )
       )
     `)
-    .eq('lists.boards.projects.organization_id', organizationId)
-    .eq('is_archived', false);
+    .eq('lists.boards.projects.organization_id', organizationId);
+
+  // Only filter out archived items if includeArchived is false
+  if (!includeArchived) {
+    query = query.eq('is_archived', false);
+  }
 
   if (listId) {
     query = query.eq('list_id', listId);
   } else if (boardId) {
     query = query.eq('lists.board_id', boardId);
+  }
+
+  // Add search functionality if search term is provided
+  if (search && search.trim()) {
+    query = query.or(`title.ilike.%${search.trim()}%,description.ilike.%${search.trim()}%`);
   }
 
   const { data: cards, error } = await query.order('position', { ascending: true });
@@ -171,7 +184,9 @@ export async function GET(req: NextRequest) {
 
   const result = { cards: transformedCards };
   try {
-    await redisSetJSON(cacheKey, result, 1296000);
+    // Cache for 5 minutes (300 seconds) since cards change frequently
+    const cacheTime = search ? 60 : 300; // Shorter cache for search results
+    await redisSetJSON(cacheKey, result, cacheTime);
   } catch (e) {
     console.warn('Failed to cache kanban cards:', e);
   }
@@ -641,6 +656,16 @@ export async function POST(req: NextRequest) {
       await redisSetJSON(listsCacheKey, { lists: transformedLists }, 1296000);
     } catch (e) {
       console.warn('Failed to refresh kanban cards cache after create:', e);
+    }
+
+    // Invalidate project progress cache since a new card was created
+    try {
+      const projectId = list.boards.project_id;
+      const progressCacheKey = `project_progress:${projectId}:${organizationId}`;
+      await redisDeleteByPattern(progressCacheKey);
+      console.log('🔄 Invalidated project progress cache after card creation');
+    } catch (e) {
+      console.warn('Failed to invalidate project progress cache:', e);
     }
 
     return NextResponse.json({ card });
