@@ -298,6 +298,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     });
     e.dataTransfer.setData("cardId", card.id);
     e.dataTransfer.setData("sourceListId", sourceListId || '');
+    e.dataTransfer.setData("dragType", "card");
   }, [kanbanState.lists]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -307,8 +308,14 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const handleDrop = useCallback(async (e: React.DragEvent, targetListId: string) => {
     e.preventDefault();
     
+    const dragType = e.dataTransfer.getData("dragType");
     const cardId = e.dataTransfer.getData("cardId");
     let sourceListId = e.dataTransfer.getData("sourceListId");
+    
+    // Only handle card drops
+    if (dragType !== "card") {
+      return;
+    }
     
     // Fallback: if sourceListId is empty or undefined, use the drag state
     if (!sourceListId || sourceListId === 'undefined') {
@@ -455,17 +462,24 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     });
     e.dataTransfer.setData("listId", list.id);
     e.dataTransfer.setData("listPosition", list.position.toString());
+    e.dataTransfer.setData("dragType", "list");
     e.dataTransfer.effectAllowed = "move";
   }, []);
 
   const handleListDragOver = useCallback((e: React.DragEvent, targetListId: string) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
     
-    setListDragState(prev => ({
-      ...prev,
-      dragOverListId: targetListId
-    }));
+    // Only handle list drag over if it's a list being dragged
+    const dragType = e.dataTransfer.types.includes('text/plain') ? 
+      e.dataTransfer.getData("dragType") : null;
+    
+    if (dragType === "list") {
+      e.dataTransfer.dropEffect = "move";
+      setListDragState(prev => ({
+        ...prev,
+        dragOverListId: targetListId
+      }));
+    }
   }, []);
 
   const handleListDragLeave = useCallback(() => {
@@ -478,8 +492,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const handleListDrop = useCallback(async (e: React.DragEvent, targetListId: string) => {
     e.preventDefault();
     
+    const dragType = e.dataTransfer.getData("dragType");
     const draggedListId = e.dataTransfer.getData("listId");
-    if (!draggedListId || draggedListId === targetListId || !currentOrganization?.id) {
+    
+    // Only handle list drops
+    if (dragType !== "list" || !draggedListId || draggedListId === targetListId || !currentOrganization?.id) {
       setListDragState({
         isDragging: false,
         draggedListId: null,

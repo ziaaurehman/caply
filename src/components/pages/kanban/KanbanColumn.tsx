@@ -43,6 +43,7 @@ export default function KanbanColumn({
   isBeingDragged = false
 }: KanbanColumnProps) {
   const [showDropdown, setShowDropdown] = useState(false)
+  const [isListDragging, setIsListDragging] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Close dropdown when clicking outside
@@ -64,6 +65,18 @@ export default function KanbanColumn({
     setShowDropdown(false)
   }
 
+  const handleGripDragStart = (e: React.DragEvent) => {
+    e.stopPropagation()
+    setIsListDragging(true)
+    if (onListDragStart) {
+      onListDragStart(e, list)
+    }
+  }
+
+  const handleGripDragEnd = () => {
+    setIsListDragging(false)
+  }
+
   return (
     <div
       className={`flex-shrink-0 w-80 rounded-xl shadow-md p-4 flex flex-col transition-all duration-200 ${
@@ -74,8 +87,7 @@ export default function KanbanColumn({
           : 'bg-white/90 backdrop-blur-sm hover:shadow-lg'
       }`}
       style={{ height: 'calc(100vh - 120px)' }}
-      draggable={!!onListDragStart}
-      onDragStart={(e) => onListDragStart?.(e, list)}
+      draggable={false}
       onDragOver={(e) => {
         onDragOver(e);
         onListDragOver?.(e, list.id);
@@ -89,7 +101,12 @@ export default function KanbanColumn({
       <div className="flex items-center mb-4 flex-shrink-0">
         {/* Drag Handle */}
         {onListDragStart && (
-          <div className="text-gray-400 hover:text-gray-600 p-1 cursor-grab mr-1">
+          <div 
+            className="text-gray-400 hover:text-gray-600 p-1 cursor-grab mr-1"
+            draggable={true}
+            onDragStart={handleGripDragStart}
+            onDragEnd={handleGripDragEnd}
+          >
             <GripVertical className="h-4 w-4" />
           </div>
         )}

@@ -29,6 +29,8 @@ interface WeekData {
   startDate: string;
   endDate: string;
   label: string;
+  type?: 'week' | 'day';
+  isWeekend?: boolean;
 }
 
 export default function WeeklyCapacityTable({ capacityOverview, allocations, projects = [], organizationId, onWeekCellClick, onRefresh, onProjectClick, onAddResource, viewMode = 'overview', selectedMonth = new Date().getMonth(), selectedYear = new Date().getFullYear() }: WeeklyCapacityTableProps) {
@@ -51,7 +53,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
     setLocalCapacityOverview(capacityOverview);
   }, [allocations, capacityOverview]);
 
-  // Generate weeks data based on view mode and selected month/year
+  // Generate time columns (weeks or days) based on view mode and selected month/year
   const weeksData: WeekData[] = useMemo(() => {
     const weeks: WeekData[] = [];
     
@@ -82,32 +84,32 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
           weekNumber,
           startDate: currentWeek.toISOString(),
           endDate: weekEnd.toISOString(),
-          label: startDateStr
+          label: startDateStr,
+          type: 'week'
         });
         
         currentWeek.setDate(currentWeek.getDate() + 7);
         weekCount++;
       }
     } else if (viewMode === 'weekly') {
-      // For weekly view, show 4 weeks from the start of the selected month
+      // Weekly view shows per-day columns (28 days from the start of the selected month)
       const monthStart = new Date(selectedYear, selectedMonth, 1);
-      
-      for (let i = 0; i < 4; i++) {
-        const weekStart = new Date(monthStart);
-        weekStart.setDate(monthStart.getDate() + (i * 7));
-        
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 6);
-        
-        const weekNumber = `W${String(i + 1).padStart(2, '0')}`;
+      for (let i = 0; i < 28; i++) {
+        const day = new Date(monthStart);
+        day.setDate(monthStart.getDate() + i);
+        const dayEnd = new Date(day);
+        const weekday = day.getDay(); // 0 Sun, 6 Sat
+        const isWeekend = weekday === 0 || weekday === 6;
+        const dayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
         const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-        const startDateStr = `${String(weekStart.getDate()).padStart(2, '0')} ${monthNames[weekStart.getMonth()]}`;
-        
+        const dayLabel = `${String(day.getDate()).padStart(2, '0')} ${monthNames[day.getMonth()]}`;
         weeks.push({
-          weekNumber,
-          startDate: weekStart.toISOString(),
-          endDate: weekEnd.toISOString(),
-          label: startDateStr
+          weekNumber: dayNames[weekday],
+          startDate: day.toISOString(),
+          endDate: dayEnd.toISOString(),
+          label: dayLabel,
+          type: 'day',
+          isWeekend
         });
       }
     } else {
@@ -133,7 +135,8 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
           weekNumber,
           startDate: weekStart.toISOString(),
           endDate: weekEnd.toISOString(),
-          label: startDateStr
+          label: startDateStr,
+          type: 'week'
         });
       }
     }
@@ -287,6 +290,23 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
   const getAllocationForWeek = (memberAllocations: ResourceAllocation[], weekData: WeekData) => {
     const start = new Date(weekData.startDate);
     const end = new Date(weekData.endDate);
+    // If this column represents a day, compute per-day allocation from weekly hours (5-day workweek)
+    if (weekData.type === 'day') {
+      const isWeekend = weekData.isWeekend === true;
+      if (isWeekend) return 0;
+      const dailyAllocated = memberAllocations.reduce((sum, alloc) => {
+        const allocStart = new Date(alloc.start_date);
+        const allocEnd = alloc.end_date ? new Date(alloc.end_date) : undefined;
+        const activeOnDay = (!allocEnd || allocEnd >= start) && allocStart <= end;
+        if (!activeOnDay) return sum;
+        const hoursPerWeek = Number(alloc.hours_per_week || 0);
+        const perDay = hoursPerWeek / 5; // assume 5 working days
+        return sum + perDay;
+      }, 0);
+      // round to single decimal for display
+      return Math.round(dailyAllocated * 10) / 10;
+    }
+    // Weekly-type column: sum weekly hours for allocations overlapping the week
     const totalAllocated = memberAllocations.reduce((sum, alloc) => {
       const allocStart = new Date(alloc.start_date);
       const allocEnd = alloc.end_date ? new Date(alloc.end_date) : undefined;
@@ -353,7 +373,10 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
               WEEKLY CAPACITY
             </th>
             {weeksData.map((week) => (
-              <th key={week.weekNumber} className="text-center px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th
+                key={`${week.weekNumber}-${week.startDate}`}
+                className={`text-center px-4 py-4 text-xs font-medium uppercase tracking-wider ${week.type === 'day' && week.isWeekend ? 'text-gray-400' : 'text-gray-500'}`}
+              >
                 <div>{week.weekNumber}</div>
                 <div className="text-xs text-gray-400">{week.label}</div>
               </th>
@@ -413,24 +436,44 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
                     </div>
                   </td>
                   {weeksData.map((week) => {
-                    const weekAllocation = getAllocationForWeek(member.allocations, week);
+                    const allocationForCell = getAllocationForWeek(member.allocations, week);
+                    const capacityForCell = week.type === 'day' ? Math.round((member.capacity / 5) * 10) / 10 : member.capacity;
+                    const availableForCell = Math.max(0, capacityForCell - allocationForCell);
+                    const isWeekend = week.type === 'day' && week.isWeekend;
+                    const isToday = (() => {
+                      if (week.type !== 'day') return false;
+                      const d = new Date(week.startDate);
+                      const now = new Date();
+                      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+                    })();
                     return (
                       <td
-                        key={week.weekNumber}
-                        className="px-4 py-4 text-center relative group cursor-pointer"
+                        key={`${week.weekNumber}-${week.startDate}`}
+                        className={`px-4 py-4 text-center relative group cursor-pointer ${isWeekend ? 'bg-gray-50' : ''} ${isToday ? 'ring-2 ring-orange-300' : ''}`}
                         onClick={() => onWeekCellClick?.({ userId: member.user.id, week, member, allocations: member.allocations })}
                       >
                         <div 
-                          className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(weekAllocation, member.capacity)}`}
+                          className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(allocationForCell, capacityForCell)} ${isWeekend ? 'opacity-50' : ''}`}
                         >
-                          {weekAllocation}h
+                          {isWeekend ? '—' : `${allocationForCell}h`}
                         </div>
                         {/* Tooltip */}
-                        <div className="invisible  group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                          <div className="font-medium">Week {week.weekNumber}</div>
-                          <div>Allocated: {weekAllocation}h</div>
-                          <div>Capacity: {member.capacity}h</div>
-                          <div>Available: {member.capacity - weekAllocation}h</div>
+                        <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                          {week.type === 'day' ? (
+                            <>
+                              <div className="font-medium">{week.weekNumber} • {new Date(week.startDate).toLocaleDateString()}</div>
+                              <div>Allocated: {allocationForCell}h</div>
+                              <div>Capacity: {capacityForCell}h</div>
+                              <div>Available: {availableForCell}h</div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="font-medium">Week {week.weekNumber}</div>
+                              <div>Allocated: {allocationForCell}h</div>
+                              <div>Capacity: {capacityForCell}h</div>
+                              <div>Available: {availableForCell}h</div>
+                            </>
+                          )}
                         </div>
                       </td>
                     );
@@ -463,7 +506,7 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
                     {/* Tasks column */}
                    
                     {weeksData.map((week, i) => (
-                      <td key={week.weekNumber} className="px-4 py-3 text-center">
+                      <td key={`${week.weekNumber}-${week.startDate}`} className="px-4 py-3 text-center">
                         {editingId === allocation.id && i === 0 ? (
                           <input
                             type="number"
@@ -496,7 +539,9 @@ export default function WeeklyCapacityTable({ capacityOverview, allocations, pro
                             title="Click to edit hours"
                             onClick={() => { setEditingId(allocation.id); setEditingHours(String(allocation.hours_per_week)); }}
                           >
-                            {allocation.hours_per_week}h
+                            {week.type === 'day'
+                              ? `${Math.round(((allocation.hours_per_week || 0) / 5) * 10) / 10}h`
+                              : `${allocation.hours_per_week}h`}
                           </button>
                         )}
                       </td>
