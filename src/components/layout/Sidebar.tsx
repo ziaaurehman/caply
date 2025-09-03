@@ -1,10 +1,10 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { Dispatch, SetStateAction } from "react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { useSession } from "next-auth/react"
+import type React from "react";
+import { Dispatch, SetStateAction } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   LayoutDashboard,
   Users,
@@ -25,31 +25,39 @@ import {
   ChevronDown,
   ChevronRight,
   X,
-} from "lucide-react"
-import { cn } from "@/lib/utils"
-import { hasRole, hasAnyRole } from "@/utils/rbac"
-import { useOrganizationStore } from "@/lib/stores/organizationStore"
-import { useState } from "react"
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { hasRole, hasAnyRole } from "@/utils/rbac";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { useState } from "react";
 
 interface SidebarProps {
-  sidebarOpen: boolean
-  setSidebarOpen: Dispatch<SetStateAction<boolean>>
-  sidebarCollapsed: boolean
-  setSidebarCollapsed: Dispatch<SetStateAction<boolean>>
+  sidebarOpen: boolean;
+  setSidebarOpen: Dispatch<SetStateAction<boolean>>;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
 }
 
 interface NavItemProps {
-  href: string
-  icon: React.ReactNode
-  label: string
-  active: boolean
-  children?: React.ReactNode
-  badge?: string
-  isCollapsed?: boolean
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  children?: React.ReactNode;
+  badge?: string;
+  isCollapsed?: boolean;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ href, icon, label, active, children, badge, isCollapsed }) => {
-  const [isExpanded, setIsExpanded] = useState(active)
+const NavItem: React.FC<NavItemProps> = ({
+  href,
+  icon,
+  label,
+  active,
+  children,
+  badge,
+  isCollapsed,
+}) => {
+  const [isExpanded, setIsExpanded] = useState(active);
 
   if (children && !isCollapsed) {
     return (
@@ -58,9 +66,9 @@ const NavItem: React.FC<NavItemProps> = ({ href, icon, label, active, children, 
           onClick={() => setIsExpanded(!isExpanded)}
           className={cn(
             "flex items-center justify-between w-full px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 group",
-            active 
-              ? "bg-primary-100 text-primary-700 shadow-sm" 
-              : "text-gray-600 hover:bg-gray-50 hover:text-gray-900",
+            active
+              ? "bg-primary-100 text-primary-700 shadow-sm"
+              : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
           )}
         >
           <div className="flex items-center min-w-0">
@@ -73,7 +81,11 @@ const NavItem: React.FC<NavItemProps> = ({ href, icon, label, active, children, 
             )}
           </div>
           <span className="ml-2 flex-shrink-0">
-            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            {isExpanded ? (
+              <ChevronDown size={16} />
+            ) : (
+              <ChevronRight size={16} />
+            )}
           </span>
         </button>
         {isExpanded && (
@@ -82,7 +94,7 @@ const NavItem: React.FC<NavItemProps> = ({ href, icon, label, active, children, 
           </div>
         )}
       </div>
-    )
+    );
   }
 
   return (
@@ -91,13 +103,15 @@ const NavItem: React.FC<NavItemProps> = ({ href, icon, label, active, children, 
       className={cn(
         "flex items-center rounded-lg mb-1 transition-all duration-200 group relative",
         isCollapsed ? "px-3 py-3 justify-center" : "px-3 py-2.5",
-        active 
-          ? "bg-primary-100 text-primary-700 shadow-sm" 
-          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900",
+        active
+          ? "bg-primary-100 text-primary-700 shadow-sm"
+          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
       )}
       title={isCollapsed ? label : undefined}
     >
-      <span className={cn("flex-shrink-0", isCollapsed ? "" : "mr-3")}>{icon}</span>
+      <span className={cn("flex-shrink-0", isCollapsed ? "" : "mr-3")}>
+        {icon}
+      </span>
       {!isCollapsed && (
         <>
           <span className="truncate text-sm font-medium">{label}</span>
@@ -108,7 +122,7 @@ const NavItem: React.FC<NavItemProps> = ({ href, icon, label, active, children, 
           )}
         </>
       )}
-      
+
       {/* Tooltip for collapsed state */}
       {isCollapsed && (
         <div className="absolute left-full ml-2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
@@ -117,36 +131,42 @@ const NavItem: React.FC<NavItemProps> = ({ href, icon, label, active, children, 
         </div>
       )}
     </Link>
-  )
-}
+  );
+};
 
-const SubNavItem: React.FC<{ href: string; label: string; active: boolean }> = ({ href, label, active }) => {
+const SubNavItem: React.FC<{
+  href: string;
+  label: string;
+  active: boolean;
+}> = ({ href, label, active }) => {
   return (
     <Link
       href={href}
       className={cn(
         "flex items-center px-3 py-2 text-sm rounded-md transition-colors relative",
-        active 
-          ? "bg-primary-50 text-primary-700 font-medium" 
-          : "text-gray-500 hover:bg-gray-50 hover:text-gray-900",
+        active
+          ? "bg-primary-50 text-primary-700 font-medium"
+          : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
       )}
     >
       <div className="w-2 h-2 rounded-full bg-gray-300 mr-3 flex-shrink-0" />
       <span className="truncate">{label}</span>
     </Link>
-  )
-}
+  );
+};
 
-const NavSection: React.FC<{ title: string; children: React.ReactNode; isCollapsed?: boolean }> = ({ title, children, isCollapsed }) => {
+const NavSection: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  isCollapsed?: boolean;
+}> = ({ title, children, isCollapsed }) => {
   if (isCollapsed) {
     return (
       <div className="mb-4">
         <div className="h-px bg-gray-200 mx-2 mb-4" />
-        <div className="space-y-2">
-          {children}
-        </div>
+        <div className="space-y-2">{children}</div>
       </div>
-    )
+    );
   }
 
   return (
@@ -154,21 +174,24 @@ const NavSection: React.FC<{ title: string; children: React.ReactNode; isCollaps
       <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
         {title}
       </h3>
-      <div className="space-y-1">
-        {children}
-      </div>
+      <div className="space-y-1">{children}</div>
     </div>
-  )
-}
+  );
+};
 
-export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed, setSidebarCollapsed }: SidebarProps) {
-  const pathname = usePathname()
-  const { data: session } = useSession()
-  const { hasRole: hasOrgRole, hasPermission } = useOrganizationStore()
-  
+export default function Sidebar({
+  sidebarOpen,
+  setSidebarOpen,
+  sidebarCollapsed,
+  setSidebarCollapsed,
+}: SidebarProps) {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+  const { hasRole: hasOrgRole, hasPermission } = useOrganizationStore();
+
   // Check admin access using organization store
-  const isAdmin = hasOrgRole('admin') || hasPermission('roles', 'manage')
-  const isManagerOrAbove = hasOrgRole('admin') || hasOrgRole('manager')
+  const isAdmin = hasOrgRole("admin") || hasPermission("roles", "manage");
+  const isManagerOrAbove = hasOrgRole("admin") || hasOrgRole("manager");
 
   const coreMenuItems = [
     {
@@ -186,7 +209,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
       icon: <GanttChart size={18} />,
       label: "Kanban",
     },
-  ]
+  ];
 
   const teamMenuItems = [
     {
@@ -199,17 +222,17 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
       icon: <Calendar size={18} />,
       label: "Capacity",
     },
-    // {
-    //   href: "/timesheets",
-    //   icon: <Clock size={18} />,
-    //   label: "Timesheets",
-    // },
+    {
+      href: "/timesheets",
+      icon: <Clock size={18} />,
+      label: "Timesheets",
+    },
     // {
     //   href: "/leave",
     //   icon: <Palmtree size={18} />,
     //   label: "Leave",
     // },
-  ]
+  ];
 
   const financeMenuItems = [
     {
@@ -227,7 +250,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
       icon: <Receipt size={18} />,
       label: "Invoices",
     },
-  ]
+  ];
 
   const resourceMenuItems = [
     {
@@ -240,33 +263,44 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
       icon: <BarChart4 size={18} />,
       label: "Reports",
     },
-  ]
+  ];
 
-  const isSettingsActive = pathname.startsWith('/settings')
+  const isSettingsActive = pathname.startsWith("/settings");
 
   return (
     <>
       {/* Desktop Sidebar */}
-      <div className={cn(
-        "hidden md:flex md:flex-col md:fixed md:inset-y-0 transition-all duration-300",
-        sidebarCollapsed ? "md:w-16" : "md:w-56"
-      )}>
+      <div
+        className={cn(
+          "hidden md:flex md:flex-col md:fixed md:inset-y-0 transition-all duration-300",
+          sidebarCollapsed ? "md:w-16" : "md:w-56"
+        )}
+      >
         <div className="flex flex-col flex-grow bg-white border-r border-gray-200 pt-5 pb-4 overflow-y-auto scrollbar-thin">
           {/* Logo */}
-          <div className={cn(
-            "flex items-center flex-shrink-0 mb-6",
-            sidebarCollapsed ? "justify-center px-2" : "px-4"
-          )}>
+          <div
+            className={cn(
+              "flex items-center flex-shrink-0 mb-6",
+              sidebarCollapsed ? "justify-center px-2" : "px-4"
+            )}
+          >
             <Link href="/dashboard" className="flex items-center">
               <PieChart className="h-8 w-8 text-primary-600" />
               {!sidebarCollapsed && (
-                <span className="ml-2 text-xl font-bold text-gray-900">Caply</span>
+                <span className="ml-2 text-xl font-bold text-gray-900">
+                  Caply
+                </span>
               )}
             </Link>
           </div>
-          
+
           {/* Navigation */}
-          <nav className={cn("flex-1 space-y-1", sidebarCollapsed ? "px-2" : "px-3")}>
+          <nav
+            className={cn(
+              "flex-1 space-y-1",
+              sidebarCollapsed ? "px-2" : "px-3"
+            )}
+          >
             {/* Core Section */}
             <NavSection title="Core" isCollapsed={sidebarCollapsed}>
               {coreMenuItems.map((item) => (
@@ -302,7 +336,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
                   href="/roles"
                   icon={<Shield size={18} />}
                   label="Roles & Permissions"
-                  active={pathname === '/roles'}
+                  active={pathname === "/roles"}
                   isCollapsed={sidebarCollapsed}
                 />
               </NavSection>
@@ -335,9 +369,9 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
                 />
               ))}
             </NavSection> */}
-            
+
             {/* Management section removed - Roles & Permissions moved to Administration section with proper admin checks */}
-            
+
             {/* Settings */}
             {/* <NavSection title="Settings" isCollapsed={sidebarCollapsed}>
               <NavItem
@@ -377,16 +411,20 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
       </div>
 
       {/* Mobile Sidebar */}
-      <div className={cn(
-        "md:hidden fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform sidebar-transition",
-        sidebarOpen ? "translate-x-0" : "-translate-x-full"
-      )}>
+      <div
+        className={cn(
+          "md:hidden fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform sidebar-transition",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
         <div className="flex flex-col h-full">
           {/* Mobile Header */}
           <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200">
             <Link href="/dashboard" className="flex items-center">
               <PieChart className="h-6 w-6 text-primary-600" />
-              <span className="ml-2 text-lg font-bold text-gray-900">Caply</span>
+              <span className="ml-2 text-lg font-bold text-gray-900">
+                Caply
+              </span>
             </Link>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -400,7 +438,12 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
           <nav className="flex-1 px-3 py-4 overflow-y-auto scrollbar-thin">
             {/* Simplified mobile menu */}
             <div className="space-y-1">
-              {[...coreMenuItems, ...teamMenuItems, ...financeMenuItems, ...resourceMenuItems].map((item) => (
+              {[
+                ...coreMenuItems,
+                ...teamMenuItems,
+                ...financeMenuItems,
+                ...resourceMenuItems,
+              ].map((item) => (
                 <NavItem
                   key={item.href}
                   href={item.href}
@@ -409,7 +452,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
                   active={pathname === item.href}
                 />
               ))}
-              
+
               <NavItem
                 href="/settings"
                 icon={<Settings size={18} />}
@@ -419,20 +462,20 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
                 <SubNavItem
                   href="/settings"
                   label="General"
-                  active={pathname === '/settings'}
+                  active={pathname === "/settings"}
                 />
                 {isManagerOrAbove && (
                   <SubNavItem
                     href="/settings/invitations"
                     label="Invitations"
-                    active={pathname === '/settings/invitations'}
+                    active={pathname === "/settings/invitations"}
                   />
                 )}
                 {isAdmin && (
                   <SubNavItem
                     href="/settings/roles"
                     label="Roles"
-                    active={pathname === '/settings/roles'}
+                    active={pathname === "/settings/roles"}
                   />
                 )}
               </NavItem>
@@ -441,5 +484,5 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, sidebarCollapsed,
         </div>
       </div>
     </>
-  )
+  );
 }
