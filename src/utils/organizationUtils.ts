@@ -4,7 +4,7 @@ import { authConfig } from '@/auth'
 import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis'
 
 // Cache TTL in seconds (5 minutes)
-const CACHE_TTL = 300
+const CACHE_TTL = 604800;
 
 interface Permission {
   resource: string
