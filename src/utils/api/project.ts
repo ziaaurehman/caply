@@ -322,6 +322,33 @@ export const projectAPI = {
       const errorData = await response.json();
       throw new Error(errorData.error || 'Failed to delete document');
     }
+  },
+
+  // ===== PROJECT PROGRESS =====
+
+  // Get progress for multiple projects
+  getProjectsProgress: async (projectIds: string[]): Promise<{ progress: Array<{
+    projectId: string;
+    progress: number;
+    totalCards: number;
+    completedCards: number;
+    inProgressCards: number;
+    todoCards: number;
+  }> }> => {
+    const response = await fetch('/api/projects/progress', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ projectIds })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch project progress');
+    }
+
+    return await response.json();
   }
 };
 

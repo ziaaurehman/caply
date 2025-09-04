@@ -25,6 +25,7 @@ export default function ProjectsPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  const [progressLoading, setProgressLoading] = useState(false);
   
   // Project details dialog state
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
@@ -71,6 +72,11 @@ export default function ProjectsPage() {
         setTotalPages(data.pagination.totalPages);
         setTotalItems(data.pagination.total);
       }
+
+      // Fetch progress data after projects are loaded
+      if (data.projects && data.projects.length > 0) {
+        fetchProjectsProgress(data.projects.map(p => p.id));
+      }
     } catch (err: any) {
       console.error('Error fetching projects:', err);
       const errorMessage = err.message || 'Failed to load projects';
@@ -82,6 +88,40 @@ export default function ProjectsPage() {
       } else {
         setIsSearching(false);
       }
+    }
+  };
+
+  const fetchProjectsProgress = async (projectIds: string[]) => {
+    if (projectIds.length === 0) return;
+    
+    setProgressLoading(true);
+    try {
+      const progressData = await projectAPI.getProjectsProgress(projectIds);
+      
+      // Update projects with progress data
+      setProjects(prevProjects => 
+        prevProjects.map(project => {
+          const progressInfo = progressData.progress.find(p => p.projectId === project.id);
+          if (progressInfo) {
+            return {
+              ...project,
+              progress: progressInfo.progress,
+              progress_details: {
+                totalCards: progressInfo.totalCards,
+                completedCards: progressInfo.completedCards,
+                inProgressCards: progressInfo.inProgressCards,
+                todoCards: progressInfo.todoCards
+              }
+            };
+          }
+          return project;
+        })
+      );
+    } catch (err: any) {
+      console.error('Error fetching project progress:', err);
+      // Don't show error toast for progress loading failures
+    } finally {
+      setProgressLoading(false);
     }
   };
 
@@ -523,27 +563,20 @@ export default function ProjectsPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="w-24 bg-gray-200 rounded-full h-2.5 mr-2">
-                            <div
-                              className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
-                              style={{ width: `${project.progress || 0}%` }}
-                            ></div>
+    
+                          <div className="flex items-center">
+                            <div className="w-24 bg-gray-200 rounded-full h-2.5 mr-2">
+                              <div
+                                className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
+                                style={{ width: `${project.progress || 0}%` }}
+                              ></div>
+                            </div>
+                            <span className="text-sm text-gray-900">{project.progress || 0}%</span>
+                         
+                            
                           </div>
-                          <span className="text-sm text-gray-900">{project.progress || 0}%</span>
-                          {project.progress_details && project.progress_details.totalCards > 0 && (
-                            <div className="ml-2 text-xs text-gray-500">
-                              ({project.progress_details.completedCards}/{project.progress_details.totalCards} cards)
-                            </div>
-                          )}
-                          {(!project.progress_details || project.progress_details.totalCards === 0) && (
-                            <div className="ml-2 text-xs text-gray-400">
-                              (No Kanban data)
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                                             <td className="px-6 py-4 whitespace-nowrap">
+                                              </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
                          {(() => {
                            const budget = getProjectBudget(project);
                            if (!budget) {

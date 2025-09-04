@@ -91,26 +91,31 @@ export default function CapacityPlanningPage() {
 
   // Calculate date range based on view mode and month/year selection
   const calculateDateRange = (month: number, year: number, mode: 'overview' | 'weekly' | 'monthly') => {
-    const startDate = new Date(year, month, 1);
-    let endDate: Date;
+    const today = new Date();
+    const currentWeekStart = new Date(today);
+    const dayOfWeek = today.getDay();
+    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    currentWeekStart.setDate(today.getDate() - daysToSubtract);
 
-    if (mode === 'monthly') {
-      // For monthly view, show the entire month
-      endDate = new Date(year, month + 1, 0); // Last day of the month
-    } else if (mode === 'weekly') {
-      // For weekly view, show 4 weeks from the start of the month
-      endDate = new Date(year, month, 1);
-      endDate.setDate(endDate.getDate() + 28); // 4 weeks
+    if (mode === 'weekly') {
+      // For weekly view, show only the current week (7 days)
+      const weekEnd = new Date(currentWeekStart);
+      weekEnd.setDate(currentWeekStart.getDate() + 6);
+      
+      return {
+        startDate: currentWeekStart.toISOString().split('T')[0],
+        endDate: weekEnd.toISOString().split('T')[0]
+      };
     } else {
-      // For overview, show 30 days from start of month
-      endDate = new Date(year, month, 1);
-      endDate.setDate(endDate.getDate() + 30);
+      // For overview and monthly, show 5 weeks from current week
+      const fiveWeeksEnd = new Date(currentWeekStart);
+      fiveWeeksEnd.setDate(currentWeekStart.getDate() + (5 * 7) - 1); // 5 weeks minus 1 day
+      
+      return {
+        startDate: currentWeekStart.toISOString().split('T')[0],
+        endDate: fiveWeeksEnd.toISOString().split('T')[0]
+      };
     }
-
-    return {
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0]
-    };
   };
 
   // Handle month change
@@ -388,8 +393,6 @@ export default function CapacityPlanningPage() {
                 </Button>
             </div>
           </div>
-
-          {/* Removed project/date filters per new requirements. Actions moved to header. */}
         </div>
 
         {/* Capacity Overview */}
