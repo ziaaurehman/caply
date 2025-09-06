@@ -3,108 +3,181 @@ import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
 
-// Cache TTL: 15 days
-const CACHE_TTL = 1296000;
+// Cache TTL: 7 days for main allocation list, shorter for filtered queries
+const MAIN_CACHE_TTL = 604800; // 7 days
+const FILTERED_CACHE_TTL = 3600; // 1 hour
 
-// Refactored: use new tables resource_allocations + project_assignments
+// Optimized: Simple queries with smart caching
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const projectId = searchParams.get('project_id');
-  const startDate = searchParams.get('start_date');
-  const endDate = searchParams.get('end_date');
-  const filterProjectIds = searchParams.getAll('filter_project_id');
-  const filterMemberIds = searchParams.getAll('filter_project_member_id');
-  const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
-
-  if (!organizationId) {
-    return NextResponse.json({ 
-      error: 'Organization ID is required' 
-    }, { status: 400 })
-  }
-
-  // Validate organization access and permissions
-  const validation = await validateOrganizationAccessWithId(
-    organizationId,
-    { resource: 'capacity', action: 'read' }
-  )
-
-  if (!validation.success) {
-    return NextResponse.json({ 
-      error: validation.error 
-    }, { status: validation.status })
-  }
-
-  // Build cache key
-  const cacheKey = `capacity:allocations:${organizationId}:${projectId || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterMemberIds.join(',') || 'all'}:${startDate || 'all'}:${endDate || 'all'}`;
-
+  console.log('🔍 GET /api/capacity/allocations - Starting request');
+  
   try {
-    // Try to get from cache first
-    const cachedData = await redisGetJSON(cacheKey);
-    if (cachedData) {
-      console.log('Cache hit for capacity allocations:', cacheKey);
-      return NextResponse.json(cachedData);
+    const { searchParams } = new URL(req.url);
+    const projectId = searchParams.get('project_id');
+    const startDate = searchParams.get('start_date');
+    const endDate = searchParams.get('end_date');
+    const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
+
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
     }
 
-    const supabase = await createClient()
-    const userContext = validation.context!
-    // Fetch project assignments scoped to org via join through resource_allocations
-    let query = supabase
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'capacity', action: 'read' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
+
+    // Simple cache key - main queries get longer cache, filtered get shorter
+    const isMainQuery = !projectId && !startDate && !endDate;
+    const cacheKey = isMainQuery 
+      ? `allocations:main:${organizationId}`
+      : `allocations:${organizationId}:${projectId || 'all'}:${startDate || ''}:${endDate || ''}`;
+    
+    const cacheTTL = isMainQuery ? MAIN_CACHE_TTL : FILTERED_CACHE_TTL;
+
+    // Try to get from cache first
+    try {
+      const cachedData = await redisGetJSON(cacheKey);
+      if (cachedData) {
+        console.log('📋 Returning cached allocations result');
+        return NextResponse.json(cachedData);
+      }
+    } catch (cacheError) {
+      console.log('⚠️ Cache read failed, proceeding with database query:', cacheError);
+    }
+
+    const supabase = await createClient();
+
+    // Step 1: Get basic project assignments (simple query)
+    let assignmentsQuery = supabase
       .from('project_assignments')
       .select(`
-        *,
-        projects (
+        id,
+        project_id,
+        hours_per_week,
+        start_date,
+        end_date,
+        is_active,
+        resource_allocation_id
+      `)
+      .eq('is_active', true)
+      .order('start_date', { ascending: true });
+
+    // Apply filters
+    if (projectId) assignmentsQuery = assignmentsQuery.eq('project_id', projectId);
+
+    // Date filtering - only include assignments that overlap with date range
+    if (startDate && endDate) {
+      assignmentsQuery = assignmentsQuery.lte('start_date', endDate)
+                   .or(`end_date.is.null,end_date.gte.${startDate}`);
+    } else if (endDate) {
+      assignmentsQuery = assignmentsQuery.lte('start_date', endDate);
+    } else if (startDate) {
+      assignmentsQuery = assignmentsQuery.or(`end_date.is.null,end_date.gte.${startDate}`);
+    }
+
+    const { data: assignments, error: assignmentsError } = await assignmentsQuery;
+    
+    if (assignmentsError) {
+      console.error('Error fetching project assignments:', assignmentsError);
+      return NextResponse.json({ error: assignmentsError.message }, { status: 500 });
+    }
+
+    // Step 2: Get resource allocations for organization filter
+    const resourceIds = Array.from(new Set(assignments?.map(a => a.resource_allocation_id).filter(Boolean)));
+    
+    if (resourceIds.length === 0) {
+      const response = { allocations: [], total: 0 };
+      
+      // Cache empty result too
+      try {
+        await redisSetJSON(cacheKey, response, cacheTTL);
+        console.log('💾 Cached empty allocations result');
+      } catch (cacheError) {
+        console.log('⚠️ Failed to cache result:', cacheError);
+      }
+      
+      return NextResponse.json(response);
+    }
+
+    const { data: resources, error: resourcesError } = await supabase
+      .from('resource_allocations')
+      .select(`
+        id,
+        organization_member_id,
+        organization_id,
+        organization_members:organization_member_id (
           id,
-          name,
-          code,
-          status
-        ),
-        resource_allocations (
-          id,
-          organization_member_id,
-          organization_members:organization_member_id (
+          user_id,
+          users!user_id (
             id,
-            user_id,
-            users!user_id (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
+            full_name,
+            email,
+            avatar_url
           )
         )
       `)
-      .eq('resource_allocations.organization_id', organizationId)
-      .order('start_date', { ascending: true });
+      .in('id', resourceIds)
+      .eq('organization_id', organizationId);
 
-    if (projectId) query = query.eq('project_id', projectId);
-    if (filterProjectIds.length > 0) query = query.in('project_id', filterProjectIds);
-
-    // Date range: include any assignment that overlaps with [startDate, endDate]
-    // Overlap condition: start_date <= endDate AND (end_date IS NULL OR end_date >= startDate)
-    if (startDate && endDate) {
-      query = query.lte('start_date', endDate)
-                   .or(`end_date.is.null,end_date.gte.${startDate}`);
-    } else if (endDate) {
-      query = query.lte('start_date', endDate);
-    } else if (startDate) {
-      query = query.or(`end_date.is.null,end_date.gte.${startDate}`);
+    if (resourcesError) {
+      console.error('Error fetching resources:', resourcesError);
+      return NextResponse.json({ error: resourcesError.message }, { status: 500 });
     }
 
-    const { data, error } = await query;
-    if (error) {
-      console.error('Error fetching project assignments:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // Step 3: Get projects info
+    const projectIds = Array.from(new Set(assignments?.map(a => a.project_id).filter(Boolean)));
+    const { data: projects, error: projectsError } = await supabase
+      .from('projects')
+      .select('id, name, code, status')
+      .in('id', projectIds)
+      .eq('organization_id', organizationId);
+
+    if (projectsError) {
+      console.error('Error fetching projects:', projectsError);
+      return NextResponse.json({ error: projectsError.message }, { status: 500 });
     }
 
-    const response = { allocations: data || [], total: data?.length || 0 };
+    // Step 4: Combine data (in memory - fast)
+    const resourceMap = new Map(resources?.map(r => [r.id, r]) || []);
+    const projectMap = new Map(projects?.map(p => [p.id, p]) || []);
+
+    const enrichedAllocations = assignments?.map(assignment => ({
+      ...assignment,
+      projects: projectMap.get(assignment.project_id) || null,
+      resource_allocations: resourceMap.get(assignment.resource_allocation_id) || null
+    })).filter(a => a.resource_allocations) || []; // Only include those in this org
+
+    const response = { 
+      allocations: enrichedAllocations, 
+      total: enrichedAllocations.length 
+    };
 
     // Cache the response
-    await redisSetJSON(cacheKey, response, CACHE_TTL);
-    console.log('Cached capacity allocations:', cacheKey);
+    try {
+      await redisSetJSON(cacheKey, response, cacheTTL);
+      console.log(`💾 Cached allocations result for ${isMainQuery ? '7 days' : '1 hour'}`);
+    } catch (cacheError) {
+      console.log('⚠️ Failed to cache result:', cacheError);
+    }
+
+    console.log('✅ Returning successful response:', {
+      allocationsCount: response.allocations.length,
+      isMainQuery
+    });
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Error in capacity allocations GET:', error);
+    console.error('💥 Unexpected error in allocations API:', error);
     return NextResponse.json({ 
       error: 'Internal server error' 
     }, { status: 500 });
@@ -211,14 +284,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: createError.message }, { status: 500 });
     }
 
-    // Clear related caches
-    await redisDel(`capacity:allocations:${organizationId}:*`);
-    await redisDel(`capacity:overview:${organizationId}:*`);
-    await redisDel(`capacity:members:${organizationId}:*`);
-    await redisDel(`capacity:projects:${organizationId}:*`);
-    await redisDel(`capacity:resources:${organizationId}:*`);
-    await redisDel(`capacity:tasks:summary:${organizationId}:*`);
-    console.log('Cleared capacity-related caches for organization:', organizationId);
+    // Clear related caches - use new simplified cache keys
+    await redisDel(`allocations:main:${organizationId}`);
+    await redisDel(`allocations:${organizationId}:*`);
+    await redisDel(`overview:main:${organizationId}`);
+    await redisDel(`overview:${organizationId}:*`);
+    await redisDel(`resources:main:${organizationId}`);
+    await redisDel(`projects:capacity:${organizationId}`);
+    console.log('💾 Cleared capacity-related caches for organization:', organizationId);
 
     return NextResponse.json({ success: true, allocation: assignment });
 

@@ -3,163 +3,266 @@ import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
 
-// Cache TTL: 15 days
-const CACHE_TTL = 1296000;
+// Cache TTL: 7 days for main overview, shorter for filtered queries
+const MAIN_CACHE_TTL = 604800; // 7 days
+const FILTERED_CACHE_TTL = 1800; // 30 minutes
 
+// Optimized: Simple queries with smart caching and pre-calculations
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const startDate = searchParams.get('start_date');
-  const endDate = searchParams.get('end_date');
-  const projectId = searchParams.get('project_id');
-  const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
-  const filterProjectIds = searchParams.getAll('filter_project_id');
-  const filterUserIds = searchParams.getAll('filter_user_id');
-  const showOnlyOverallocated = searchParams.get('only_overallocated') === 'true';
-  const showOnlyActive = searchParams.get('only_active') !== 'false';
-
-  if (!organizationId) {
-    return NextResponse.json({ 
-      error: 'Organization ID is required' 
-    }, { status: 400 })
-  }
-
-  // Validate organization access and permissions
-  const validation = await validateOrganizationAccessWithId(
-    organizationId,
-    { resource: 'capacity', action: 'read' }
-  )
-
-  if (!validation.success) {
-    return NextResponse.json({ 
-      error: validation.error 
-    }, { status: validation.status })
-  }
-
-  // Build cache key
-  const cacheKey = `capacity:overview:${organizationId}:${projectId || 'all'}:${filterProjectIds.join(',') || 'all'}:${filterUserIds.join(',') || 'all'}:${startDate || 'all'}:${endDate || 'all'}:${showOnlyOverallocated}:${showOnlyActive}`;
-
+  console.log('🔍 GET /api/capacity/overview - Starting request');
+  
   try {
-    // Try to get from cache first
-    const cachedData = await redisGetJSON(cacheKey);
-    if (cachedData) {
-      console.log('Cache hit for capacity overview:', cacheKey);
-      return NextResponse.json(cachedData);
+    const { searchParams } = new URL(req.url);
+    const startDate = searchParams.get('start_date');
+    const endDate = searchParams.get('end_date');
+    const projectId = searchParams.get('project_id');
+    const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
+    const filterUserIds = searchParams.getAll('filter_user_id');
+    const showOnlyOverallocated = searchParams.get('only_overallocated') === 'true';
+
+    if (!organizationId) {
+      return NextResponse.json({ 
+        error: 'Organization ID is required' 
+      }, { status: 400 })
     }
 
-    const supabase = await createClient()
-    const userContext = validation.context!
-    // Fetch all org members that are resources
+    // Validate organization access and permissions
+    const validation = await validateOrganizationAccessWithId(
+      organizationId,
+      { resource: 'capacity', action: 'read' }
+    )
+
+    if (!validation.success) {
+      return NextResponse.json({ 
+        error: validation.error 
+      }, { status: validation.status })
+    }
+
+    // Simple cache key - main queries get longer cache
+    const isMainQuery = !projectId && !startDate && !endDate && filterUserIds.length === 0 && !showOnlyOverallocated;
+    const cacheKey = isMainQuery 
+      ? `overview:main:${organizationId}`
+      : `overview:${organizationId}:${projectId || ''}:${startDate || ''}:${endDate || ''}:${filterUserIds.join(',') || ''}:${showOnlyOverallocated}`;
+    
+    const cacheTTL = isMainQuery ? MAIN_CACHE_TTL : FILTERED_CACHE_TTL;
+
+    // Try to get from cache first
+    try {
+      const cachedData = await redisGetJSON(cacheKey);
+      if (cachedData) {
+        console.log('📋 Returning cached overview result');
+        return NextResponse.json(cachedData);
+      }
+    } catch (cacheError) {
+      console.log('⚠️ Cache read failed, proceeding with database query:', cacheError);
+    }
+
+    const supabase = await createClient();
+
+    // Step 1: Get active resources for this organization (simple query)
     let resourcesQuery = supabase
       .from('resource_allocations')
       .select(`
         id,
-        organization_id,
         organization_member_id,
         weekly_capacity_hours,
-        is_active,
-        organization_members!organization_member_id (
-          id,
-          status,
-          user_id,
-          department,
-          users!user_id ( id, full_name, email, avatar_url, position )
-        )
+        is_active
       `)
-      .eq('organization_id', organizationId);
+      .eq('organization_id', organizationId)
+      .eq('is_active', true);
 
-    if (showOnlyActive) resourcesQuery = resourcesQuery.eq('is_active', true);
-
-    const { data: resources, error: resErr } = await resourcesQuery;
-    if (resErr) return NextResponse.json({ error: resErr.message }, { status: 500 });
-
-    // Optional filter by specific users
-    let filteredResources = resources || [];
-    if (filterUserIds.length > 0) {
-      filteredResources = filteredResources.filter(r => {
-        const uid = (r as any)?.organization_members?.[0]?.users?.id || (r as any)?.organization_members?.users?.id;
-        return uid ? filterUserIds.includes(uid) : false;
-      });
+    const { data: resources, error: resourcesError } = await resourcesQuery;
+    if (resourcesError) {
+      console.error('Error fetching resources:', resourcesError);
+      return NextResponse.json({ error: resourcesError.message }, { status: 500 });
     }
 
-    // Fetch assignments (project_assignments) intersecting the range
+    if (!resources || resources.length === 0) {
+      const emptyResponse = {
+        capacityOverview: [],
+        summary: {
+          totalMembers: 0,
+          overallocatedMembers: 0,
+          optimalMembers: 0,
+          underutilizedMembers: 0,
+          totalCapacity: 0,
+          totalAllocated: 0,
+          totalAvailable: 0
+        }
+      };
+
+      try {
+        await redisSetJSON(cacheKey, emptyResponse, cacheTTL);
+        console.log('💾 Cached empty overview result');
+      } catch (cacheError) {
+        console.log('⚠️ Failed to cache result:', cacheError);
+      }
+
+      return NextResponse.json(emptyResponse);
+    }
+
+    // Step 2: Get organization members info
+    const { data: orgMembers, error: membersError } = await supabase
+      .from('organization_members')
+      .select(`
+        id,
+        user_id,
+        department,
+        users!user_id (
+          id,
+          full_name,
+          email,
+          avatar_url,
+          position
+        )
+      `)
+      .in('id', resources.map(r => r.organization_member_id));
+
+    if (membersError) {
+      console.error('Error fetching organization members:', membersError);
+      return NextResponse.json({ error: membersError.message }, { status: 500 });
+    }
+
+    // Filter by user IDs if specified
+    let filteredMembers = orgMembers || [];
+    if (filterUserIds.length > 0) {
+      filteredMembers = filteredMembers.filter(member => 
+        filterUserIds.includes((member as any).users?.id)
+      );
+    }
+
+    if (filteredMembers.length === 0) {
+      const emptyResponse = {
+        capacityOverview: [],
+        summary: {
+          totalMembers: 0,
+          overallocatedMembers: 0,
+          optimalMembers: 0,
+          underutilizedMembers: 0,
+          totalCapacity: 0,
+          totalAllocated: 0,
+          totalAvailable: 0
+        }
+      };
+
+      return NextResponse.json(emptyResponse);
+    }
+
+    // Step 3: Get project assignments for date range
+    const resourceIds = resources
+      .filter(r => filteredMembers.some(m => m.id === r.organization_member_id))
+      .map(r => r.id);
+
     let assignmentsQuery = supabase
       .from('project_assignments')
       .select(`
-        *,
-        projects ( id, name, code, status, capacity_planning_enabled ),
-        resource_allocations ( id, organization_member_id )
+        id,
+        project_id,
+        hours_per_week,
+        start_date,
+        end_date,
+        resource_allocation_id
       `)
-      .gte('start_date', startDate || '1900-01-01')
-      .lte('end_date', endDate || '2100-12-31')
+      .in('resource_allocation_id', resourceIds)
       .eq('is_active', true);
 
+    // Apply date filtering
+    if (startDate && endDate) {
+      assignmentsQuery = assignmentsQuery.lte('start_date', endDate)
+                                       .or(`end_date.is.null,end_date.gte.${startDate}`);
+    } else if (endDate) {
+      assignmentsQuery = assignmentsQuery.lte('start_date', endDate);
+    } else if (startDate) {
+      assignmentsQuery = assignmentsQuery.or(`end_date.is.null,end_date.gte.${startDate}`);
+    }
+
     if (projectId) assignmentsQuery = assignmentsQuery.eq('project_id', projectId);
-    if (filterProjectIds.length > 0) assignmentsQuery = assignmentsQuery.in('project_id', filterProjectIds);
 
-    const { data: assignments, error: assErr } = await assignmentsQuery;
-    if (assErr) return NextResponse.json({ error: assErr.message }, { status: 500 });
+    const { data: assignments, error: assignmentsError } = await assignmentsQuery;
+    if (assignmentsError) {
+      console.error('Error fetching assignments:', assignmentsError);
+      return NextResponse.json({ error: assignmentsError.message }, { status: 500 });
+    }
 
-    // Build overview rows
-    const capacityOverview = (filteredResources || []).map((res) => {
-      const orgMember = (res as any).organization_members?.[0] || (res as any).organization_members;
-      const user = orgMember?.users || null;
-      const memberAssignments = (assignments || []).filter(a => (a as any).resource_allocations?.organization_member_id === (res as any).organization_member_id);
-      
-      // Debug logging
-      console.log('Resource:', (res as any).organization_member_id, 'User:', user?.full_name);
-      console.log('All assignments:', assignments?.length);
-      console.log('Member assignments:', memberAssignments?.length);
-      console.log('Assignment details:', memberAssignments?.map(a => ({ 
-        hours: a.hours_per_week, 
-        project: (a as any).projects?.name,
-        resource_id: (a as any).resource_allocations?.organization_member_id 
-      })));
-      
-      const totalAllocatedHours = memberAssignments.reduce((sum, a) => sum + Number(a.hours_per_week || 0), 0);
-      const capacity = Number((res as any).weekly_capacity_hours || 40);
+    // Step 4: Build overview (in memory calculations - fast)
+    const resourceMap = new Map(resources.map(r => [r.id, r]));
+    const memberMap = new Map(filteredMembers.map(m => [m.id, m]));
+    
+    // Group assignments by resource
+    const assignmentsByResource = new Map();
+    assignments?.forEach(assignment => {
+      const resourceId = assignment.resource_allocation_id;
+      if (!assignmentsByResource.has(resourceId)) {
+        assignmentsByResource.set(resourceId, []);
+      }
+      assignmentsByResource.get(resourceId).push(assignment);
+    });
+
+    const capacityOverview = Array.from(memberMap.values()).map(member => {
+      // Find corresponding resource
+      const resource = resources.find(r => r.organization_member_id === member.id);
+      if (!resource) return null;
+
+      const memberAssignments = assignmentsByResource.get(resource.id) || [];
+      const totalAllocatedHours = memberAssignments.reduce((sum: number, a: any) => sum + Number(a.hours_per_week || 0), 0);
+      const capacity = Number(resource.weekly_capacity_hours || 40);
       const utilizationPercent = capacity > 0 ? (totalAllocatedHours / capacity) * 100 : 0;
 
       return {
         member: {
-          id: orgMember?.user_id || user?.id,
-          user,
-          role: orgMember?.department || user?.position || '',
-          project: null,
-          organization_member_id: orgMember?.id
+          id: (member as any).users?.id,
+          user: (member as any).users,
+          role: (member as any).department || (member as any).users?.position || '',
+          organization_member_id: member.id
         },
-        allocations: memberAssignments,
+        allocations: memberAssignments, // Simplified - just the assignment data
         capacity,
         totalAllocatedHours,
         availableHours: Math.max(0, capacity - totalAllocatedHours),
         utilizationPercent,
         status: utilizationPercent > 100 ? 'overallocated' : utilizationPercent >= 80 ? 'nearOptimal' : utilizationPercent >= 60 ? 'optimal' : 'underutilized'
       };
-    });
+    }).filter(Boolean);
 
+    // Filter overallocated if requested
     const filteredOverview = showOnlyOverallocated
-      ? capacityOverview.filter(m => m.utilizationPercent > 100)
-      : capacityOverview;
+      ? capacityOverview.filter(m => m && m.utilizationPercent > 100)
+      : capacityOverview.filter(m => m !== null);
+
+    // Calculate summary
+    const summary = {
+      totalMembers: filteredOverview.length,
+      overallocatedMembers: filteredOverview.filter(m => m && m.status === 'overallocated').length,
+      optimalMembers: filteredOverview.filter(m => m && (m.status === 'optimal' || m.status === 'nearOptimal')).length,
+      underutilizedMembers: filteredOverview.filter(m => m && m.status === 'underutilized').length,
+      totalCapacity: filteredOverview.reduce((sum, m) => sum + (m?.capacity || 0), 0),
+      totalAllocated: filteredOverview.reduce((sum, m) => sum + (m?.totalAllocatedHours || 0), 0),
+      totalAvailable: filteredOverview.reduce((sum, m) => sum + (m?.availableHours || 0), 0)
+    };
 
     const response = {
       capacityOverview: filteredOverview,
-      summary: {
-        totalMembers: filteredOverview?.length || 0,
-        overallocatedMembers: filteredOverview.filter(m => m.status === 'overallocated').length,
-        optimalMembers: filteredOverview.filter(m => m.status === 'optimal' || m.status === 'nearOptimal').length,
-        underutilizedMembers: filteredOverview.filter(m => m.status === 'underutilized').length,
-        totalCapacity: filteredOverview.reduce((sum, m) => sum + m.capacity, 0),
-        totalAllocated: filteredOverview.reduce((sum, m) => sum + m.totalAllocatedHours, 0),
-        totalAvailable: filteredOverview.reduce((sum, m) => sum + m.availableHours, 0)
-      }
+      summary
     };
 
     // Cache the response
-    await redisSetJSON(cacheKey, response, CACHE_TTL);
-    console.log('Cached capacity overview:', cacheKey);
+    try {
+      await redisSetJSON(cacheKey, response, cacheTTL);
+      console.log(`💾 Cached overview result for ${isMainQuery ? '7 days' : '30 minutes'}`);
+    } catch (cacheError) {
+      console.log('⚠️ Failed to cache result:', cacheError);
+    }
+
+    console.log('✅ Returning successful response:', {
+      overviewCount: response.capacityOverview.length,
+      totalCapacity: summary.totalCapacity,
+      totalAllocated: summary.totalAllocated,
+      isMainQuery
+    });
 
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Error fetching capacity overview:', error);
+    console.error('💥 Unexpected error in overview API:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

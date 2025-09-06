@@ -3,84 +3,145 @@ import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
 
-// Cache TTL: 15 days
-const CACHE_TTL = 1296000;
+// Cache TTL: 7 days for resources (longer since they don't change often)
+const CACHE_TTL = 604800; // 7 days
 
-// GET: list resources (organization members participating in capacity planning)
+// Optimized: Simple queries with smart caching
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
-  const onlyActive = (searchParams.get('only_active') ?? 'true') === 'true';
-  const filterUserIds = searchParams.getAll('user_id');
-
-  if (!organizationId) {
-    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
-  }
-
-  const validation = await validateOrganizationAccessWithId(organizationId, { resource: 'capacity', action: 'read' });
-  if (!validation.success) {
-    return NextResponse.json({ error: validation.error }, { status: validation.status });
-  }
-
-  // Build cache key
-  const cacheKey = `capacity:resources:${organizationId}:${onlyActive}:${filterUserIds.join(',') || 'all'}`;
-
+  console.log('🔍 GET /api/capacity/resources - Starting request');
+  
   try {
+    const { searchParams } = new URL(req.url);
+    const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
+    const onlyActive = (searchParams.get('only_active') ?? 'true') === 'true';
+    const filterUserIds = searchParams.getAll('user_id');
+
+    if (!organizationId) {
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    }
+
+    const validation = await validateOrganizationAccessWithId(organizationId, { resource: 'capacity', action: 'read' });
+    if (!validation.success) {
+      return NextResponse.json({ error: validation.error }, { status: validation.status });
+    }
+
+    // Simple cache key - main queries get longer cache
+    const isMainQuery = onlyActive && filterUserIds.length === 0;
+    const cacheKey = isMainQuery
+      ? `resources:main:${organizationId}`
+      : `resources:${organizationId}:${onlyActive}:${filterUserIds.join(',') || 'all'}`;
+
     // Try to get from cache first
-    const cachedData = await redisGetJSON(cacheKey);
-    if (cachedData) {
-      console.log('Cache hit for capacity resources:', cacheKey);
-      return NextResponse.json(cachedData);
+    try {
+      const cachedData = await redisGetJSON(cacheKey);
+      if (cachedData) {
+        console.log('📋 Returning cached resources result');
+        return NextResponse.json(cachedData);
+      }
+    } catch (cacheError) {
+      console.log('⚠️ Cache read failed, proceeding with database query:', cacheError);
     }
 
     const supabase = await createClient();
 
-    let query = supabase
+    // Step 1: Get basic resource allocations (simple query)
+    let resourcesQuery = supabase
       .from('resource_allocations')
       .select(`
         id,
-        organization_id,
         organization_member_id,
         weekly_capacity_hours,
         hourly_rate,
         is_active,
         is_archived,
         created_at,
-        updated_at,
-        organization_members!organization_member_id (
-          id,
-          user_id,
-          status,
-          roles:role_id (
-            id,
-            name
-          ),
-          users!user_id (
-            id,
-            full_name,
-            email,
-            avatar_url,
-            position
-          )
-        )
+        updated_at
       `)
       .eq('organization_id', organizationId);
 
-    if (onlyActive) query = query.eq('is_active', true);
-    if (filterUserIds.length > 0) query = query.in('organization_members.user_id', filterUserIds as any);
+    if (onlyActive) resourcesQuery = resourcesQuery.eq('is_active', true);
 
-    const { data, error } = await query.order('created_at', { ascending: true });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data: resources, error: resourcesError } = await resourcesQuery.order('created_at', { ascending: true });
+    
+    if (resourcesError) {
+      console.error('Error fetching resources:', resourcesError);
+      return NextResponse.json({ error: resourcesError.message }, { status: 500 });
+    }
 
-    const response = { resources: data || [] };
+    if (!resources || resources.length === 0) {
+      const emptyResponse = { resources: [] };
+      
+      try {
+        await redisSetJSON(cacheKey, emptyResponse, CACHE_TTL);
+        console.log('💾 Cached empty resources result');
+      } catch (cacheError) {
+        console.log('⚠️ Failed to cache result:', cacheError);
+      }
+      
+      return NextResponse.json(emptyResponse);
+    }
+
+    // Step 2: Get organization members info
+    const { data: orgMembers, error: membersError } = await supabase
+      .from('organization_members')
+      .select(`
+        id,
+        user_id,
+        status,
+        roles:role_id (
+          id,
+          name
+        ),
+        users!user_id (
+          id,
+          full_name,
+          email,
+          avatar_url,
+          position
+        )
+      `)
+      .in('id', resources.map(r => r.organization_member_id));
+
+    if (membersError) {
+      console.error('Error fetching organization members:', membersError);
+      return NextResponse.json({ error: membersError.message }, { status: 500 });
+    }
+
+    // Step 3: Combine data (in memory - fast)
+    const memberMap = new Map((orgMembers || []).map(m => [m.id, m]));
+
+    let enrichedResources = resources.map(resource => ({
+      ...resource,
+      organization_id: organizationId, // Add back for compatibility
+      organization_members: memberMap.get(resource.organization_member_id) || null
+    }));
+
+    // Filter by user IDs if specified
+    if (filterUserIds.length > 0) {
+      enrichedResources = enrichedResources.filter(resource => {
+        const userId = (resource.organization_members as any)?.users?.id;
+        return userId && filterUserIds.includes(userId);
+      });
+    }
+
+    const response = { resources: enrichedResources };
 
     // Cache the response
-    await redisSetJSON(cacheKey, response, CACHE_TTL);
-    console.log('Cached capacity resources:', cacheKey);
+    try {
+      await redisSetJSON(cacheKey, response, CACHE_TTL);
+      console.log('💾 Cached resources result for 7 days');
+    } catch (cacheError) {
+      console.log('⚠️ Failed to cache result:', cacheError);
+    }
+
+    console.log('✅ Returning successful response:', {
+      resourcesCount: response.resources.length,
+      isMainQuery
+    });
 
     return NextResponse.json(response);
   } catch (e) {
-    console.error('Error listing capacity resources:', e);
+    console.error('💥 Unexpected error in resources API:', e);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -127,14 +188,15 @@ export async function POST(req: NextRequest) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // Clear related caches
-    await redisDel(`capacity:resources:${organizationId}:*`);
-    await redisDel(`capacity:overview:${organizationId}:*`);
-    await redisDel(`capacity:allocations:${organizationId}:*`);
-    await redisDel(`capacity:members:${organizationId}:*`);
-    await redisDel(`capacity:projects:${organizationId}:*`);
-    await redisDel(`capacity:tasks:summary:${organizationId}:*`);
-    console.log('Cleared capacity-related caches for organization:', organizationId);
+    // Clear related caches - use new simplified cache keys
+    await redisDel(`resources:main:${organizationId}`);
+    await redisDel(`resources:${organizationId}:*`);
+    await redisDel(`overview:main:${organizationId}`);
+    await redisDel(`overview:${organizationId}:*`);
+    await redisDel(`allocations:main:${organizationId}`);
+    await redisDel(`allocations:${organizationId}:*`);
+    await redisDel(`projects:capacity:${organizationId}:*`);
+    console.log('💾 Cleared capacity-related caches for organization:', organizationId);
 
     return NextResponse.json({ resource: data });
   } catch (e) {

@@ -3,8 +3,8 @@ import { createClient } from '@/utils/supabase/server';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
 import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
 
-// Cache TTL: 15 days
-const CACHE_TTL = 1296000;
+// Cache TTL: 1 hour (task summaries change moderately)
+const CACHE_TTL = 3600; // 1 hour
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
