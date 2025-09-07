@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Filter, ChevronDown, Search, X } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -46,7 +46,7 @@ export default function ProjectsPage() {
     userOrganizations 
   } = useOrganizationStore();
   
-  const fetchProjects = async (isInitialLoad = false) => {
+  const fetchProjects = useCallback(async (isInitialLoad = false) => {
     if (!currentOrganization?.id) return;
     
     // Use different loading states based on operation type
@@ -89,7 +89,7 @@ export default function ProjectsPage() {
         setIsSearching(false);
       }
     }
-  };
+  }, [currentOrganization?.id, currentPage, itemsPerPage, searchTerm, statusFilter]);
 
   const fetchProjectsProgress = async (projectIds: string[]) => {
     if (projectIds.length === 0) return;
@@ -151,7 +151,7 @@ export default function ProjectsPage() {
       const isInitialLoad = currentPage === 1 && searchTerm === ''
       fetchProjects(isInitialLoad)
     }
-  }, [currentOrganization?.id, currentPage, statusFilter])
+  }, [currentOrganization?.id, currentPage, statusFilter, fetchProjects, searchTerm])
 
   // Optimized search with minimal delay
   useEffect(() => {
@@ -175,7 +175,7 @@ export default function ProjectsPage() {
     }, 100) // Reduced to 100ms for fast response
 
     return () => clearTimeout(timeoutId)
-  }, [searchTerm])
+  }, [searchTerm, currentPage, currentOrganization?.id, fetchProjects])
   
   const handleEdit = (project: Project) => {
     setSelectedProject(project);
@@ -334,6 +334,27 @@ export default function ProjectsPage() {
     if (budgetUtilization > timeProgress + 20) return { label: 'Behind', color: 'bg-yellow-100 text-yellow-800' };
     if (timeProgress > budgetUtilization + 20) return { label: 'Ahead', color: 'bg-green-100 text-green-800' };
     return { label: 'On Track', color: 'bg-blue-100 text-blue-800' };
+  };
+
+  // Helper functions for backend status display
+  const getBackendStatusLabel = (status: string) => {
+    switch (status) {
+      case 'active': return 'Active';
+      case 'on_hold': return 'On Hold';
+      case 'completed': return 'Completed';
+      case 'cancelled': return 'Cancelled';
+      default: return 'Active';
+    }
+  };
+
+  const getBackendStatusColor = (status: string) => {
+    switch (status) {
+      case 'active': return 'bg-green-100 text-green-800';
+      case 'on_hold': return 'bg-yellow-100 text-yellow-800';
+      case 'completed': return 'bg-blue-100 text-blue-800';
+      case 'cancelled': return 'bg-red-100 text-red-800';
+      default: return 'bg-green-100 text-green-800';
+    }
   };
   
   // Projects are already filtered by API, no need for client-side filtering
@@ -532,6 +553,12 @@ export default function ProjectsPage() {
                     scope="col"
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                   >
+                    Progress
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Actions
                   </th>
                 </tr>
@@ -541,19 +568,18 @@ export default function ProjectsPage() {
                   const timeProgress = calculateTimeProgress(project);
                   const budgetUtilization = getBudgetUtilization(project);
                   const remainingDays = getRemainingDays(project.end_date);
-                  const status = getProjectStatus(project);
                   const statusIcon = getStatusIcon(project.status);
                   
                   return (
                     <tr 
                       key={project.id}
-                      onClick={() => handleProjectDetails(project.id)}
+                      
                       className="hover:bg-gray-50 cursor-pointer"
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className={`h-3 w-3 rounded-full border-2 ${statusIcon} mr-3`}></div>
-                          <div>
+                          {/* <div className={`h-3 w-3 rounded-full border-2 ${statusIcon} mr-3`}></div> */}
+                          <div onClick={() => handleProjectDetails(project.id)}>
                             <div className="text-sm font-medium text-gray-900">{project.name}</div>
                             <div className="text-sm text-gray-500">{project.description}</div>
                             {project.code && (
@@ -611,12 +637,19 @@ export default function ProjectsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
-                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${status.color}`}
+                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getBackendStatusColor(project.status || 'active')}`}
                         >
-                          {status.label}
+                          {getBackendStatusLabel(project.status || 'active')}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getProjectStatus(project).color}`}
+                        >
+                          {getProjectStatus(project).label}
+                        </span>
+                      </td>
+                      <td className=" py-4 whitespace-nowrap text-center text-sm font-medium">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

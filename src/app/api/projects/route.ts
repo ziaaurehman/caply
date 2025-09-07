@@ -3,7 +3,7 @@ import { createClient } from '@/utils/supabase/server';
 import { getServerSession } from 'next-auth';
 import { authConfig } from '@/auth';
 import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
-import { redisGetJSON, redisSetJSON } from '@/utils/redis';
+import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
 
 // Cache TTL - 7 days for page 1 only (most frequently accessed)
 const PAGE_ONE_CACHE_TTL = 604800; // 7 days in seconds
@@ -734,12 +734,36 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    // Invalidate page 1 cache after updating project
+    // Clear individual project cache and refresh projects list cache
     try {
+      // Clear individual project cache for all access levels
+      const projectCacheKeys = [
+        `project:${projectId}:${organizationId}:all`, // Admin/Manager access
+        `project:${projectId}:${organizationId}:${userContext.userId}` // User-specific access
+      ]
+      
+      for (const key of projectCacheKeys) {
+        try {
+          await redisDel(key)
+          console.log('🗑️ Cleared project cache:', key)
+        } catch (cacheError) {
+          console.warn('Failed to clear project cache:', key, cacheError)
+        }
+      }
+
+      // Refresh projects list cache for all possible combinations
       const cacheKeysToInvalidate = [
         `projects:page1:${organizationId}:::all`, // Admin/Manager empty search, no status
-        // Note: For projects, we'll only refresh the admin cache for simplicity
-        // Individual user caches can be added if needed
+        `projects:page1:${organizationId}::active:all`, // Admin/Manager empty search, active status
+        `projects:page1:${organizationId}::on_hold:all`, // Admin/Manager empty search, on_hold status
+        `projects:page1:${organizationId}::completed:all`, // Admin/Manager empty search, completed status
+        `projects:page1:${organizationId}::cancelled:all`, // Admin/Manager empty search, cancelled status
+        // Add user-specific caches if needed
+        `projects:page1:${organizationId}:::${userContext.userId}`, // User empty search, no status
+        `projects:page1:${organizationId}::active:${userContext.userId}`, // User empty search, active status
+        `projects:page1:${organizationId}::on_hold:${userContext.userId}`, // User empty search, on_hold status
+        `projects:page1:${organizationId}::completed:${userContext.userId}`, // User empty search, completed status
+        `projects:page1:${organizationId}::cancelled:${userContext.userId}`, // User empty search, cancelled status
       ]
       
       for (const key of cacheKeysToInvalidate) {

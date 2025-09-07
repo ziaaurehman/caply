@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useForm } from 'react-hook-form';
-import { X, CalendarIcon, ChevronDown } from 'lucide-react';
+import { X, ChevronDown } from 'lucide-react';
 import { projectAPI, type Project, type CreateProjectData, type UpdateProjectData } from '@/utils/api';
 import { useOrganizationStore } from '@/lib/stores/organizationStore';
 import { toast } from 'sonner';
@@ -90,200 +90,244 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   if (!isOpen) return null;
   
   return (
-    <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 focus:outline-none"
-          aria-label="Close modal"
-        >
-          <X className="h-6 w-6" />
-        </button>
-        <h2 className="text-xl font-semibold text-gray-800 mb-6">
-          {project ? 'Edit Project' : 'Add Project'}
-        </h2>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[100vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">
+              {project ? 'Edit Project' : 'Add Project'}
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {project ? 'Update project details and settings' : 'Create a new project with all necessary information'}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Close modal"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
-        <form onSubmit={handleSubmit(onSubmit, (errors) => {
-          // Show validation errors in toast
-          const errorMessages = Object.values(errors).map(error => error?.message).filter(Boolean);
-          if (errorMessages.length > 0) {
-            toast.error('Please fix the following errors:', {
-              description: errorMessages.join(', '),
-              duration: 5000,
-            });
-          }
-        })} className="space-y-4">
-          <div>
-            <label htmlFor="projectName" className="block text-sm font-medium text-gray-700 mb-1">
-              Project Name
-            </label>
-            <input
-              type="text"
-              {...register('name', { required: 'Project name is required' })}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-            />
-            {errors.name && (
-              <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
-            )}
-          </div>
-          
-          <div>
-            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-              Description
-            </label>
-            <textarea
-              {...register('description')}
-              rows={3}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-            />
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
-                Start Date
-              </label>
-              <div className="relative">
+        {/* Content */}
+        <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+          <form id="project-form" onSubmit={handleSubmit(onSubmit, (errors) => {
+            // Show validation errors in toast
+            const errorMessages = Object.values(errors).map(error => error?.message).filter(Boolean);
+            if (errorMessages.length > 0) {
+              toast.error('Please fix the following errors:', {
+                description: errorMessages.join(', '),
+                duration: 5000,
+              });
+            }
+          })} className="space-y-6">
+            {/* Basic Information Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">Basic Information</h3>
+              
+              <div>
+                <label htmlFor="projectName" className="block text-sm font-medium text-gray-700 mb-2">
+                  Project Name <span className="text-red-500">*</span>
+                </label>
                 <input
-                  type="date"
-                  {...register('start_date', { required: 'Start date is required' })}
-                  className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-                  placeholder="mm/dd/yyyy"
+                  type="text"
+                  {...register('name', { required: 'Project name is required' })}
+                  className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                    errors.name ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="Enter project name"
                 />
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
-                  <CalendarIcon className="h-4 w-4" />
-                </div>
+                {errors.name && (
+                  <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>
+                )}
               </div>
-              {errors.start_date && (
-                <p className="mt-1 text-sm text-red-600">{errors.start_date.message}</p>
-              )}
-            </div>
-            
-            <div>
-              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
-                End Date
-              </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  {...register('end_date')}
-                  className="block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-                  placeholder="mm/dd/yyyy"
+              
+              <div>
+                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  {...register('description')}
+                  rows={3}
+                  className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors resize-none"
+                  placeholder="Enter project description"
                 />
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
-                  <CalendarIcon className="h-4 w-4" />
+              </div>
+            </div>
+          
+            {/* Timeline Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">Timeline</h3>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-2">
+                    Start Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    {...register('start_date', { required: 'Start date is required' })}
+                    className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                      errors.start_date ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                    }`}
+                  />
+                  {errors.start_date && (
+                    <p className="mt-1 text-sm text-red-600">{errors.start_date.message}</p>
+                  )}
+                </div>
+                
+                <div>
+                  <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-2">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    {...register('end_date')}
+                    className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors"
+                  />
                 </div>
               </div>
             </div>
-          </div>
 
-          <div>
-            <label htmlFor="projectType" className="block text-sm font-medium text-gray-700 mb-1">
-              Project Type
-            </label>
-            <div className="relative">
-              <select
-                {...register('project_type')}
-                className="block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md appearance-none"
-              >
-                <option value="time_materials">Time & Materials</option>
-                <option value="fixed_fee">Fixed Fee</option>
-                <option value="non_billable">Non-Billable</option>
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
-                <ChevronDown className="h-4 w-4" />
-              </div>
-            </div>
-          </div>
-
-          {project && (
-            <div>
-              <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-1">
-                Status
-              </label>
-              <div className="relative">
-                <select
-                  {...register('status')}
-                  className="block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-md appearance-none"
-                >
-                  <option value="active">Active</option>
-                  <option value="on_hold">On Hold</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-700">
-                  <ChevronDown className="h-4 w-4" />
+            {/* Project Type Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">Project Type</h3>
+              
+              <div>
+                <label htmlFor="projectType" className="block text-sm font-medium text-gray-700 mb-2">
+                  Type
+                </label>
+                <div className="relative">
+                  <select
+                    {...register('project_type')}
+                    className="block w-full pl-3 pr-10 py-2.5 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-lg appearance-none transition-colors"
+                  >
+                    <option value="time_materials">Time & Materials</option>
+                    <option value="fixed_fee">Fixed Fee</option>
+                    <option value="non_billable">Non-Billable</option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500">
+                    <ChevronDown className="h-4 w-4" />
+                  </div>
                 </div>
               </div>
             </div>
-          )}
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="budgetHours" className="block text-sm font-medium text-gray-700 mb-1">
-                Budget Hours
-              </label>
-              <input
-                type="number"
-                {...register('budget_hours', {
-                  min: { value: 0, message: 'Hours must be positive' },
-                })}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-              />
-              {errors.budget_hours && (
-                <p className="mt-1 text-sm text-red-600">{errors.budget_hours.message}</p>
-              )}
-            </div>
-            
-            <div>
-              <label htmlFor="budgetAmount" className="block text-sm font-medium text-gray-700 mb-1">
-                Budget Amount
-              </label>
-              <input
-                type="number"
-                {...register('budget_amount', {
-                  min: { value: 0, message: 'Amount must be positive' },
-                })}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-              />
-              {errors.budget_amount && (
-                <p className="mt-1 text-sm text-red-600">{errors.budget_amount.message}</p>
-              )}
-            </div>
-          </div>
-          
-          <div>
-            <label htmlFor="billingRate" className="block text-sm font-medium text-gray-700 mb-1">
-              Billing Rate ($/hour)
-            </label>
-            <input
-              type="number"
-              {...register('billing_rate', {
-                min: { value: 0, message: 'Rate must be positive' },
-              })}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-            />
-            {errors.billing_rate && (
-              <p className="mt-1 text-sm text-red-600">{errors.billing_rate.message}</p>
+
+            {/* Status Section (only for existing projects) */}
+            {project && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">Status</h3>
+                
+                <div>
+                  <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-2">
+                    Project Status
+                  </label>
+                  <div className="relative">
+                    <select
+                      {...register('status')}
+                      className="block w-full pl-3 pr-10 py-2.5 text-base border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm rounded-lg appearance-none transition-colors"
+                    >
+                      <option value="active">Active</option>
+                      <option value="on_hold">On Hold</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500">
+                      <ChevronDown className="h-4 w-4" />
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
-          </div>
+            
+            {/* Budget Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">Budget & Billing</h3>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="budgetHours" className="block text-sm font-medium text-gray-700 mb-2">
+                    Budget Hours
+                  </label>
+                  <input
+                    type="number"
+                    {...register('budget_hours', {
+                      min: { value: 0, message: 'Hours must be positive' },
+                    })}
+                    className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                      errors.budget_hours ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                    }`}
+                    placeholder="0"
+                  />
+                  {errors.budget_hours && (
+                    <p className="mt-1 text-sm text-red-600">{errors.budget_hours.message}</p>
+                  )}
+                </div>
+                
+                <div>
+                  <label htmlFor="budgetAmount" className="block text-sm font-medium text-gray-700 mb-2">
+                    Budget Amount ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    {...register('budget_amount', {
+                      min: { value: 0, message: 'Amount must be positive' },
+                    })}
+                    className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                      errors.budget_amount ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                    }`}
+                    placeholder="0.00"
+                  />
+                  {errors.budget_amount && (
+                    <p className="mt-1 text-sm text-red-600">{errors.budget_amount.message}</p>
+                  )}
+                </div>
+              </div>
+              
+              <div>
+                <label htmlFor="billingRate" className="block text-sm font-medium text-gray-700 mb-2">
+                  Billing Rate ($/hour)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  {...register('billing_rate', {
+                    min: { value: 0, message: 'Rate must be positive' },
+                  })}
+                  className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                    errors.billing_rate ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                  }`}
+                  placeholder="0.00"
+                />
+                {errors.billing_rate && (
+                  <p className="mt-1 text-sm text-red-600">{errors.billing_rate.message}</p>
+                )}
+              </div>
+            </div>
 
-          <div className="mt-6 flex justify-end space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200"
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-            >
-              {project ? 'Update Project' : 'Add Project'}
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-2 bg-gray-50 border-t border-gray-200">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit"
+            form="project-form"
+            className="px-6 py-2.5 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors"
+          >
+            {project ? 'Update Project' : 'Create Project'}
+          </button>
+        </div>
       </div>
     </div>
   );

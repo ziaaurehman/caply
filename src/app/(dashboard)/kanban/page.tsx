@@ -167,7 +167,7 @@ export default function Kanban() {
               No projects with Kanban enabled were found. Create a project with Kanban enabled to get started.
             </p>
             <a 
-              href="/dashboard/projects"
+              href="/projects"
               className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 inline-block"
             >
               Go to Projects

@@ -104,6 +104,63 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     { type: "color", value: "#1e293b", name: "Dark Gray" },
   ];
 
+  const loadBoardData = useCallback(async (boardId: string) => {
+    if (!currentOrganization?.id) return;
+    
+    try {
+      // Step 1: Load basic list structure (show lists immediately)
+      const listsResponse = await kanbanAPI.getLists(boardId, currentOrganization.id, showArchived);
+      const basicLists = listsResponse.lists.map(list => ({
+        ...list,
+        cards: [], // Initialize with empty cards array
+        isLoadingCards: true // Add loading state for cards
+      }));
+      
+      // Show lists immediately (even without cards)
+      setKanbanState(prev => ({
+        ...prev,
+        lists: basicLists
+      }));
+
+      // Step 2: Load cards for each list progressively (show cards as they load)
+      basicLists.forEach(async (list) => {
+        try {
+          const cardsResponse = await kanbanAPI.getCardsByList(list.id, currentOrganization.id, searchTerm, showArchived);
+          
+          // Update this specific list with its cards immediately when they load
+          setKanbanState(prev => ({
+            ...prev,
+            lists: prev.lists.map(prevList => 
+              prevList.id === list.id 
+                ? { ...prevList, cards: cardsResponse.cards, isLoadingCards: false }
+                : prevList
+            )
+          }));
+          
+        } catch (error) {
+          console.error(`Error loading cards for list ${list.id}:`, error);
+          
+          // Mark this list as failed to load cards
+          setKanbanState(prev => ({
+            ...prev,
+            lists: prev.lists.map(prevList => 
+              prevList.id === list.id 
+                ? { ...prevList, cards: [], isLoadingCards: false }
+                : prevList
+            )
+          }));
+        }
+      });
+
+    } catch (error) {
+      console.error("Error loading board data:", error);
+      setKanbanState(prev => ({
+        ...prev,
+        error: error instanceof Error ? error.message : "Failed to load board data"
+      }));
+    }
+  }, [currentOrganization?.id, showArchived, searchTerm]);
+
   // Initialize data
   const initializeKanbanData = useCallback(async () => {
     if (!currentOrganization?.id) return;
@@ -183,7 +240,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         error: error instanceof Error ? error.message : "Failed to load Kanban board"
       }));
     }
-  }, [projectId, currentOrganization?.id]);
+  }, [projectId, currentOrganization?.id, loadBoardData]);
 
   // Initialize organization store if needed
   useEffect(() => {
@@ -217,64 +274,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     if (kanbanState.currentBoard) {
       loadBoardData(kanbanState.currentBoard.id);
     }
-  }, [showArchived]);
-
-  const loadBoardData = async (boardId: string) => {
-    if (!currentOrganization?.id) return;
-    
-    try {
-      // Step 1: Load basic list structure (show lists immediately)
-      const listsResponse = await kanbanAPI.getLists(boardId, currentOrganization.id, showArchived);
-      const basicLists = listsResponse.lists.map(list => ({
-        ...list,
-        cards: [], // Initialize with empty cards array
-        isLoadingCards: true // Add loading state for cards
-      }));
-      
-      // Show lists immediately (even without cards)
-      setKanbanState(prev => ({
-        ...prev,
-        lists: basicLists
-      }));
-
-      // Step 2: Load cards for each list progressively (show cards as they load)
-      basicLists.forEach(async (list) => {
-        try {
-          const cardsResponse = await kanbanAPI.getCardsByList(list.id, currentOrganization.id, searchTerm, showArchived);
-          
-          // Update this specific list with its cards immediately when they load
-          setKanbanState(prev => ({
-            ...prev,
-            lists: prev.lists.map(prevList => 
-              prevList.id === list.id 
-                ? { ...prevList, cards: cardsResponse.cards, isLoadingCards: false }
-                : prevList
-            )
-          }));
-          
-        } catch (error) {
-          console.error(`Error loading cards for list ${list.id}:`, error);
-          
-          // Mark this list as failed to load cards
-          setKanbanState(prev => ({
-            ...prev,
-            lists: prev.lists.map(prevList => 
-              prevList.id === list.id 
-                ? { ...prevList, cards: [], isLoadingCards: false }
-                : prevList
-            )
-          }));
-        }
-      });
-
-    } catch (error) {
-      console.error("Error loading board data:", error);
-      setKanbanState(prev => ({
-        ...prev,
-        error: error instanceof Error ? error.message : "Failed to load board data"
-      }));
-    }
-  };
+  }, [showArchived, kanbanState.currentBoard, loadBoardData]);
 
   // Drag and Drop handlers
   const handleDragStart = useCallback((e: React.DragEvent, card: Card) => {
@@ -382,15 +382,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       setTimeout(async () => {
         try {
           console.log('Making API call to update card...');
-        await kanbanAPI.updateCard(cardId, { list_id: targetListId, organizationId: currentOrganization.id });
-        
-          // API call successful - refresh data to ensure consistency
-        if (kanbanState.currentBoard) {
-          await loadBoardData(kanbanState.currentBoard.id);
-        }
-          console.log('API call successful');
-      } catch (error) {
-        console.error("Error moving card:", error);
+          await kanbanAPI.updateCard(cardId, { list_id: targetListId, organizationId: currentOrganization.id });
+          console.log('API call successful - card moved');
+          // No need to refetch data since optimistic update already handled the UI
+        } catch (error) {
+          console.error("Error moving card:", error);
           
           // ROLLBACK: Revert the optimistic update on failure
           console.log('Rolling back to original state');
@@ -411,7 +407,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       sourceListId: null,
       targetListId: null
     });
-  }, [kanbanState.currentBoard, kanbanState.lists, currentOrganization?.id]);
+  }, [kanbanState.lists, currentOrganization?.id, dragState.sourceListId]);
 
   // Board management
   const updateBoardBackground = async (backgroundType: 'image' | 'color', value: string) => {
@@ -567,7 +563,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         dragOverListId: null
       });
     }
-  }, [kanbanState.lists, kanbanState.currentBoard, currentOrganization?.id]);
+  }, [kanbanState.lists, kanbanState.currentBoard, currentOrganization?.id, loadBoardData]);
 
   const handleListArchive = useCallback(async (listId: string, isArchived: boolean) => {
     if (!currentOrganization?.id) return;
@@ -591,12 +587,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         organizationId: currentOrganization.id
       });
 
-      // Refresh board data to get updated cards status
-      if (kanbanState.currentBoard) {
-        await loadBoardData(kanbanState.currentBoard.id);
-      }
-
       toast.success(`List ${isArchived ? 'archived' : 'unarchived'} successfully!`);
+      
+      // No need to refetch data since optimistic update already handled the UI
     } catch (error) {
       console.error("Error archiving/unarchiving list:", error);
       toast.error(`Failed to ${isArchived ? 'archive' : 'unarchive'} list`);
@@ -611,7 +604,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         )
       }));
     }
-  }, [currentOrganization?.id, kanbanState.currentBoard]);
+  }, [currentOrganization?.id]);
 
   // List management
   const handleAddList = async () => {
@@ -621,16 +614,22 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     if (!listName) return;
 
     try {
-      await kanbanAPI.createList({
+      const response = await kanbanAPI.createList({
         board_id: kanbanState.currentBoard.id,
         name: listName,
         organizationId: currentOrganization.id
       });
       
-      // Refresh board data
-      await loadBoardData(kanbanState.currentBoard.id);
+      // Add the new list optimistically instead of refetching all data
+      setKanbanState(prev => ({
+        ...prev,
+        lists: [...prev.lists, { ...response.list, cards: [] }]
+      }));
+      
+      toast.success('List created successfully!');
     } catch (error) {
       console.error("Error creating list:", error);
+      toast.error('Failed to create list');
     }
   };
 
@@ -660,14 +659,21 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         }
       }
       
-      // Refresh board data
-      if (kanbanState.currentBoard) {
-        await loadBoardData(kanbanState.currentBoard.id);
-      }
+      // Add the new card to the specific list optimistically instead of refetching all data
+      setKanbanState(prev => ({
+        ...prev,
+        lists: prev.lists.map(list => 
+          list.id === listId 
+            ? { ...list, cards: [...(list.cards || []), newCard.card] }
+            : list
+        )
+      }));
       
       setIsAddTaskModalOpen(false);
+      toast.success('Card created successfully!');
     } catch (error) {
       console.error("Error creating card:", error);
+      toast.error('Failed to create card');
     }
   };
 
@@ -1000,10 +1006,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               return;
             }
             
-            // Refresh board data to ensure consistency for other updates
-            if (kanbanState.currentBoard) {
-              loadBoardData(kanbanState.currentBoard.id);
-            }
+            // No need to refetch data since we already updated the card in state above
+            // This prevents unnecessary loading skeletons from appearing
           }}
         />
       )}

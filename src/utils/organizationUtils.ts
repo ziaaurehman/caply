@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis'
 
-// Cache TTL in seconds (5 minutes)
+// Cache TTL in seconds (1 week)
 const CACHE_TTL = 604800;
 
 interface Permission {
