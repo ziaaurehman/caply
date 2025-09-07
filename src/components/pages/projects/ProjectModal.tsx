@@ -1,6 +1,6 @@
 "use client"
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { X, ChevronDown } from 'lucide-react';
 import { projectAPI, type Project, type CreateProjectData, type UpdateProjectData } from '@/utils/api';
@@ -31,6 +31,14 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   project,
 }) => {
   const { currentOrganization } = useOrganizationStore();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset loading state when modal closes
+  React.useEffect(() => {
+    if (!isOpen) {
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
   
   const { register, handleSubmit, formState: { errors }, reset } = useForm<FormData>({
     defaultValues: project ? {
@@ -65,6 +73,8 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       return;
     }
     
+    setIsSubmitting(true);
+    
     try {
       if (project) {
         await projectAPI.updateProject(project.id, { ...data, organizationId: currentOrganization.id });
@@ -84,6 +94,8 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
         description: error.message || 'An error occurred while saving the project.',
         duration: 5000,
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
   
@@ -104,7 +116,8 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            disabled={isSubmitting}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
             aria-label="Close modal"
           >
             <X className="h-5 w-5" />
@@ -316,16 +329,24 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200 transition-colors"
+            disabled={isSubmitting}
+            className="px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
           >
             Cancel
           </button>
           <button 
             type="submit"
             form="project-form"
-            className="px-6 py-2.5 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors"
+            disabled={isSubmitting}
+            className="px-6 py-2.5 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-orange-600 flex items-center gap-2"
           >
-            {project ? 'Update Project' : 'Create Project'}
+            {isSubmitting && (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+            )}
+            {isSubmitting 
+              ? (project ? 'Updating...' : 'Creating...') 
+              : (project ? 'Update Project' : 'Create Project')
+            }
           </button>
         </div>
       </div>
