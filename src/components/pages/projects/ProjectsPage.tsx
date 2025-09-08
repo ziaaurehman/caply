@@ -1,20 +1,28 @@
-"use client"
+"use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Filter, ChevronDown, Search, X } from 'lucide-react';
-import Link from 'next/link';
-import { toast } from 'sonner';
-import { projectAPI, type Project } from '@/utils/api';
-import { formatCurrency, cn } from '@/lib/utils';
-import { useConfirmation } from '@/lib/hooks/useConfirmation';
-import { createDeleteConfirmation } from '@/utils/confirmations';
-import ConfirmationModal from '@/components/ui/ConfirmationModal';
-import ProjectModal from './ProjectModal';
-import ProjectDetailsDialog from './ProjectDetailsDialog';
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Filter,
+  ChevronDown,
+  Search,
+  X,
+} from "lucide-react";
+import Link from "next/link";
+import { toast } from "sonner";
+import { projectAPI, type Project } from "@/utils/api";
+import { formatCurrency, cn } from "@/lib/utils";
+import { useConfirmation } from "@/lib/hooks/useConfirmation";
+import { createDeleteConfirmation } from "@/utils/confirmations";
+import ConfirmationModal from "@/components/ui/ConfirmationModal";
+import ProjectModal from "./ProjectModal";
+import ProjectDetailsDialog from "./ProjectDetailsDialog";
 import ProjectsSkeleton from "./ProjectsSkeleton";
-import { useOrganizationStore } from '@/lib/stores/organizationStore';
-import { Input } from '@/components/ui/Input';
-import Pagination from '@/components/ui/Pagination';
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { Input } from "@/components/ui/Input";
+import Pagination from "@/components/ui/Pagination";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -23,85 +31,99 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
   const [progressLoading, setProgressLoading] = useState(false);
-  
+
   // Project details dialog state
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null
+  );
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [itemsPerPage] = useState(10);
-  const [searchTerm, setSearchTerm] = useState('');
-  
-  const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation();
-  const { 
-    currentOrganization, 
-    loading: organizationLoading, 
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const { confirmation, confirm, handleConfirm, handleClose } =
+    useConfirmation();
+  const {
+    currentOrganization,
+    loading: organizationLoading,
     fetchUserOrganizations,
-    userOrganizations 
+    userOrganizations,
   } = useOrganizationStore();
-  
-  const fetchProjects = useCallback(async (isInitialLoad = false) => {
-    if (!currentOrganization?.id) return;
-    
-    // Use different loading states based on operation type
-    if (isInitialLoad) {
-      setLoading(true);
-    } else {
-      setIsSearching(true);
-    }
-    
-    setError(null);
-    try {
-      const data = await projectAPI.getProjects(currentOrganization.id, {
-        page: currentPage,
-        limit: itemsPerPage,
-        search: searchTerm,
-        status: statusFilter !== 'all' ? statusFilter : undefined
-      });
-      
-      setProjects(data.projects || []);
-      
-      // Update pagination metadata
-      if (data.pagination) {
-        setTotalPages(data.pagination.totalPages);
-        setTotalItems(data.pagination.total);
+
+  const fetchProjects = useCallback(
+    async (isInitialLoad = false) => {
+      if (!currentOrganization?.id) return;
+
+      // Use different loading states based on operation type
+      if (isInitialLoad) {
+        setLoading(true);
+      } else {
+        setIsSearching(true);
       }
 
-      // Fetch progress data after projects are loaded
-      if (data.projects && data.projects.length > 0) {
-        fetchProjectsProgress(data.projects.map(p => p.id));
+      setError(null);
+      try {
+        const data = await projectAPI.getProjects(currentOrganization.id, {
+          page: currentPage,
+          limit: itemsPerPage,
+          search: searchTerm,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+        });
+
+        setProjects(data.projects || []);
+
+        // Update pagination metadata
+        if (data.pagination) {
+          setTotalPages(data.pagination.totalPages);
+          setTotalItems(data.pagination.total);
+        }
+
+        // Fetch progress data after projects are loaded
+        if (data.projects && data.projects.length > 0) {
+          fetchProjectsProgress(data.projects.map((p) => p.id));
+        }
+      } catch (err: any) {
+        console.error("Error fetching projects:", err);
+        const errorMessage = err.message || "Failed to load projects";
+        setError(errorMessage);
+        toast.error(errorMessage);
+      } finally {
+        if (isInitialLoad) {
+          setLoading(false);
+        } else {
+          setIsSearching(false);
+        }
       }
-    } catch (err: any) {
-      console.error('Error fetching projects:', err);
-      const errorMessage = err.message || 'Failed to load projects';
-      setError(errorMessage);
-      toast.error(errorMessage);
-    } finally {
-      if (isInitialLoad) {
-        setLoading(false);
-      } else {
-        setIsSearching(false);
-      }
-    }
-  }, [currentOrganization?.id, currentPage, itemsPerPage, searchTerm, statusFilter]);
+    },
+    [
+      currentOrganization?.id,
+      currentPage,
+      itemsPerPage,
+      searchTerm,
+      statusFilter,
+    ]
+  );
 
   const fetchProjectsProgress = async (projectIds: string[]) => {
     if (projectIds.length === 0) return;
-    
+
     setProgressLoading(true);
     try {
       const progressData = await projectAPI.getProjectsProgress(projectIds);
-      
+
       // Update projects with progress data
-      setProjects(prevProjects => 
-        prevProjects.map(project => {
-          const progressInfo = progressData.progress.find(p => p.projectId === project.id);
+      setProjects((prevProjects) =>
+        prevProjects.map((project) => {
+          const progressInfo = progressData.progress.find(
+            (p) => p.projectId === project.id
+          );
           if (progressInfo) {
             return {
               ...project,
@@ -110,15 +132,15 @@ export default function ProjectsPage() {
                 totalCards: progressInfo.totalCards,
                 completedCards: progressInfo.completedCards,
                 inProgressCards: progressInfo.inProgressCards,
-                todoCards: progressInfo.todoCards
-              }
+                todoCards: progressInfo.todoCards,
+              },
             };
           }
           return project;
         })
       );
     } catch (err: any) {
-      console.error('Error fetching project progress:', err);
+      console.error("Error fetching project progress:", err);
       // Don't show error toast for progress loading failures
     } finally {
       setProgressLoading(false);
@@ -135,78 +157,89 @@ export default function ProjectsPage() {
   // Handle clicking outside the status dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      const dropdown = document.getElementById('status-dropdown')
+      const dropdown = document.getElementById("status-dropdown");
       if (dropdown && !dropdown.contains(event.target as Node)) {
-        setIsStatusDropdownOpen(false)
+        setIsStatusDropdownOpen(false);
       }
-    }
+    };
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   useEffect(() => {
     if (currentOrganization?.id) {
       // Initial load or pagination change
-      const isInitialLoad = currentPage === 1 && searchTerm === ''
-      fetchProjects(isInitialLoad)
+      const isInitialLoad = currentPage === 1 && searchTerm === "";
+      fetchProjects(isInitialLoad);
     }
-  }, [currentOrganization?.id, currentPage, statusFilter, fetchProjects, searchTerm])
+  }, [
+    currentOrganization?.id,
+    currentPage,
+    statusFilter,
+    fetchProjects,
+    searchTerm,
+  ]);
 
   // Optimized search with minimal delay
   useEffect(() => {
     // For empty search, load immediately
-    if (searchTerm === '') {
+    if (searchTerm === "") {
       if (currentPage !== 1) {
-        setCurrentPage(1)
+        setCurrentPage(1);
       } else if (currentOrganization?.id) {
-        fetchProjects(false) // Not initial load
+        fetchProjects(false); // Not initial load
       }
-      return
+      return;
     }
 
     // For search terms, use minimal debounce
     const timeoutId = setTimeout(() => {
       if (currentPage !== 1) {
-        setCurrentPage(1) // Reset to first page on search
+        setCurrentPage(1); // Reset to first page on search
       } else if (currentOrganization?.id) {
-        fetchProjects(false) // Not initial load
+        fetchProjects(false); // Not initial load
       }
-    }, 100) // Reduced to 100ms for fast response
+    }, 100); // Reduced to 100ms for fast response
 
-    return () => clearTimeout(timeoutId)
-  }, [searchTerm, currentPage, currentOrganization?.id, fetchProjects])
-  
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, currentPage, currentOrganization?.id, fetchProjects]);
+
   const handleEdit = (project: Project) => {
     setSelectedProject(project);
     setIsModalOpen(true);
   };
-  
+
+  const handleProjectUpdated = useCallback(() => {
+    fetchProjects(false);
+  }, [fetchProjects]);
+
   const handleDelete = async (id: string) => {
     if (!currentOrganization?.id) return;
-    
-    const project = projects.find(p => p.id === id);
-    const projectName = project?.name || 'this project';
-    
+
+    const project = projects.find((p) => p.id === id);
+    const projectName = project?.name || "this project";
+
     const confirmation = createDeleteConfirmation({
       itemName: projectName,
-      itemType: 'Project',
-      additionalMessage: 'will remove all associated tasks, time entries, and other data',
+      itemType: "Project",
+      additionalMessage:
+        "will remove all associated tasks, time entries, and other data",
       onDelete: async () => {
         try {
           await projectAPI.deleteProject(id, currentOrganization.id);
           toast.success(`Project "${projectName}" deleted successfully`);
           await fetchProjects(false);
         } catch (err: any) {
-          console.error('Error deleting project:', err);
-          toast.error(err.message || 'Failed to delete project');
+          console.error("Error deleting project:", err);
+          toast.error(err.message || "Failed to delete project");
         }
-      }
+      },
     });
-    
+
     confirm(confirmation.action, confirmation);
   };
-  
+
   const handleAddNew = () => {
     setSelectedProject(null);
     setIsModalOpen(true);
@@ -224,16 +257,16 @@ export default function ProjectsPage() {
 
   // Status filter options
   const statusOptions = [
-    { value: 'all', label: 'All Status' },
-    { value: 'active', label: 'Active' },
-    { value: 'on_hold', label: 'On Hold' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'cancelled', label: 'Cancelled' }
+    { value: "all", label: "All Status" },
+    { value: "active", label: "Active" },
+    { value: "on_hold", label: "On Hold" },
+    { value: "completed", label: "Completed" },
+    { value: "cancelled", label: "Cancelled" },
   ];
 
   const getStatusLabel = (status: string) => {
-    const option = statusOptions.find(opt => opt.value === status);
-    return option ? option.label : 'All Status';
+    const option = statusOptions.find((opt) => opt.value === status);
+    return option ? option.label : "All Status";
   };
 
   const handleStatusFilter = (status: string) => {
@@ -241,43 +274,45 @@ export default function ProjectsPage() {
     setIsStatusDropdownOpen(false);
     setCurrentPage(1); // Reset to first page when filtering
   };
-  
+
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'active':
-        return 'border-blue-500';
-      case 'on_hold':
-        return 'border-yellow-500';
-      case 'completed':
-        return 'border-green-500';
-      case 'cancelled':
-        return 'border-gray-500';
+      case "active":
+        return "border-blue-500";
+      case "on_hold":
+        return "border-yellow-500";
+      case "completed":
+        return "border-green-500";
+      case "cancelled":
+        return "border-gray-500";
       default:
-        return 'border-gray-500';
+        return "border-gray-500";
     }
   };
-  
+
   const calculateTimeProgress = (project: Project) => {
     if (!project.start_date || !project.end_date) return 0;
-    
+
     const start = new Date(project.start_date);
     const end = new Date(project.end_date);
     const today = new Date();
-    
+
     const total = end.getTime() - start.getTime();
     const elapsed = today.getTime() - start.getTime();
-    
+
     return Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)));
   };
-  
+
   const getRemainingDays = (endDate: string | undefined) => {
     if (!endDate) return 0;
     const end = new Date(endDate);
     const today = new Date();
-    const days = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const days = Math.ceil(
+      (end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
     return days;
   };
-  
+
   const getBudgetUtilization = (project: Project) => {
     // Since we don't have actual spending data, we'll simulate it based on time progress
     const timeProgress = calculateTimeProgress(project);
@@ -286,79 +321,101 @@ export default function ProjectsPage() {
   };
 
   const getProjectBudget = (project: Project) => {
-    if (project.project_type === 'fixed_fee' && project.budget_amount) {
+    if (project.project_type === "fixed_fee" && project.budget_amount) {
       // For fixed fee projects, use the budget_amount directly
       const budgetUtilization = getBudgetUtilization(project);
-      const spent = Math.round((budgetUtilization / 100) * project.budget_amount);
+      const spent = Math.round(
+        (budgetUtilization / 100) * project.budget_amount
+      );
       return {
-        type: 'fixed_fee',
+        type: "fixed_fee",
         total: project.budget_amount,
         spent: spent,
-        remaining: project.budget_amount - spent
+        remaining: project.budget_amount - spent,
       };
-    } else if (project.project_type === 'time_materials' && project.budget_hours && project.billing_rate) {
+    } else if (
+      project.project_type === "time_materials" &&
+      project.budget_hours &&
+      project.billing_rate
+    ) {
       // For time & materials projects, calculate based on hours * rate
       const totalBudget = project.budget_hours * project.billing_rate;
       const budgetUtilization = getBudgetUtilization(project);
       const spent = Math.round((budgetUtilization / 100) * totalBudget);
       return {
-        type: 'time_materials',
+        type: "time_materials",
         total: totalBudget,
         spent: spent,
-        remaining: totalBudget - spent
+        remaining: totalBudget - spent,
       };
-    } else if (project.project_type === 'time_materials' && project.billing_rate) {
+    } else if (
+      project.project_type === "time_materials" &&
+      project.billing_rate
+    ) {
       // If only billing rate is set, calculate based on time progress
       const estimatedHours = project.budget_hours || 40; // Default to 40 hours if not set
       const totalBudget = estimatedHours * project.billing_rate;
       const budgetUtilization = getBudgetUtilization(project);
       const spent = Math.round((budgetUtilization / 100) * totalBudget);
       return {
-        type: 'time_materials',
+        type: "time_materials",
         total: totalBudget,
         spent: spent,
-        remaining: totalBudget - spent
+        remaining: totalBudget - spent,
       };
-    } else if (project.project_type === 'non_billable') {
+    } else if (project.project_type === "non_billable") {
       // For non-billable projects, show no budget
       return null;
     }
     return null;
   };
-  
+
   const getProjectStatus = (project: Project) => {
     const timeProgress = calculateTimeProgress(project);
     const budgetUtilization = getBudgetUtilization(project);
-    
-    if (budgetUtilization > 90) return { label: 'Behind', color: 'bg-yellow-100 text-yellow-800' };
-    if (budgetUtilization > timeProgress + 20) return { label: 'Behind', color: 'bg-yellow-100 text-yellow-800' };
-    if (timeProgress > budgetUtilization + 20) return { label: 'Ahead', color: 'bg-green-100 text-green-800' };
-    return { label: 'On Track', color: 'bg-blue-100 text-blue-800' };
+
+    if (budgetUtilization > 90)
+      return { label: "Behind", color: "bg-yellow-100 text-yellow-800" };
+    if (budgetUtilization > timeProgress + 20)
+      return { label: "Behind", color: "bg-yellow-100 text-yellow-800" };
+    if (timeProgress > budgetUtilization + 20)
+      return { label: "Ahead", color: "bg-green-100 text-green-800" };
+    return { label: "On Track", color: "bg-blue-100 text-blue-800" };
   };
 
   // Helper functions for backend status display
   const getBackendStatusLabel = (status: string) => {
     switch (status) {
-      case 'active': return 'Active';
-      case 'on_hold': return 'On Hold';
-      case 'completed': return 'Completed';
-      case 'cancelled': return 'Cancelled';
-      default: return 'Active';
+      case "active":
+        return "Active";
+      case "on_hold":
+        return "On Hold";
+      case "completed":
+        return "Completed";
+      case "cancelled":
+        return "Cancelled";
+      default:
+        return "Active";
     }
   };
 
   const getBackendStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return 'bg-green-100 text-green-800';
-      case 'on_hold': return 'bg-yellow-100 text-yellow-800';
-      case 'completed': return 'bg-blue-100 text-blue-800';
-      case 'cancelled': return 'bg-red-100 text-red-800';
-      default: return 'bg-green-100 text-green-800';
+      case "active":
+        return "bg-green-100 text-green-800";
+      case "on_hold":
+        return "bg-yellow-100 text-yellow-800";
+      case "completed":
+        return "bg-blue-100 text-blue-800";
+      case "cancelled":
+        return "bg-red-100 text-red-800";
+      default:
+        return "bg-green-100 text-green-800";
     }
   };
-  
+
   // Projects are already filtered by API, no need for client-side filtering
-  
+
   if (error) {
     return (
       <div className="p-8">
@@ -368,7 +425,9 @@ export default function ProjectsPage() {
               <Plus className="w-4 h-4 text-red-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-red-900">Error Loading Projects</h3>
+              <h3 className="text-lg font-semibold text-red-900">
+                Error Loading Projects
+              </h3>
               <p className="text-red-700">{error}</p>
             </div>
           </div>
@@ -394,9 +453,12 @@ export default function ProjectsPage() {
         {/* Title */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900">Projects</h1>
-          <p className="text-gray-600 mt-2">Manage your projects and track their progress for {currentOrganization?.name}</p>
+          <p className="text-gray-600 mt-2">
+            Manage your projects and track their progress for{" "}
+            {currentOrganization?.name}
+          </p>
         </div>
-        
+
         {/* Search, Filter and Create Button Row */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4 flex-1">
@@ -431,8 +493,8 @@ export default function ProjectsPage() {
                       onClick={() => handleStatusFilter(option.value)}
                       className={`${
                         statusFilter === option.value
-                          ? 'bg-orange-50 text-orange-900'
-                          : 'text-gray-900'
+                          ? "bg-orange-50 text-orange-900"
+                          : "text-gray-900"
                       } group relative cursor-pointer select-none py-2 pl-3 pr-9 hover:bg-orange-50 hover:text-orange-900 w-full text-left`}
                     >
                       <span className="block truncate font-normal">
@@ -440,8 +502,16 @@ export default function ProjectsPage() {
                       </span>
                       {statusFilter === option.value && (
                         <span className="absolute inset-y-0 right-0 flex items-center pr-4 text-orange-600">
-                          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          <svg
+                            className="h-5 w-5"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                              clipRule="evenodd"
+                            />
                           </svg>
                         </span>
                       )}
@@ -451,13 +521,13 @@ export default function ProjectsPage() {
               )}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
-            {(searchTerm || statusFilter !== 'all') && (
+            {(searchTerm || statusFilter !== "all") && (
               <button
                 onClick={() => {
-                  setSearchTerm('')
-                  setStatusFilter('all')
+                  setSearchTerm("");
+                  setStatusFilter("all");
                 }}
                 className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
@@ -474,47 +544,55 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-        <div className="bg-white rounded-lg shadow-md p-6">
-          {isSearching ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
-              <span className="ml-2 text-gray-600">
-                {searchTerm ? 'Searching projects...' : 'Loading projects...'}
-              </span>
-            </div>
-          ) : projects.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                {searchTerm ? (
-                  <Search className="h-6 w-6 text-gray-400" />
-                ) : (
-                  <Plus className="h-6 w-6 text-gray-400" />
-                )}
-              </div>
+      <div className="bg-white rounded-lg shadow-md p-6">
+        {isSearching ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+            <span className="ml-2 text-gray-600">
+              {searchTerm ? "Searching projects..." : "Loading projects..."}
+            </span>
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
               {searchTerm ? (
-                <>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No results found</h3>
-                  <p className="text-gray-500 mb-4">No projects match your search criteria for "{searchTerm}".</p>
-                  <button
-                    onClick={() => setSearchTerm('')}
-                    className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-                  >
-                    Clear Search
-                  </button>
-                </>
+                <Search className="h-6 w-6 text-gray-400" />
               ) : (
-                <>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No projects yet</h3>
-                  <p className="text-gray-500 mb-4">Get started by creating your first project.</p>
-                  <Link href="/projects/new">
-                    <button className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600">
-                      Create Your First Project
-                    </button>
-                  </Link>
-                </>
+                <Plus className="h-6 w-6 text-gray-400" />
               )}
             </div>
-          ) : (
+            {searchTerm ? (
+              <>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No results found
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  No projects match your search criteria for "{searchTerm}".
+                </p>
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                >
+                  Clear Search
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No projects yet
+                </h3>
+                <p className="text-gray-500 mb-4">
+                  Get started by creating your first project.
+                </p>
+                <Link href="/projects/new">
+                  <button className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600">
+                    Create Your First Project
+                  </button>
+                </Link>
+              </>
+            )}
+          </div>
+        ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -564,82 +642,91 @@ export default function ProjectsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {projects.map(project => {
+                {projects.map((project) => {
                   const timeProgress = calculateTimeProgress(project);
                   const budgetUtilization = getBudgetUtilization(project);
                   const remainingDays = getRemainingDays(project.end_date);
                   const statusIcon = getStatusIcon(project.status);
-                  
+
                   return (
-                    <tr 
+                    <tr
                       key={project.id}
-                      
                       className="hover:bg-gray-50 cursor-pointer"
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           {/* <div className={`h-3 w-3 rounded-full border-2 ${statusIcon} mr-3`}></div> */}
                           <div onClick={() => handleProjectDetails(project.id)}>
-                            <div className="text-sm font-medium text-gray-900">{project.name}</div>
-                            <div className="text-sm text-gray-500">{project.description}</div>
+                            <div className="text-sm font-medium text-gray-900">
+                              {project.name}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {project.description}
+                            </div>
                             {project.code && (
-                              <div className="text-xs text-gray-400">{project.code}</div>
+                              <div className="text-xs text-gray-400">
+                                {project.code}
+                              </div>
                             )}
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-    
-                          <div className="flex items-center">
-                            <div className="w-24 bg-gray-200 rounded-full h-2.5 mr-2">
-                              <div
-                                className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
-                                style={{ width: `${project.progress || 0}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-sm text-gray-900">{project.progress || 0}%</span>
-                         
-                            
+                        <div className="flex items-center">
+                          <div className="w-24 bg-gray-200 rounded-full h-2.5 mr-2">
+                            <div
+                              className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
+                              style={{ width: `${project.progress || 0}%` }}
+                            ></div>
                           </div>
-                                              </td>
+                          <span className="text-sm text-gray-900">
+                            {project.progress || 0}%
+                          </span>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                         {(() => {
-                           const budget = getProjectBudget(project);
-                           if (!budget) {
-                             return (
-                               <div className="text-sm text-gray-900">
-                                 No budget set
-                               </div>
-                             );
-                           }
-                           
-                           return (
-                             <>
-                               <div className="text-sm text-gray-900">
-                                 ${budget.spent.toLocaleString()} / ${budget.total.toLocaleString()}
-                               </div>
-                               <div className="text-sm text-green-600">
-                                 +${budget.remaining.toLocaleString()}
-                               </div>
-                             </>
-                           );
-                         })()}
-                       </td>
+                        {(() => {
+                          const budget = getProjectBudget(project);
+                          if (!budget) {
+                            return (
+                              <div className="text-sm text-gray-900">
+                                No budget set
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <>
+                              <div className="text-sm text-gray-900">
+                                ${budget.spent.toLocaleString()} / $
+                                {budget.total.toLocaleString()}
+                              </div>
+                              <div className="text-sm text-green-600">
+                                +${budget.remaining.toLocaleString()}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
-                          {remainingDays > 0 ? `${remainingDays} days left` : 
-                           remainingDays === 0 ? 'Due today' : 
-                           `${Math.abs(remainingDays)} days overdue`}
+                          {remainingDays > 0
+                            ? `${remainingDays} days left`
+                            : remainingDays === 0
+                              ? "Due today"
+                              : `${Math.abs(remainingDays)} days overdue`}
                         </div>
                         <div className="text-sm text-gray-500">
-                          {project.end_date ? new Date(project.end_date).toLocaleDateString() : 'No end date'}
+                          {project.end_date
+                            ? new Date(project.end_date).toLocaleDateString()
+                            : "No end date"}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
-                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getBackendStatusColor(project.status || 'active')}`}
+                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getBackendStatusColor(project.status || "active")}`}
                         >
-                          {getBackendStatusLabel(project.status || 'active')}
+                          {getBackendStatusLabel(project.status || "active")}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -659,7 +746,7 @@ export default function ProjectsPage() {
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
-                        <button 
+                        <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDelete(project.id);
@@ -675,30 +762,31 @@ export default function ProjectsPage() {
               </tbody>
             </table>
           </div>
-          )}
-          
-          {/* Pagination */}
-          {!isSearching && projects.length > 0 && totalPages > 1 && (
-            <div className="mt-6">
-              <Pagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                totalItems={totalItems}
-                itemsPerPage={itemsPerPage}
-                onPageChange={setCurrentPage}
-              />
-            </div>
-          )}
-        </div>
-      
+        )}
+
+        {/* Pagination */}
+        {!isSearching && projects.length > 0 && totalPages > 1 && (
+          <div className="mt-6">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalItems}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+            />
+          </div>
+        )}
+      </div>
+
       {isModalOpen && (
         <ProjectModal
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           project={selectedProject}
+          onProjectUpdated={handleProjectUpdated}
         />
       )}
-      
+
       <ConfirmationModal
         isOpen={confirmation.isOpen}
         onClose={handleClose}

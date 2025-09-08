@@ -15,9 +15,6 @@
     "redis:cli": "docker exec -it caply-redis redis-cli"
   },
   "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@dnd-kit/sortable": "^8.0.0",
-    "@dnd-kit/utilities": "^3.2.2",
     "@next-auth/supabase-adapter": "^0.2.1",
     "@sendgrid/mail": "^8.1.5",
     "@stripe/stripe-js": "^7.4.0",
