@@ -972,6 +972,84 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     }
   };
 
+  useEffect(() => {
+    const handleGlobalDragEnd = (e: DragEvent) => {
+      console.log("Global drag end detected");
+
+      // Reset card drag state
+      setDragState({
+        isDragging: false,
+        draggedCard: null,
+        sourceListId: null,
+        targetListId: null,
+      });
+
+      // Reset list drag state
+      setListDragState({
+        isDragging: false,
+        draggedListId: null,
+        dragOverListId: null,
+      });
+    };
+
+    const handleGlobalDragOver = (e: DragEvent) => {
+      // Allow drop anywhere to prevent default browser behavior
+      e.preventDefault();
+    };
+
+    const handleGlobalDrop = (e: DragEvent) => {
+      console.log("Global drop detected - resetting all drag states");
+
+      // Reset all drag states when dropping outside valid drop zones
+      setDragState({
+        isDragging: false,
+        draggedCard: null,
+        sourceListId: null,
+        targetListId: null,
+      });
+
+      setListDragState({
+        isDragging: false,
+        draggedListId: null,
+        dragOverListId: null,
+      });
+    };
+
+    const handleEscapeKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        console.log("Escape key pressed - resetting all drag states");
+
+        // Reset all drag states
+        setDragState({
+          isDragging: false,
+          draggedCard: null,
+          sourceListId: null,
+          targetListId: null,
+        });
+
+        setListDragState({
+          isDragging: false,
+          draggedListId: null,
+          dragOverListId: null,
+        });
+      }
+    };
+
+    // Add global event listeners
+    document.addEventListener("dragend", handleGlobalDragEnd);
+    document.addEventListener("dragover", handleGlobalDragOver);
+    document.addEventListener("drop", handleGlobalDrop);
+    document.addEventListener("keydown", handleEscapeKey);
+
+    return () => {
+      // Cleanup event listeners
+      document.removeEventListener("dragend", handleGlobalDragEnd);
+      document.removeEventListener("dragover", handleGlobalDragOver);
+      document.removeEventListener("drop", handleGlobalDrop);
+      document.removeEventListener("keydown", handleEscapeKey);
+    };
+  }, []);
+
   // Card management
   const handleAddCard = (listId: string) => {
     setSelectedListId(listId);
