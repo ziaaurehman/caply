@@ -1,94 +1,112 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/utils/supabase/server'
-import { getServerSession } from 'next-auth'
-import { authConfig } from '@/auth'
-import { validateOrganizationAccess, validateOrganizationAccessWithId } from '@/utils/organizationUtils'
-import { redisGetJSON, redisSetJSON } from '@/utils/redis'
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
+import {
+  validateOrganizationAccess,
+  validateOrganizationAccessWithId,
+} from "@/utils/organizationUtils";
+import { redisGetJSON, redisSetJSON } from "@/utils/redis";
 
 // Cache TTL - 7 days for page 1 only (most frequently accessed)
-const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
+const PAGE_ONE_CACHE_TTL = 604800; // 7 days in seconds
 
 // GET /api/roles - Get organization-specific roles with pagination
 export async function GET(request: NextRequest) {
   try {
     // Get organization ID from headers or use session-based validation
-    const headerOrgId = request.headers.get('x-organization-id')
-    const url = new URL(request.url)
-    
+    const headerOrgId = request.headers.get("x-organization-id");
+    const url = new URL(request.url);
+
     // Get pagination parameters
-    const page = parseInt(url.searchParams.get('page') || '1')
-    const limit = parseInt(url.searchParams.get('limit') || '10')
-    const search = url.searchParams.get('search') || ''
-    
+    const page = parseInt(url.searchParams.get("page") || "1");
+    const limit = parseInt(url.searchParams.get("limit") || "10");
+    const search = url.searchParams.get("search") || "";
+
     let validation;
     if (headerOrgId) {
       // Use header-based validation if organization ID is provided
-      validation = await validateOrganizationAccessWithId(
-        headerOrgId,
-        { resource: 'roles', action: 'read' }
-      )
+      validation = await validateOrganizationAccessWithId(headerOrgId, {
+        resource: "roles",
+        action: "read",
+      });
     } else {
       // Fallback to session-based validation
-      validation = await validateOrganizationAccess(
-        { resource: 'roles', action: 'read' }
-      )
+      validation = await validateOrganizationAccess({
+        resource: "roles",
+        action: "read",
+      });
     }
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status })
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
-    const organizationId = validation.context!.organizationId
+    const organizationId = validation.context!.organizationId;
 
-    console.log('User organization:', organizationId)
+    console.log("User organization:", organizationId);
 
     // Only cache page 1 with 10 items for 7 days (most frequently accessed)
-    const shouldCache = page === 1 && limit === 10
-    const cacheKey = shouldCache ? `roles:page1:${organizationId}:${search}` : null
-    
+    const shouldCache = page === 1 && limit === 10;
+    const cacheKey = shouldCache
+      ? `roles:page1:${organizationId}:${search}`
+      : null;
+
     // Try to get cached result first (only for page 1)
     if (shouldCache && cacheKey) {
       try {
-        const cached = await redisGetJSON<any>(cacheKey)
+        const cached = await redisGetJSON<any>(cacheKey);
         if (cached) {
-          console.log('📋 Returning cached roles page 1 result')
-          return NextResponse.json(cached)
+          console.log("📋 Returning cached roles page 1 result");
+          return NextResponse.json(cached);
         }
       } catch (cacheError) {
-        console.log('⚠️ Cache read failed, proceeding with database query:', cacheError)
+        console.log(
+          "⚠️ Cache read failed, proceeding with database query:",
+          cacheError
+        );
       }
     }
 
     // Calculate offset for pagination
-    const offset = (page - 1) * limit
+    const offset = (page - 1) * limit;
 
-    const supabase = await createClient()
-    
+    const supabase = await createClient();
+
     // First, get total count for pagination
     let countQuery = supabase
-      .from('roles')
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', organizationId)
-      .eq('is_system_role', false)
+      .from("roles")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("is_system_role", false);
 
     // Add search filter to count query if search term provided
     if (search) {
-      countQuery = countQuery.or(`name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`)
+      countQuery = countQuery.or(
+        `name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`
+      );
     }
 
-    const { count: totalCount, error: countError } = await countQuery
+    const { count: totalCount, error: countError } = await countQuery;
 
     if (countError) {
-      console.error('Error counting roles:', countError)
-      return NextResponse.json({ error: 'Failed to count roles' }, { status: 500 })
+      console.error("Error counting roles:", countError);
+      return NextResponse.json(
+        { error: "Failed to count roles" },
+        { status: 500 }
+      );
     }
 
     // Build main query for data
     let query = supabase
-      .from('roles')
-      .select(`
+      .from("roles")
+      .select(
+        `
         id,
         name,
         display_name,
@@ -107,43 +125,55 @@ export async function GET(request: NextRequest) {
             action
           )
         )
-      `)
-      .eq('organization_id', organizationId)
-      .eq('is_system_role', false)
+      `
+      )
+      .eq("organization_id", organizationId)
+      .eq("is_system_role", false);
 
     // Add search filter if search term provided
     if (search) {
-      query = query.or(`name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`)
+      query = query.or(
+        `name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`
+      );
     }
 
     // Add pagination and ordering
     const { data: roles, error } = await query
-      .order('name')
-      .range(offset, offset + limit - 1)
+      .order("name")
+      .range(offset, offset + limit - 1);
 
     if (error) {
-      console.error('Error fetching roles:', error)
-      return NextResponse.json({ error: 'Failed to fetch roles' }, { status: 500 })
+      console.error("Error fetching roles:", error);
+      return NextResponse.json(
+        { error: "Failed to fetch roles" },
+        { status: 500 }
+      );
     }
 
-    console.log(`Found ${roles?.length || 0} roles for organization ${organizationId}`)
+    console.log(
+      `Found ${roles?.length || 0} roles for organization ${organizationId}`
+    );
 
     // Transform the data to flatten permissions
-    const transformedRoles = roles?.map((role: any) => ({
-      id: role.id,
-      name: role.name,
-      display_name: role.display_name,
-      description: role.description,
-      is_system_role: role.is_system_role,
-      organization_id: role.organization_id,
-      created_at: role.created_at,
-      updated_at: role.updated_at,
-      permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
-    })) || []
+    const transformedRoles =
+      roles?.map((role: any) => ({
+        id: role.id,
+        name: role.name,
+        display_name: role.display_name,
+        description: role.description,
+        is_system_role: role.is_system_role,
+        organization_id: role.organization_id,
+        created_at: role.created_at,
+        updated_at: role.updated_at,
+        permissions:
+          role.role_permissions
+            ?.map((rp: any) => rp.permissions)
+            .filter(Boolean) || [],
+      })) || [];
 
-    const totalPages = Math.ceil((totalCount || 0) / limit)
+    const totalPages = Math.ceil((totalCount || 0) / limit);
 
-    const result = { 
+    const result = {
       roles: transformedRoles,
       organization_id: organizationId,
       pagination: {
@@ -152,128 +182,161 @@ export async function GET(request: NextRequest) {
         total: totalCount || 0,
         totalPages,
         hasNext: page < totalPages,
-        hasPrev: page > 1
-      }
-    }
+        hasPrev: page > 1,
+      },
+    };
 
     // Cache the result for future requests (only page 1 for 7 days)
     if (shouldCache && cacheKey) {
       try {
-        await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL)
-        console.log('💾 Cached roles page 1 result for 7 days')
+        await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL);
+        console.log("💾 Cached roles page 1 result for 7 days");
       } catch (cacheError) {
-        console.log('⚠️ Failed to cache result:', cacheError)
+        console.log("⚠️ Failed to cache result:", cacheError);
       }
     }
 
-    return NextResponse.json(result)
-
+    return NextResponse.json(result);
   } catch (error) {
-    console.error('Error in roles API:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error in roles API:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
 // POST /api/roles - Create a new organization-specific role
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { name, display_name, description, permission_ids, organizationId } = body
+    const body = await request.json();
+    const { name, display_name, description, permission_ids, organizationId } =
+      body;
 
     // Get organization ID from body, headers, or use session-based validation
-    const headerOrgId = request.headers.get('x-organization-id')
-    const orgId = organizationId || headerOrgId
-    
+    const headerOrgId = request.headers.get("x-organization-id");
+    const orgId = organizationId || headerOrgId;
+
     let validation;
     if (orgId) {
       // Use header/body-based validation if organization ID is provided
-      validation = await validateOrganizationAccessWithId(
-        orgId,
-        { resource: 'roles', action: 'create' }
-      )
+      validation = await validateOrganizationAccessWithId(orgId, {
+        resource: "roles",
+        action: "create",
+      });
     } else {
       // Fallback to session-based validation
-      validation = await validateOrganizationAccess(
-        { resource: 'roles', action: 'create' }
-      )
+      validation = await validateOrganizationAccess({
+        resource: "roles",
+        action: "create",
+      });
     }
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status })
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
-    const supabase = await createClient()
-    const finalOrganizationId = validation.context!.organizationId
-    const userId = validation.context!.userId
+    const supabase = await createClient();
+    const finalOrganizationId = validation.context!.organizationId;
+    const userId = validation.context!.userId;
 
-    console.log('Creating role with data:', { name, display_name, description, permission_ids, organizationId: finalOrganizationId })
+    console.log("Creating role with data:", {
+      name,
+      display_name,
+      description,
+      permission_ids,
+      organizationId: finalOrganizationId,
+    });
 
-    if (!name || !display_name || !permission_ids || !Array.isArray(permission_ids)) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: name, display_name, permission_ids' 
-      }, { status: 400 })
+    if (
+      !name ||
+      !display_name ||
+      !permission_ids ||
+      !Array.isArray(permission_ids)
+    ) {
+      return NextResponse.json(
+        {
+          error: "Missing required fields: name, display_name, permission_ids",
+        },
+        { status: 400 }
+      );
     }
 
     // Check if role name already exists in this organization
     const { data: existingRole, error: checkError } = await supabase
-      .from('roles')
-      .select('id')
-      .eq('name', name)
-      .eq('organization_id', finalOrganizationId)
-      .single()
+      .from("roles")
+      .select("id")
+      .eq("name", name)
+      .eq("organization_id", finalOrganizationId)
+      .single();
 
-    if (checkError && checkError.code !== 'PGRST116') {
-      console.error('Error checking existing role:', checkError)
-      return NextResponse.json({ error: 'Failed to validate role name' }, { status: 500 })
+    if (checkError && checkError.code !== "PGRST116") {
+      console.error("Error checking existing role:", checkError);
+      return NextResponse.json(
+        { error: "Failed to validate role name" },
+        { status: 500 }
+      );
     }
 
     if (existingRole) {
-      return NextResponse.json({ 
-        error: 'Role name already exists in this organization' 
-      }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: "Role name already exists in this organization",
+        },
+        { status: 400 }
+      );
     }
 
     // Create the role
     const { data: newRole, error: roleError } = await supabase
-      .from('roles')
+      .from("roles")
       .insert({
         name: name,
         display_name: display_name,
         description: description || null,
         organization_id: finalOrganizationId,
-        is_system_role: false
+        is_system_role: false,
       })
       .select()
-      .single()
+      .single();
 
     if (roleError) {
-      console.error('Error creating role:', roleError)
-      return NextResponse.json({ error: 'Failed to create role' }, { status: 500 })
+      console.error("Error creating role:", roleError);
+      return NextResponse.json(
+        { error: "Failed to create role" },
+        { status: 500 }
+      );
     }
 
-    console.log('Role created:', newRole)
+    console.log("Role created:", newRole);
 
     // Create role-permission relationships
     if (permission_ids.length > 0) {
       const rolePermissions = permission_ids.map((permissionId: string) => ({
         role_id: newRole.id,
-        permission_id: permissionId
-      }))
+        permission_id: permissionId,
+      }));
 
       const { error: permissionsError } = await supabase
-        .from('role_permissions')
-        .insert(rolePermissions)
+        .from("role_permissions")
+        .insert(rolePermissions);
 
       if (permissionsError) {
-        console.error('Error creating role permissions:', permissionsError)
+        console.error("Error creating role permissions:", permissionsError);
         // Try to clean up the created role
-        await supabase.from('roles').delete().eq('id', newRole.id)
-        return NextResponse.json({ error: 'Failed to assign permissions to role' }, { status: 500 })
+        await supabase.from("roles").delete().eq("id", newRole.id);
+        return NextResponse.json(
+          { error: "Failed to assign permissions to role" },
+          { status: 500 }
+        );
       }
 
-      console.log('Role permissions created:', rolePermissions.length)
+      console.log("Role permissions created:", rolePermissions.length);
     }
 
     // Invalidate page 1 cache after creating new role
@@ -284,14 +347,15 @@ export async function POST(request: NextRequest) {
         `roles:page1:${finalOrganizationId}:`, // Empty search
         // Note: We could implement a more sophisticated cache invalidation strategy
         // but for now, we'll clear the main page 1 cache
-      ]
-      
+      ];
+
       for (const key of cacheKeysToInvalidate) {
         try {
           // Instead of deleting, we'll refresh with new data
           const { data: roles } = await supabase
-            .from('roles')
-            .select(`
+            .from("roles")
+            .select(
+              `
               id,
               name,
               display_name,
@@ -310,11 +374,12 @@ export async function POST(request: NextRequest) {
                   action
                 )
               )
-            `)
-            .eq('organization_id', finalOrganizationId)
-            .eq('is_system_role', false)
-            .order('name')
-            .range(0, 9) // First 10 items for page 1
+            `
+            )
+            .eq("organization_id", finalOrganizationId)
+            .eq("is_system_role", false)
+            .order("name")
+            .range(0, 9); // First 10 items for page 1
 
           const transformedRoles = (roles || []).map((role: any) => ({
             id: role.id,
@@ -325,17 +390,20 @@ export async function POST(request: NextRequest) {
             organization_id: role.organization_id,
             created_at: role.created_at,
             updated_at: role.updated_at,
-            permissions: role.role_permissions?.map((rp: any) => rp.permissions).filter(Boolean) || []
-          }))
+            permissions:
+              role.role_permissions
+                ?.map((rp: any) => rp.permissions)
+                .filter(Boolean) || [],
+          }));
 
           // Get total count for pagination
           const { count: totalCount } = await supabase
-            .from('roles')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', finalOrganizationId)
-            .eq('is_system_role', false)
+            .from("roles")
+            .select("id", { count: "exact", head: true })
+            .eq("organization_id", finalOrganizationId)
+            .eq("is_system_role", false);
 
-          const totalPages = Math.ceil((totalCount || 0) / 10)
+          const totalPages = Math.ceil((totalCount || 0) / 10);
 
           const refreshedResult = {
             roles: transformedRoles,
@@ -346,27 +414,33 @@ export async function POST(request: NextRequest) {
               total: totalCount || 0,
               totalPages,
               hasNext: 1 < totalPages,
-              hasPrev: false
-            }
-          }
+              hasPrev: false,
+            },
+          };
 
-          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
-          console.log('🔄 Refreshed page 1 cache after role creation')
+          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
+          console.log("🔄 Refreshed page 1 cache after role creation");
         } catch (cacheError) {
-          console.warn('Failed to refresh specific cache key:', key, cacheError)
+          console.warn(
+            "Failed to refresh specific cache key:",
+            key,
+            cacheError
+          );
         }
       }
     } catch (e) {
-      console.warn('Failed to refresh roles page 1 cache after create:', e)
+      console.warn("Failed to refresh roles page 1 cache after create:", e);
     }
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       role: newRole,
-      message: 'Role created successfully' 
-    })
-
+      message: "Role created successfully",
+    });
   } catch (error) {
-    console.error('Error in POST roles API:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error in POST roles API:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
-} 
+}
