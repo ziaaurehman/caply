@@ -96,6 +96,35 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const [isListReordering, setIsListReordering] = useState(false);
   const loadingRequestsRef = useRef<Set<string>>(new Set());
 
+  // List Drag & Drop State
+  const [listDragState, setListDragState] = useState<{
+    isDragging: boolean;
+    draggedListId: string | null;
+    dragOverListId: string | null;
+  }>({
+    isDragging: false,
+    draggedListId: null,
+    dragOverListId: null,
+  });
+
+  const [cardDragState, setCardDragState] = useState<{
+    isDragging: boolean;
+    draggedCardId: string | null;
+    dragOverCardId: string | null;
+    sourceListId: string | null;
+  }>({
+    isDragging: false,
+    draggedCardId: null,
+    dragOverCardId: null,
+    sourceListId: null,
+  });
+
+  const dragStateRef = useRef(listDragState);
+  const dragTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const cardReorderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const cardReorderAbortControllerRef = useRef<AbortController | null>(null);
+  const [isCardReordering, setIsCardReordering] = useState(false);
+
   // Background options
   const backgroundImages: BackgroundOption[] = [
     {
@@ -375,19 +404,20 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         }
       }
 
-      console.log(
-        "Drag start - Card:",
-        card.title,
-        "Source List ID:",
-        sourceListId
-      );
-
       setDragState({
         isDragging: true,
         draggedCard: card,
         sourceListId: sourceListId,
         targetListId: null,
       });
+
+      setCardDragState({
+        isDragging: true,
+        draggedCardId: card.id,
+        dragOverCardId: null,
+        sourceListId: sourceListId,
+      });
+
       e.dataTransfer.setData("cardId", card.id);
       e.dataTransfer.setData("sourceListId", sourceListId || "");
       e.dataTransfer.setData("dragType", "card");
@@ -397,6 +427,21 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+  }, []);
+
+  // Add card drag leave handler
+  const handleCardDragLeave = useCallback((e: React.DragEvent) => {
+    // Only reset if we're leaving the card area completely
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setCardDragState((prev) => ({
+        ...prev,
+        dragOverCardId: null,
+      }));
+    }
   }, []);
 
   const handleDrop = useCallback(
@@ -507,11 +552,19 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         }, 0);
       }
 
+      // Reset all drag states
       setDragState({
         isDragging: false,
         draggedCard: null,
         sourceListId: null,
         targetListId: null,
+      });
+
+      setCardDragState({
+        isDragging: false,
+        draggedCardId: null,
+        dragOverCardId: null,
+        sourceListId: null,
       });
     },
     [kanbanState.lists, currentOrganization?.id, dragState.sourceListId]
@@ -551,20 +604,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       console.error("Error updating board background:", error);
     }
   };
-
-  // List Drag & Drop State
-  const [listDragState, setListDragState] = useState<{
-    isDragging: boolean;
-    draggedListId: string | null;
-    dragOverListId: string | null;
-  }>({
-    isDragging: false,
-    draggedListId: null,
-    dragOverListId: null,
-  });
-
-  const dragStateRef = useRef(listDragState);
-  const dragTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     dragStateRef.current = listDragState;
@@ -608,21 +647,187 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     [listDragState.isDragging, listDragState.draggedListId]
   );
 
-  const handleEmptySpaceDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
+  const handleCardDrop = useCallback(
+    async (e: React.DragEvent, targetCard: Card) => {
+      e.preventDefault();
 
-    const dragType = e.dataTransfer.getData("dragType");
-    console.log("Drop on empty space detected", { dragType });
+      const dragType = e.dataTransfer.getData("dragType");
+      const draggedCardId = e.dataTransfer.getData("cardId");
+      const sourceListId =
+        e.dataTransfer.getData("sourceListId") || cardDragState.sourceListId;
 
-    if (dragType === "list") {
-      console.log("List dropped on empty space - resetting drag state");
-      setListDragState({
+      // Only handle card drops
+      if (dragType !== "card" || !draggedCardId || !sourceListId) {
+        setCardDragState({
+          isDragging: false,
+          draggedCardId: null,
+          dragOverCardId: null,
+          sourceListId: null,
+        });
+        return;
+      }
+
+      // Find the target list
+      const targetList = kanbanState.lists.find((list) =>
+        list.cards?.some((card) => card.id === targetCard.id)
+      );
+
+      if (!targetList) {
+        console.warn("Target list not found");
+        setCardDragState({
+          isDragging: false,
+          draggedCardId: null,
+          dragOverCardId: null,
+          sourceListId: null,
+        });
+        return;
+      }
+
+      // If it's the same list, handle reordering
+      if (sourceListId === targetList.id && draggedCardId !== targetCard.id) {
+        if (!currentOrganization?.id) {
+          setCardDragState({
+            isDragging: false,
+            draggedCardId: null,
+            dragOverCardId: null,
+            sourceListId: null,
+          });
+          return;
+        }
+
+        // Store original state for potential rollback
+        const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
+
+        try {
+          console.log(
+            `Reordering card ${draggedCardId} to position of ${targetCard.id}`
+          );
+
+          // Find current positions
+          const cards = targetList.cards || [];
+          const draggedCard = cards.find((c) => c.id === draggedCardId);
+          const targetCardIndex = cards.findIndex(
+            (c) => c.id === targetCard.id
+          );
+
+          if (!draggedCard || targetCardIndex === -1) {
+            console.warn("Card not found for reordering");
+            setCardDragState({
+              isDragging: false,
+              draggedCardId: null,
+              dragOverCardId: null,
+              sourceListId: null,
+            });
+            return;
+          }
+
+          // Create new card order with optimistic update
+          const newCards = [...cards];
+          const draggedIndex = newCards.findIndex(
+            (c) => c.id === draggedCardId
+          );
+
+          // Remove dragged card and insert at target position
+          const [removed] = newCards.splice(draggedIndex, 1);
+          newCards.splice(targetCardIndex, 0, removed);
+
+          // Update positions
+          const updatedCards = newCards.map((card, index) => ({
+            ...card,
+            position: index,
+          }));
+
+          // OPTIMISTIC UPDATE: Immediately update the UI
+          setKanbanState((prev) => ({
+            ...prev,
+            lists: prev.lists.map((list) =>
+              list.id === targetList.id
+                ? { ...list, cards: updatedCards }
+                : list
+            ),
+          }));
+
+          // Set reordering state
+          setIsCardReordering(true);
+
+          // Prepare API payload
+          const cardPositions = updatedCards.map((card) => ({
+            card_id: card.id,
+            position: card.position,
+          }));
+
+          // Create new abort controller for this request
+          cardReorderAbortControllerRef.current = new AbortController();
+
+          // Debounced API call with cancellation support
+          cardReorderTimeoutRef.current = setTimeout(async () => {
+            try {
+              console.log("Making debounced API call to reorder cards...");
+
+              // Check if request was cancelled
+              if (cardReorderAbortControllerRef.current?.signal.aborted) {
+                console.log("Card reorder request was cancelled");
+                return;
+              }
+
+              await kanbanAPI.reorderCards(
+                targetList.id,
+                cardPositions,
+                currentOrganization.id
+              );
+
+              console.log("Card reorder API call successful");
+              toast.success("Cards reordered successfully!");
+            } catch (error: any) {
+              // Don't show error if request was cancelled
+              if (error.name === "AbortError") {
+                console.log("Card reorder request was cancelled");
+                return;
+              }
+
+              console.error("Error reordering cards:", error);
+              toast.error("Failed to reorder cards");
+
+              // ROLLBACK: Revert the optimistic update on failure
+              console.log("Rolling back card reorder to original state");
+              setKanbanState((prev) => ({
+                ...prev,
+                lists: originalLists,
+              }));
+            } finally {
+              setIsCardReordering(false);
+              cardReorderAbortControllerRef.current = null;
+            }
+          }, 300); // 300ms debounce delay
+        } catch (error) {
+          console.error("Error in card reorder logic:", error);
+          toast.error("Failed to reorder cards");
+
+          // ROLLBACK: Revert the optimistic update on failure
+          setKanbanState((prev) => ({
+            ...prev,
+            lists: originalLists,
+          }));
+
+          setIsCardReordering(false);
+        }
+      }
+
+      // Reset card drag state
+      setCardDragState({
         isDragging: false,
-        draggedListId: null,
-        dragOverListId: null,
+        draggedCardId: null,
+        dragOverCardId: null,
+        sourceListId: null,
       });
-    }
-  }, []);
+    },
+    [
+      kanbanState.lists,
+      currentOrganization?.id,
+      cardDragState.sourceListId,
+      isCardReordering,
+    ]
+  );
 
   const handleListDragOver = useCallback(
     (e: React.DragEvent, targetListId: string) => {
@@ -990,6 +1195,14 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         draggedListId: null,
         dragOverListId: null,
       });
+
+      // Reset card drag state
+      setCardDragState({
+        isDragging: false,
+        draggedCardId: null,
+        dragOverCardId: null,
+        sourceListId: null,
+      });
     };
 
     const handleGlobalDragOver = (e: DragEvent) => {
@@ -1013,6 +1226,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         draggedListId: null,
         dragOverListId: null,
       });
+
+      setCardDragState({
+        isDragging: false,
+        draggedCardId: null,
+        dragOverCardId: null,
+        sourceListId: null,
+      });
     };
 
     const handleEscapeKey = (e: KeyboardEvent) => {
@@ -1032,6 +1252,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           draggedListId: null,
           dragOverListId: null,
         });
+
+        setCardDragState({
+          isDragging: false,
+          draggedCardId: null,
+          dragOverCardId: null,
+          sourceListId: null,
+        });
       }
     };
 
@@ -1047,6 +1274,17 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       document.removeEventListener("dragover", handleGlobalDragOver);
       document.removeEventListener("drop", handleGlobalDrop);
       document.removeEventListener("keydown", handleEscapeKey);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (cardReorderTimeoutRef.current) {
+        clearTimeout(cardReorderTimeoutRef.current);
+      }
+      if (cardReorderAbortControllerRef.current) {
+        cardReorderAbortControllerRef.current.abort();
+      }
     };
   }, []);
 
@@ -1190,6 +1428,23 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       mode: "view",
     });
   };
+
+  // Add card drag over handler
+  const handleCardDragOver = useCallback(
+    (e: React.DragEvent, targetCard: Card) => {
+      e.preventDefault();
+
+      const dragType = e.dataTransfer.getData("dragType");
+      if (dragType === "card") {
+        e.dataTransfer.dropEffect = "move";
+        setCardDragState((prev) => ({
+          ...prev,
+          dragOverCardId: targetCard.id,
+        }));
+      }
+    },
+    []
+  );
 
   // Filter cards based on current filters
   const getFilteredCards = (cards: Card[]): Card[] => {
@@ -1497,8 +1752,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   onListDragLeave={handleListDragLeave}
                   onListDrop={handleListDrop}
                   onListArchive={handleListArchive}
+                  onCardDragOver={handleCardDragOver}
+                  onCardDragLeave={handleCardDragLeave}
+                  onCardDrop={handleCardDrop}
                   isDraggedOver={listDragState.dragOverListId === list.id}
                   isBeingDragged={listDragState.draggedListId === list.id}
+                  draggedCardId={cardDragState.draggedCardId}
+                  dragOverCardId={cardDragState.dragOverCardId}
                 />
               </div>
             ))}

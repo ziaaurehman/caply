@@ -27,8 +27,13 @@ interface KanbanColumnProps {
   onListDrop?: (e: React.DragEvent, listId: string) => void;
   onListArchive?: (listId: string, isArchived: boolean) => void;
   onListDragEnd?: () => void;
+  onCardDragOver?: (e: React.DragEvent, card: Card) => void;
+  onCardDragLeave?: (e: React.DragEvent) => void;
+  onCardDrop?: (e: React.DragEvent, targetCard: Card) => void;
   isDraggedOver?: boolean;
   isBeingDragged?: boolean;
+  draggedCardId?: string | null;
+  dragOverCardId?: string | null;
 }
 
 export default function KanbanColumn({
@@ -47,8 +52,13 @@ export default function KanbanColumn({
   onListDrop,
   onListArchive,
   onListDragEnd,
+  onCardDragOver,
+  onCardDragLeave,
+  onCardDrop,
   isDraggedOver = false,
   isBeingDragged = false,
+  draggedCardId = null,
+  dragOverCardId = null,
 }: KanbanColumnProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [isListDragging, setIsListDragging] = useState(false);
@@ -197,6 +207,11 @@ export default function KanbanColumn({
               projectMembers={projectMembers}
               onDragStart={onDragStart}
               onClick={onCardClick}
+              onCardDragOver={onCardDragOver}
+              onCardDragLeave={onCardDragLeave}
+              onCardDrop={onCardDrop}
+              isDraggedOver={dragOverCardId === card.id}
+              isBeingDragged={draggedCardId === card.id}
             />
           ))
         )}

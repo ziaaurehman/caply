@@ -1,73 +1,140 @@
-"use client"
+"use client";
 
-import { Calendar, MessageCircle, Paperclip, CheckSquare, User, Tag, Clock, FileText, Loader2 } from "lucide-react"
-import { Card, ProjectMember } from "./types"
+import {
+  Calendar,
+  MessageCircle,
+  Paperclip,
+  CheckSquare,
+  User,
+  Tag,
+  Clock,
+  FileText,
+  Loader2,
+} from "lucide-react";
+import { Card, ProjectMember } from "./types";
 
 interface KanbanCardProps {
-  card: Card
-  projectMembers: ProjectMember[]
-  onDragStart: (e: React.DragEvent, card: Card) => void
-  onClick: (card: Card) => void
+  card: Card;
+  projectMembers: ProjectMember[];
+  onDragStart: (e: React.DragEvent, card: Card) => void;
+  onClick: (card: Card) => void;
+  onCardDragOver?: (e: React.DragEvent, card: Card) => void;
+  onCardDragLeave?: (e: React.DragEvent) => void;
+  onCardDrop?: (e: React.DragEvent, targetCard: Card) => void;
+  isDraggedOver?: boolean;
+  isBeingDragged?: boolean;
 }
 
-export default function KanbanCard({ card, projectMembers, onDragStart, onClick }: KanbanCardProps) {
+export default function KanbanCard({
+  card,
+  projectMembers,
+  onDragStart,
+  onClick,
+  onCardDragOver,
+  onCardDragLeave,
+  onCardDrop,
+  isDraggedOver = false,
+  isBeingDragged = false,
+}: KanbanCardProps) {
   // Get assigned members
-  const assignedMembers = card.card_members?.map(cm => 
-    projectMembers.find(pm => pm.id === cm.project_member_id)
-  ).filter(Boolean) || []
+  const assignedMembers =
+    card.card_members
+      ?.map((cm) => projectMembers.find((pm) => pm.id === cm.project_member_id))
+      .filter(Boolean) || [];
 
   // Check for content indicators
-  const hasComments = card.comments && card.comments.length > 0
-  const hasAttachments = card.attachments && card.attachments.length > 0
-  const hasChecklists = card.checklists && card.checklists.length > 0
-  const hasDescription = card.description && card.description.trim().length > 0
-  const hasDueDate = card.due_date
+  const hasComments = card.comments && card.comments.length > 0;
+  const hasAttachments = card.attachments && card.attachments.length > 0;
+  const hasChecklists = card.checklists && card.checklists.length > 0;
+  const hasDescription = card.description && card.description.trim().length > 0;
+  const hasDueDate = card.due_date;
 
   // Calculate checklist progress
-  const totalChecklistItems = card.checklists?.reduce((total, checklist) => 
-    total + (checklist.checklist_items?.length || 0), 0) || 0
-  const completedChecklistItems = card.checklists?.reduce((total, checklist) => 
-    total + (checklist.checklist_items?.filter(item => item.is_completed).length || 0), 0) || 0
+  const totalChecklistItems =
+    card.checklists?.reduce(
+      (total, checklist) => total + (checklist.checklist_items?.length || 0),
+      0
+    ) || 0;
+  const completedChecklistItems =
+    card.checklists?.reduce(
+      (total, checklist) =>
+        total +
+        (checklist.checklist_items?.filter((item) => item.is_completed)
+          .length || 0),
+      0
+    ) || 0;
 
   // Format due date in Trello style
   const formatDueDate = (dueDate: string) => {
-    const date = new Date(dueDate)
-    const today = new Date()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    
-    const isOverdue = date < today
-    const isDueToday = date.toDateString() === today.toDateString()
-    const isDueTomorrow = date.toDateString() === tomorrow.toDateString()
-    
-    if (isOverdue) return { text: 'Overdue', color: 'bg-red-100 text-red-700', textColor: 'text-red-700' }
-    if (isDueToday) return { text: 'Due today', color: 'bg-red-100 text-red-700', textColor: 'text-red-700' }
-    if (isDueTomorrow) return { text: 'Due tomorrow', color: 'bg-yellow-100 text-yellow-700', textColor: 'text-yellow-700' }
-    
-    return { 
-      text: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      color: 'bg-gray-100 text-gray-700',
-      textColor: 'text-gray-700'
-    }
-  }
+    const date = new Date(dueDate);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const isOverdue = date < today;
+    const isDueToday = date.toDateString() === today.toDateString();
+    const isDueTomorrow = date.toDateString() === tomorrow.toDateString();
+
+    if (isOverdue)
+      return {
+        text: "Overdue",
+        color: "bg-red-100 text-red-700",
+        textColor: "text-red-700",
+      };
+    if (isDueToday)
+      return {
+        text: "Due today",
+        color: "bg-red-100 text-red-700",
+        textColor: "text-red-700",
+      };
+    if (isDueTomorrow)
+      return {
+        text: "Due tomorrow",
+        color: "bg-yellow-100 text-yellow-700",
+        textColor: "text-yellow-700",
+      };
+
+    return {
+      text: date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      }),
+      color: "bg-gray-100 text-gray-700",
+      textColor: "text-gray-700",
+    };
+  };
 
   return (
     <div
-      className="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 cursor-pointer group mb-3"
+      className={`bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 cursor-pointer group mb-3 ${
+        isBeingDragged
+          ? "opacity-50 scale-95 bg-blue-50/80 backdrop-blur-sm border-2 border-blue-300 border-dashed"
+          : isDraggedOver
+            ? "bg-blue-50/90 backdrop-blur-sm border-2 border-blue-400 shadow-lg transform scale-105"
+            : ""
+      }`}
       draggable
       onDragStart={(e) => onDragStart(e, card)}
       onClick={() => onClick(card)}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onCardDragOver?.(e, card);
+      }}
+      onDragLeave={onCardDragLeave}
+      onDrop={(e) => {
+        e.preventDefault();
+        onCardDrop?.(e, card);
+      }}
     >
       {/* Card Cover */}
       {card.cover?.color && (
-        <div 
-          className={`w-full rounded-t-xl ${card.cover.size === 'large' ? 'h-16' : 'h-2'}`}
+        <div
+          className={`w-full rounded-t-xl ${card.cover.size === "large" ? "h-16" : "h-2"}`}
           style={{ backgroundColor: card.cover.color }}
         />
       )}
 
       <div className="p-2 relative">
-        
         {/* Labels - Small text badges at top */}
         {card.labels && card.labels.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-2">
@@ -89,18 +156,25 @@ export default function KanbanCard({ card, projectMembers, onDragStart, onClick 
         </h3>
 
         {/* Bottom Row - Horizontal layout with icons and members */}
-        {(hasDescription || hasComments || hasAttachments || hasChecklists || hasDueDate || assignedMembers.length > 0) && (
+        {(hasDescription ||
+          hasComments ||
+          hasAttachments ||
+          hasChecklists ||
+          hasDueDate ||
+          assignedMembers.length > 0) && (
           <div className="flex items-center justify-between">
             {/* Left side - Icons */}
             <div className="flex items-center gap-1">
               {/* Due Date */}
               {hasDueDate && card.due_date && (
-                <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${formatDueDate(card.due_date).color}`}>
+                <div
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${formatDueDate(card.due_date).color}`}
+                >
                   <Clock className="h-3 w-3" />
                   <span>{formatDueDate(card.due_date).text}</span>
                 </div>
               )}
-              
+
               {/* Description Icon */}
               {hasDescription && (
                 <div className="text-gray-400 hover:text-gray-600">
@@ -126,11 +200,17 @@ export default function KanbanCard({ card, projectMembers, onDragStart, onClick 
 
               {/* Checklists */}
               {hasChecklists && (
-                <div className={`flex items-center gap-1 text-xs ${
-                  completedChecklistItems === totalChecklistItems ? 'text-green-600' : 'text-gray-400'
-                }`}>
+                <div
+                  className={`flex items-center gap-1 text-xs ${
+                    completedChecklistItems === totalChecklistItems
+                      ? "text-green-600"
+                      : "text-gray-400"
+                  }`}
+                >
                   <CheckSquare className="h-3 w-3" />
-                  <span>{completedChecklistItems}/{totalChecklistItems}</span>
+                  <span>
+                    {completedChecklistItems}/{totalChecklistItems}
+                  </span>
                 </div>
               )}
             </div>
@@ -144,7 +224,12 @@ export default function KanbanCard({ card, projectMembers, onDragStart, onClick 
                     className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-medium border-2 border-white"
                     title={member?.organization_members.users.full_name}
                   >
-                    {member?.organization_members.users.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || '??'}
+                    {member?.organization_members.users.full_name
+                      ?.split(" ")
+                      .map((n: string) => n[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase() || "??"}
                   </div>
                 ))}
                 {assignedMembers.length > 3 && (
@@ -158,5 +243,5 @@ export default function KanbanCard({ card, projectMembers, onDragStart, onClick 
         )}
       </div>
     </div>
-  )
-} 
+  );
+}
