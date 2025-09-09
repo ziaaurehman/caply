@@ -27,9 +27,17 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { hasRole, hasAnyRole } from "@/utils/rbac";
-import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { useState } from "react";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { 
+  hasRole, 
+  hasPermission, 
+  getUserPermissions, 
+  isAdmin, 
+  isManagerOrAbove, 
+  canManageRoles, 
+  canViewLeave 
+} from "@/utils/clientOrganizationUtils";
 
 interface SidebarProps {
   sidebarOpen: boolean;
@@ -187,11 +195,13 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const { hasRole: hasOrgRole, hasPermission } = useOrganizationStore();
+  const { currentOrganization, organizationContext } = useOrganizationStore();
 
-  // Check admin access using organization store
-  const isAdmin = hasOrgRole("admin") || hasPermission("roles", "manage");
-  const isManagerOrAbove = hasOrgRole("admin") || hasOrgRole("manager");
+  // Check permissions using the client-side organizationUtils approach
+  const userIsAdmin = isAdmin(organizationContext);
+  const userIsManagerOrAbove = isManagerOrAbove(organizationContext);
+  const userCanManageRoles = canManageRoles(organizationContext);
+  const userCanViewLeave = canViewLeave(organizationContext);
 
   const coreMenuItems = [
     {
@@ -227,11 +237,12 @@ export default function Sidebar({
       icon: <Clock size={18} />,
       label: "Timesheets",
     },
-    // {
-    //   href: "/leave",
-    //   icon: <Palmtree size={18} />,
-    //   label: "Leave",
-    // },
+    // Only show leave if user has permission
+    ...(userCanViewLeave ? [{
+      href: "/leave",
+      icon: <Palmtree size={18} />,
+      label: "Leave",
+    }] : []),
   ];
 
   const financeMenuItems = [
@@ -330,7 +341,7 @@ export default function Sidebar({
             </NavSection>
 
             {/* Administration */}
-            {isAdmin && (
+            {userCanManageRoles && (
               <NavSection title="Administration" isCollapsed={sidebarCollapsed}>
                 <NavItem
                   href="/roles"
@@ -453,6 +464,16 @@ export default function Sidebar({
                 />
               ))}
 
+              {/* Roles & Permissions for mobile */}
+              {userCanManageRoles && (
+                <NavItem
+                  href="/roles"
+                  icon={<Shield size={18} />}
+                  label="Roles & Permissions"
+                  active={pathname === "/roles"}
+                />
+              )}
+
               <NavItem
                 href="/settings"
                 icon={<Settings size={18} />}
@@ -464,14 +485,14 @@ export default function Sidebar({
                   label="General"
                   active={pathname === "/settings"}
                 />
-                {isManagerOrAbove && (
+                {userIsManagerOrAbove && (
                   <SubNavItem
                     href="/settings/invitations"
                     label="Invitations"
                     active={pathname === "/settings/invitations"}
                   />
                 )}
-                {isAdmin && (
+                {userCanManageRoles && (
                   <SubNavItem
                     href="/settings/roles"
                     label="Roles"
