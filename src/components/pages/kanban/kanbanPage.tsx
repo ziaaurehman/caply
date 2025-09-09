@@ -164,12 +164,114 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     { type: "color", value: "#1e293b", name: "Dark Gray" },
   ];
 
+  // const loadBoardData = useCallback(
+  //   async (boardId: string) => {
+  //     if (!currentOrganization?.id) return;
+
+  //     // Prevent duplicate requests
+  //     const requestKey = `${boardId}-${currentOrganization.id}-${showArchived}-${searchTerm}`;
+  //     if (loadingRequestsRef.current.has(requestKey)) {
+  //       console.log("Request already in progress, skipping duplicate");
+  //       return;
+  //     }
+
+  //     loadingRequestsRef.current.add(requestKey);
+
+  //     try {
+  //       console.log("Loading board data for:", boardId);
+
+  //       // Step 1: Load basic list structure (show lists immediately)
+  //       const listsResponse = await kanbanAPI.getLists(
+  //         boardId,
+  //         currentOrganization.id,
+  //         showArchived
+  //       );
+
+  //       const basicLists = listsResponse.lists.map((list) => ({
+  //         ...list,
+  //         cards: [], // Initialize with empty cards array
+  //         isLoadingCards: true, // Add loading state for cards
+  //       }));
+
+  //       // Show lists immediately (even without cards)
+  //       setKanbanState((prev) => ({
+  //         ...prev,
+  //         lists: basicLists,
+  //       }));
+
+  //       // Step 2: Load ALL cards in parallel instead of sequentially
+  //       if (basicLists.length > 0) {
+  //         console.log(
+  //           `Loading cards for ${basicLists.length} lists in parallel`
+  //         );
+
+  //         // Create promises for all card requests
+  //         const cardPromises = basicLists.map(async (list) => {
+  //           try {
+  //             const cardsResponse = await kanbanAPI.getCardsByList(
+  //               list.id,
+  //               currentOrganization.id,
+  //               searchTerm,
+  //               showArchived
+  //             );
+  //             return {
+  //               listId: list.id,
+  //               cards: cardsResponse.cards,
+  //               success: true,
+  //             };
+  //           } catch (error) {
+  //             console.error(`Error loading cards for list ${list.id}:`, error);
+  //             return {
+  //               listId: list.id,
+  //               cards: [],
+  //               success: false,
+  //             };
+  //           }
+  //         });
+
+  //         // Wait for all card requests to complete
+  //         const cardResults = await Promise.all(cardPromises);
+
+  //         // Update all lists with their cards at once
+  //         setKanbanState((prev) => ({
+  //           ...prev,
+  //           lists: prev.lists.map((list) => {
+  //             const result = cardResults.find((r) => r.listId === list.id);
+  //             return result
+  //               ? {
+  //                   ...list,
+  //                   cards: result.cards,
+  //                   isLoadingCards: false,
+  //                 }
+  //               : list;
+  //           }),
+  //         }));
+
+  //         console.log("All cards loaded successfully");
+  //       }
+  //     } catch (error) {
+  //       console.error("Error loading board data:", error);
+  //       setKanbanState((prev) => ({
+  //         ...prev,
+  //         error:
+  //           error instanceof Error
+  //             ? error.message
+  //             : "Failed to load board data",
+  //       }));
+  //     } finally {
+  //       // Remove request from deduplication set
+  //       loadingRequestsRef.current.delete(requestKey);
+  //     }
+  //   },
+  //   [currentOrganization?.id, showArchived, searchTerm]
+  // );
+
   const loadBoardData = useCallback(
     async (boardId: string) => {
       if (!currentOrganization?.id) return;
 
-      // Prevent duplicate requests
-      const requestKey = `${boardId}-${currentOrganization.id}-${showArchived}-${searchTerm}`;
+      // Prevent duplicate requests - remove searchTerm from key
+      const requestKey = `${boardId}-${currentOrganization.id}-${showArchived}`;
       if (loadingRequestsRef.current.has(requestKey)) {
         console.log("Request already in progress, skipping duplicate");
         return;
@@ -205,13 +307,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             `Loading cards for ${basicLists.length} lists in parallel`
           );
 
-          // Create promises for all card requests
+          // Create promises for all card requests - remove searchTerm from API call
           const cardPromises = basicLists.map(async (list) => {
             try {
               const cardsResponse = await kanbanAPI.getCardsByList(
                 list.id,
                 currentOrganization.id,
-                searchTerm,
+                "", // Remove searchTerm - search will be client-side
                 showArchived
               );
               return {
@@ -263,7 +365,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         loadingRequestsRef.current.delete(requestKey);
       }
     },
-    [currentOrganization?.id, showArchived, searchTerm]
+    [currentOrganization?.id, showArchived] // Remove searchTerm from dependencies
   );
 
   // Initialize data
