@@ -9,6 +9,110 @@ import { redisSetJSON, redisGetJSON } from '@/utils/redis'
 // Cache TTL - 7 days for page 1 only (most frequently accessed)
 const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
 
+// Helper function to refresh team members cache
+async function refreshTeamMembersCache(organizationId: string, supabase: any) {
+  const cacheKeysToInvalidate = [
+    `team_members:page1:${organizationId}::`, // Empty search, no status filter
+    `team_members:page1:${organizationId}::active`, // Active status filter
+  ]
+  
+  for (const key of cacheKeysToInvalidate) {
+    try {
+      const isActiveFilter = key.includes('active')
+      
+      // Get team members with proper status filtering
+      const { data: members } = await supabase
+        .from('organization_members')
+        .select(`
+          id,
+          user_id,
+          role_id,
+          hourly_rate,
+          weekly_capacity,
+          department,
+          hire_date,
+          status,
+          joined_at,
+          users:user_id (
+            id,
+            email,
+            full_name,
+            avatar_url,
+            position,
+            phone,
+            is_active
+          ),
+          roles:role_id (
+            id,
+            name,
+            display_name,
+            description
+          )
+        `)
+        .eq('organization_id', organizationId)
+        .eq('status', isActiveFilter ? 'active' : undefined)
+        .order('joined_at', { ascending: false })
+        .range(0, 9) // First 10 items for page 1
+
+      // Get pending invitations (no caching needed - they're temporary)
+      const { data: invitations } = await supabase
+        .from('organization_invitations')
+        .select(`
+          id,
+          email,
+          role_id,
+          status,
+          expires_at,
+          created_at,
+          user_id,
+          roles:role_id (
+            id,
+            name,
+            display_name,
+            description
+          )
+        `)
+        .eq('organization_id', organizationId)
+        .eq('status', 'pending')
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .range(0, 9) // First 10 items
+
+      // Get total count for members only (invitations are separate)
+      const { count: totalMembers } = await supabase
+        .from('organization_members')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+        .eq('status', isActiveFilter ? 'active' : undefined)
+
+      const totalPages = Math.ceil((totalMembers || 0) / 10)
+
+      const refreshedResult = {
+        members: members || [],
+        invitations: invitations || [], // Fresh data, not cached
+        pagination: {
+          page: 1,
+          limit: 10,
+          total: totalMembers || 0,
+          totalPages,
+          hasNext: 1 < totalPages,
+          hasPrev: false
+        }
+      }
+
+      await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
+      console.log('🔄 Refreshed team members page 1 cache:', {
+        key,
+        membersCount: members?.length || 0,
+        invitationsCount: invitations?.length || 0,
+        totalMembers
+      })
+    } catch (cacheError) {
+      console.warn('Failed to refresh specific cache key:', key, cacheError)
+    }
+  }
+}
+
 // GET /api/team-members - List all team members in the organization with pagination
 export async function GET(request: NextRequest) {
   console.log('🔍 GET /api/team-members - Starting request')
@@ -197,7 +301,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch team members' }, { status: 500 })
     }
 
-    // Get pending invitations
+    // Get pending invitations (no caching needed - they're temporary)
     console.log('🔍 Fetching pending invitations for organization:', organizationId)
     const { data: invitations, error: inviteError } = await supabase
       .from('organization_invitations')
@@ -524,100 +628,7 @@ export async function POST(request: NextRequest) {
 
     // Invalidate page 1 cache after creating invitation
     try {
-      const cacheKeysToInvalidate = [
-        `team_members:page1:${organizationId}::`, // Empty search, no status filter
-        `team_members:page1:${organizationId}::active`, // Active status filter
-        // Note: We could implement more sophisticated cache invalidation
-        // but for now, we'll clear the main page 1 caches
-      ]
-      
-      for (const key of cacheKeysToInvalidate) {
-        try {
-          // Refresh cache with new data
-          const { data: members } = await supabase
-            .from('organization_members')
-            .select(`
-              id,
-              user_id,
-              role_id,
-              status,
-              hourly_rate,
-              weekly_capacity,
-              department,
-              hire_date,
-              joined_at,
-              users!inner(
-                id,
-                email,
-                full_name,
-                avatar_url
-              ),
-              roles!inner(
-                id,
-                name,
-                display_name
-              )
-            `)
-            .eq('organization_id', organizationId)
-            .eq('status', key.includes('active') ? 'active' : undefined)
-            .order('joined_at', { ascending: false })
-            .range(0, 9) // First 10 items for page 1
-
-          // Get invitations for page 1
-          const { data: invitations } = await supabase
-            .from('organization_invitations')
-            .select(`
-              id,
-              email,
-              role_id,
-              status,
-              expires_at,
-              created_at,
-              user_id,
-              roles:role_id (
-                id,
-                name,
-                display_name
-              )
-            `)
-            .eq('organization_id', organizationId)
-            .order('created_at', { ascending: false })
-            .range(0, 9) // First 10 items
-
-          // Get total counts
-          const { count: totalMembers } = await supabase
-            .from('organization_members')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', organizationId)
-            .eq('status', key.includes('active') ? 'active' : undefined)
-
-          const { count: totalInvitations } = await supabase
-            .from('organization_invitations')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', organizationId)
-
-          const totalCount = (totalMembers || 0) + (totalInvitations || 0)
-          const totalPages = Math.ceil(totalCount / 10)
-
-          const refreshedResult = {
-            members: members || [],
-            invitations: invitations || [],
-            pagination: {
-              page: 1,
-              limit: 10,
-              total: totalCount,
-              totalPages,
-              hasNext: 1 < totalPages,
-              hasPrev: false
-            }
-          }
-
-          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
-          console.log('🔄 Refreshed team members page 1 cache after invitation')
-        } catch (cacheError) {
-          console.warn('Failed to refresh specific cache key:', key, cacheError)
-        }
-      }
+      await refreshTeamMembersCache(organizationId, supabase)
     } catch (e) {
       console.warn('Failed to refresh team members page 1 cache after invitation:', e)
     }

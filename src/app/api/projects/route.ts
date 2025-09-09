@@ -34,6 +34,18 @@ export async function GET(req: NextRequest) {
       { resource: 'projects', action: 'read' }
     )
 
+    console.log('🔍 Projects API - Permission validation:', {
+      organizationId,
+      validationSuccess: validation.success,
+      validationError: validation.error,
+      validationStatus: validation.status,
+      userRole: validation.context?.membership?.role?.name,
+      userPermissions: validation.context?.membership?.role?.permissions,
+      hasProjectsRead: validation.context?.membership?.role?.permissions?.some(p => p.resource === 'projects' && p.action === 'read'),
+      isAdmin: validation.context?.membership?.role?.name === 'admin',
+      isManager: validation.context?.membership?.role?.name === 'manager'
+    })
+
     if (!validation.success) {
       return NextResponse.json({ 
         error: validation.error 

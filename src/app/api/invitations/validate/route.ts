@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
+import { invalidateOrganizationCaches, invalidateUserCaches } from '@/utils/organizationUtils'
 
 // GET /api/invitations/validate?token=xxx - Validate an invitation token
 export async function GET(request: NextRequest) {
@@ -212,6 +213,17 @@ export async function POST(request: NextRequest) {
       // Don't fail the request since member was created successfully
     } else {
       console.log('✅ Invitation marked as accepted')
+    }
+
+    // Invalidate all relevant caches
+    console.log('🔄 Invalidating organization caches after invitation acceptance')
+    try {
+      await invalidateOrganizationCaches(invitation.organization_id, userId, true)
+      await invalidateUserCaches(userId)
+      console.log('✅ All caches invalidated successfully')
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to invalidate some caches:', cacheError)
+      // Don't fail the request if cache invalidation fails
     }
 
     return NextResponse.json({

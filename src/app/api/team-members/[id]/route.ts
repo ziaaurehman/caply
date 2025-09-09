@@ -110,37 +110,43 @@ export async function PUT(
       
       for (const key of cacheKeysToInvalidate) {
         try {
-          // Refresh cache with new data
+          const isActiveFilter = key.includes('active')
+          
+          // Get team members with proper status filtering
           const { data: members } = await supabase
             .from('organization_members')
             .select(`
               id,
               user_id,
               role_id,
-              status,
               hourly_rate,
               weekly_capacity,
               department,
               hire_date,
+              status,
               joined_at,
-              users!inner(
+              users:user_id (
                 id,
                 email,
                 full_name,
-                avatar_url
+                avatar_url,
+                position,
+                phone,
+                is_active
               ),
-              roles!inner(
+              roles:role_id (
                 id,
                 name,
-                display_name
+                display_name,
+                description
               )
             `)
             .eq('organization_id', headerOrgId)
-            .eq('status', key.includes('active') ? 'active' : undefined)
+            .eq('status', isActiveFilter ? 'active' : undefined)
             .order('joined_at', { ascending: false })
             .range(0, 9) // First 10 items for page 1
 
-          // Get invitations for page 1
+          // Get pending invitations
           const { data: invitations } = await supabase
             .from('organization_invitations')
             .select(`
@@ -154,27 +160,24 @@ export async function PUT(
               roles:role_id (
                 id,
                 name,
-                display_name
+                display_name,
+                description
               )
             `)
             .eq('organization_id', headerOrgId)
+            .eq('status', 'pending')
+            .gt('expires_at', new Date().toISOString())
             .order('created_at', { ascending: false })
             .range(0, 9) // First 10 items
 
-          // Get total counts
+          // Get total count for members only (invitations are separate)
           const { count: totalMembers } = await supabase
             .from('organization_members')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', headerOrgId)
-            .eq('status', key.includes('active') ? 'active' : undefined)
+            .eq('status', isActiveFilter ? 'active' : undefined)
 
-          const { count: totalInvitations } = await supabase
-            .from('organization_invitations')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', headerOrgId)
-
-          const totalCount = (totalMembers || 0) + (totalInvitations || 0)
-          const totalPages = Math.ceil(totalCount / 10)
+          const totalPages = Math.ceil((totalMembers || 0) / 10)
 
           const refreshedResult = {
             members: members || [],
@@ -182,7 +185,7 @@ export async function PUT(
             pagination: {
               page: 1,
               limit: 10,
-              total: totalCount,
+              total: totalMembers || 0,
               totalPages,
               hasNext: 1 < totalPages,
               hasPrev: false
@@ -190,7 +193,12 @@ export async function PUT(
           }
 
           await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
-          console.log('🔄 Refreshed team members page 1 cache after member update')
+          console.log('🔄 Refreshed team members page 1 cache after member update:', {
+            key,
+            membersCount: members?.length || 0,
+            invitationsCount: invitations?.length || 0,
+            totalMembers
+          })
         } catch (cacheError) {
           console.warn('Failed to refresh specific cache key:', key, cacheError)
         }
@@ -301,37 +309,43 @@ export async function DELETE(
       
       for (const key of cacheKeysToInvalidate) {
         try {
-          // Refresh cache with new data
+          const isActiveFilter = key.includes('active')
+          
+          // Get team members with proper status filtering
           const { data: members } = await supabase
             .from('organization_members')
             .select(`
               id,
               user_id,
               role_id,
-              status,
               hourly_rate,
               weekly_capacity,
               department,
               hire_date,
+              status,
               joined_at,
-              users!inner(
+              users:user_id (
                 id,
                 email,
                 full_name,
-                avatar_url
+                avatar_url,
+                position,
+                phone,
+                is_active
               ),
-              roles!inner(
+              roles:role_id (
                 id,
                 name,
-                display_name
+                display_name,
+                description
               )
             `)
             .eq('organization_id', headerOrgId)
-            .eq('status', key.includes('active') ? 'active' : undefined)
+            .eq('status', isActiveFilter ? 'active' : undefined)
             .order('joined_at', { ascending: false })
             .range(0, 9) // First 10 items for page 1
 
-          // Get invitations for page 1
+          // Get pending invitations
           const { data: invitations } = await supabase
             .from('organization_invitations')
             .select(`
@@ -345,27 +359,24 @@ export async function DELETE(
               roles:role_id (
                 id,
                 name,
-                display_name
+                display_name,
+                description
               )
             `)
             .eq('organization_id', headerOrgId)
+            .eq('status', 'pending')
+            .gt('expires_at', new Date().toISOString())
             .order('created_at', { ascending: false })
             .range(0, 9) // First 10 items
 
-          // Get total counts
+          // Get total count for members only (invitations are separate)
           const { count: totalMembers } = await supabase
             .from('organization_members')
             .select('id', { count: 'exact', head: true })
             .eq('organization_id', headerOrgId)
-            .eq('status', key.includes('active') ? 'active' : undefined)
+            .eq('status', isActiveFilter ? 'active' : undefined)
 
-          const { count: totalInvitations } = await supabase
-            .from('organization_invitations')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', headerOrgId)
-
-          const totalCount = (totalMembers || 0) + (totalInvitations || 0)
-          const totalPages = Math.ceil(totalCount / 10)
+          const totalPages = Math.ceil((totalMembers || 0) / 10)
 
           const refreshedResult = {
             members: members || [],
@@ -373,7 +384,7 @@ export async function DELETE(
             pagination: {
               page: 1,
               limit: 10,
-              total: totalCount,
+              total: totalMembers || 0,
               totalPages,
               hasNext: 1 < totalPages,
               hasPrev: false
@@ -381,7 +392,12 @@ export async function DELETE(
           }
 
           await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
-          console.log('🔄 Refreshed team members page 1 cache after member deletion')
+          console.log('🔄 Refreshed team members page 1 cache after member deletion:', {
+            key,
+            membersCount: members?.length || 0,
+            invitationsCount: invitations?.length || 0,
+            totalMembers
+          })
         } catch (cacheError) {
           console.warn('Failed to refresh specific cache key:', key, cacheError)
         }

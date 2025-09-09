@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { createClient } from '@/utils/supabase/server'
-import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
+import { validateOrganizationAccessWithId, invalidateOrganizationCaches } from '@/utils/organizationUtils'
 import { sendInvitationEmail } from '@/lib/email'
 import crypto from 'crypto'
 
@@ -116,6 +116,16 @@ export async function POST(request: NextRequest) {
     } catch (emailError) {
       console.error('Error sending invitation email:', emailError)
       return NextResponse.json({ error: 'Failed to send invitation email' }, { status: 500 })
+    }
+
+    // Invalidate team members cache to update invitation expiry date
+    console.log('🔄 Invalidating team members cache after invitation resend')
+    try {
+      await invalidateOrganizationCaches(invitation.organization_id, undefined, true)
+      console.log('✅ Team members cache invalidated successfully')
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to invalidate team members cache:', cacheError)
+      // Don't fail the request if cache invalidation fails
     }
 
     return NextResponse.json({
