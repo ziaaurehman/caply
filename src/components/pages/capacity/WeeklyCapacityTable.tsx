@@ -71,44 +71,45 @@ export default function WeeklyCapacityTable({
   const weeksData: WeekData[] = useMemo(() => {
     const weeks: WeekData[] = []
 
+    // Create a date based on the selected month and year
+    const selectedDate = new Date(selectedYear, selectedMonth, 1)
+    
     if (viewMode === "monthly") {
-      // For monthly view, show 5 weeks from current week (same as overview)
-      const today = new Date()
-      const currentWeekStart = new Date(today)
-      const dayOfWeek = today.getDay()
+      // For monthly view, show 5 weeks starting from the week containing the 1st of the selected month
+      const weekStart = new Date(selectedDate)
+      const dayOfWeek = weekStart.getDay()
       const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-      currentWeekStart.setDate(today.getDate() - daysToSubtract)
+      weekStart.setDate(weekStart.getDate() - daysToSubtract)
 
       for (let i = 0; i < 5; i++) {
-        const weekStart = new Date(currentWeekStart)
-        weekStart.setDate(currentWeekStart.getDate() + i * 7)
+        const currentWeekStart = new Date(weekStart)
+        currentWeekStart.setDate(weekStart.getDate() + i * 7)
 
-        const weekEnd = new Date(weekStart)
-        weekEnd.setDate(weekStart.getDate() + 6)
+        const weekEnd = new Date(currentWeekStart)
+        weekEnd.setDate(currentWeekStart.getDate() + 6)
 
         const weekNumber = `W${String(i + 1).padStart(2, "0")}`
         const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
-        const startDateStr = `${String(weekStart.getDate()).padStart(2, "0")} ${monthNames[weekStart.getMonth()]}`
+        const startDateStr = `${String(currentWeekStart.getDate()).padStart(2, "0")} ${monthNames[currentWeekStart.getMonth()]}`
 
         weeks.push({
           weekNumber,
-          startDate: weekStart.toISOString(),
+          startDate: currentWeekStart.toISOString(),
           endDate: weekEnd.toISOString(),
           label: startDateStr,
           type: "week",
         })
       }
     } else if (viewMode === "weekly") {
-      // Weekly view shows per-day columns for current week only (7 days)
-      const today = new Date()
-      const currentWeekStart = new Date(today)
-      const dayOfWeek = today.getDay()
+      // Weekly view shows per-day columns for the week containing the 1st of the selected month
+      const weekStart = new Date(selectedDate)
+      const dayOfWeek = weekStart.getDay()
       const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-      currentWeekStart.setDate(today.getDate() - daysToSubtract)
+      weekStart.setDate(weekStart.getDate() - daysToSubtract)
 
       for (let i = 0; i < 7; i++) {
-        const day = new Date(currentWeekStart)
-        day.setDate(currentWeekStart.getDate() + i)
+        const day = new Date(weekStart)
+        day.setDate(weekStart.getDate() + i)
         const dayEnd = new Date(day)
         const weekday = day.getDay() // 0 Sun, 6 Sat
         const isWeekend = weekday === 0 || weekday === 6
@@ -125,27 +126,26 @@ export default function WeeklyCapacityTable({
         })
       }
     } else {
-      // For overview, show 5 weeks from current week
-      const today = new Date()
-      const currentWeekStart = new Date(today)
-      const dayOfWeek = today.getDay()
+      // For overview, show 5 weeks starting from the week containing the 1st of the selected month
+      const weekStart = new Date(selectedDate)
+      const dayOfWeek = weekStart.getDay()
       const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-      currentWeekStart.setDate(today.getDate() - daysToSubtract)
+      weekStart.setDate(weekStart.getDate() - daysToSubtract)
 
       for (let i = 0; i < 5; i++) {
-        const weekStart = new Date(currentWeekStart)
-        weekStart.setDate(currentWeekStart.getDate() + i * 7)
+        const currentWeekStart = new Date(weekStart)
+        currentWeekStart.setDate(weekStart.getDate() + i * 7)
 
-        const weekEnd = new Date(weekStart)
-        weekEnd.setDate(weekStart.getDate() + 6)
+        const weekEnd = new Date(currentWeekStart)
+        weekEnd.setDate(currentWeekStart.getDate() + 6)
 
         const weekNumber = `W${String(i + 1).padStart(2, "0")}`
         const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
-        const startDateStr = `${String(weekStart.getDate()).padStart(2, "0")} ${monthNames[weekStart.getMonth()]}`
+        const startDateStr = `${String(currentWeekStart.getDate()).padStart(2, "0")} ${monthNames[currentWeekStart.getMonth()]}`
 
         weeks.push({
           weekNumber,
-          startDate: weekStart.toISOString(),
+          startDate: currentWeekStart.toISOString(),
           endDate: weekEnd.toISOString(),
           label: startDateStr,
           type: "week",
@@ -154,7 +154,7 @@ export default function WeeklyCapacityTable({
     }
 
     return weeks
-  }, [viewMode])
+  }, [viewMode, selectedMonth, selectedYear])
 
   // Optimistically remove allocation from local state
   const removeAllocationOptimistically = (allocationId: string) => {
