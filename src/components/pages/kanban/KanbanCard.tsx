@@ -127,10 +127,10 @@ export default function KanbanCard({
       }}
     >
       {/* Card Cover */}
-      {card.cover?.color && (
+      {(card.cover?.color || card.cover_color) && (
         <div
-          className={`w-full rounded-t-xl ${card.cover.size === "large" ? "h-16" : "h-2"}`}
-          style={{ backgroundColor: card.cover.color }}
+          className={`w-full rounded-t-xl ${card.cover?.size === "large" ? "h-16" : "h-2"}`}
+          style={{ backgroundColor: card.cover?.color || card.cover_color }}
         />
       )}
 
