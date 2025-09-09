@@ -83,12 +83,18 @@ export function isManagerOrAbove(context: OrganizationContext | null): boolean {
  * Check if user can manage roles (client-side)
  */
 export function canManageRoles(context: OrganizationContext | null): boolean {
-  return isAdmin(context) || hasPermission(context, "roles", "manage");
+  return isAdmin(context) || 
+         hasPermission(context, "roles", "manage") || 
+         hasPermission(context, "roles", "create") ||
+         hasPermission(context, "roles", "update") ||
+         hasPermission(context, "roles", "delete");
 }
 
 /**
  * Check if user can view leave (client-side)
  */
 export function canViewLeave(context: OrganizationContext | null): boolean {
-  return hasPermission(context, "leave", "read") || isManagerOrAbove(context);
+  return hasPermission(context, "leave_requests", "read") || 
+         hasPermission(context, "leave", "read") ||
+         isManagerOrAbove(context);
 }
