@@ -7,7 +7,7 @@ interface Board {
   background_color: string;
   background_image?: string;
   is_closed: boolean;
-  visibility: 'private' | 'project' | 'public';
+  visibility: "private" | "project" | "public";
   position: number;
   created_by: string;
   created_at: string;
@@ -40,7 +40,7 @@ interface Card {
   cover?: {
     color?: string;
     image?: string;
-    size?: 'small' | 'large';
+    size?: "small" | "large";
   };
   created_by: string;
   created_at: string;
@@ -174,8 +174,25 @@ interface Activity {
   user_id: string;
   board_id?: string;
   card_id?: string;
-  action_type: 'create' | 'update' | 'delete' | 'move' | 'archive' | 'restore' | 'complete' | 'incomplete';
-  entity_type: 'board' | 'list' | 'card' | 'comment' | 'attachment' | 'member' | 'label' | 'checklist' | 'checklist_item';
+  action_type:
+    | "create"
+    | "update"
+    | "delete"
+    | "move"
+    | "archive"
+    | "restore"
+    | "complete"
+    | "incomplete";
+  entity_type:
+    | "board"
+    | "list"
+    | "card"
+    | "comment"
+    | "attachment"
+    | "member"
+    | "label"
+    | "checklist"
+    | "checklist_item";
   entity_id: string;
   details: any;
   created_at: string;
@@ -190,7 +207,12 @@ interface Activity {
 interface BoardNotification {
   id: string;
   user_id: string;
-  type: 'card_assigned' | 'card_due' | 'card_comment' | 'card_moved' | 'mention';
+  type:
+    | "card_assigned"
+    | "card_due"
+    | "card_comment"
+    | "card_moved"
+    | "mention";
   title: string;
   message: string;
   is_read: boolean;
@@ -208,7 +230,7 @@ interface CreateBoardData {
   description?: string;
   background_color?: string;
   background_image?: string;
-  visibility?: 'private' | 'project' | 'public';
+  visibility?: "private" | "project" | "public";
 }
 
 interface UpdateBoardData {
@@ -216,7 +238,7 @@ interface UpdateBoardData {
   description?: string;
   background_color?: string;
   background_image?: string;
-  visibility?: 'private' | 'project' | 'public';
+  visibility?: "private" | "project" | "public";
   is_closed?: boolean;
 }
 
@@ -309,7 +331,7 @@ interface UpdateCommentData {
 }
 
 interface BulkCardOperation {
-  operation: 'move' | 'archive' | 'delete';
+  operation: "move" | "archive" | "delete";
   card_ids: string[];
   target_list_id?: string;
   positions?: number[];
@@ -327,7 +349,12 @@ interface ListPosition {
 
 interface CreateNotificationData {
   user_id: string;
-  type: 'card_assigned' | 'card_due' | 'card_comment' | 'card_moved' | 'mention';
+  type:
+    | "card_assigned"
+    | "card_due"
+    | "card_comment"
+    | "card_moved"
+    | "mention";
   title: string;
   message: string;
   related_card_id?: string;
@@ -453,17 +480,23 @@ interface ReorderResponse {
 // Kanban API
 export const kanbanAPI = {
   // ===== BOARDS =====
-  
+
   // Get boards by project
-  getBoards: async (projectId: string, organizationId: string): Promise<BoardsResponse> => {
-    const response = await fetch(`/api/kanban/boards?project_id=${projectId}&organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getBoards: async (
+    projectId: string,
+    organizationId: string
+  ): Promise<BoardsResponse> => {
+    const response = await fetch(
+      `/api/kanban/boards?project_id=${projectId}&organizationId=${organizationId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch boards');
+      throw new Error(errorData.error || "Failed to fetch boards");
     }
     const data = await response.json();
     return { boards: data.boards || [] };
@@ -474,43 +507,48 @@ export const kanbanAPI = {
     const response = await fetch(`/api/kanban/boards/${id}`);
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch board');
+      throw new Error(errorData.error || "Failed to fetch board");
     }
     const data = await response.json();
     return { board: data.board };
   },
 
   // Create board
-  createBoard: async (data: CreateBoardData & { organizationId: string }): Promise<BoardResponse> => {
-    const response = await fetch('/api/kanban/boards', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+  createBoard: async (
+    data: CreateBoardData & { organizationId: string }
+  ): Promise<BoardResponse> => {
+    const response = await fetch("/api/kanban/boards", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create board');
+      throw new Error(errorData.error || "Failed to create board");
     }
     const result = await response.json();
     return { board: result.board };
   },
 
   // Update board
-  updateBoard: async (id: string, data: UpdateBoardData & { organizationId: string }): Promise<BoardResponse> => {
+  updateBoard: async (
+    id: string,
+    data: UpdateBoardData & { organizationId: string }
+  ): Promise<BoardResponse> => {
     const response = await fetch(`/api/kanban/boards/${id}`, {
-      method: 'PATCH',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update board');
+      throw new Error(errorData.error || "Failed to update board");
     }
     const result = await response.json();
     return { board: result.board };
@@ -519,30 +557,37 @@ export const kanbanAPI = {
   // Delete board
   deleteBoard: async (id: string, organizationId: string): Promise<void> => {
     const response = await fetch(`/api/kanban/boards/${id}`, {
-      method: 'DELETE',
+      method: "DELETE",
       headers: {
-        'x-organization-id': organizationId,
-      }
+        "x-organization-id": organizationId,
+      },
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete board');
+      throw new Error(errorData.error || "Failed to delete board");
     }
   },
 
   // ===== LISTS =====
 
   // Get lists by board
-  getLists: async (boardId: string, organizationId: string, includeArchived?: boolean): Promise<ListsResponse> => {
-    const archivedParam = includeArchived ? '&include_archived=true' : '';
-    const response = await fetch(`/api/kanban/lists?board_id=${boardId}&organizationId=${organizationId}${archivedParam}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getLists: async (
+    boardId: string,
+    organizationId: string,
+    includeArchived?: boolean
+  ): Promise<ListsResponse> => {
+    const archivedParam = includeArchived ? "&include_archived=true" : "";
+    const response = await fetch(
+      `/api/kanban/lists?board_id=${boardId}&organizationId=${organizationId}${archivedParam}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch lists');
+      throw new Error(errorData.error || "Failed to fetch lists");
     }
     const data = await response.json();
     return { lists: data.lists || [] };
@@ -553,43 +598,48 @@ export const kanbanAPI = {
     const response = await fetch(`/api/kanban/lists/${id}`);
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch list');
+      throw new Error(errorData.error || "Failed to fetch list");
     }
     const data = await response.json();
     return { list: data.list };
   },
 
   // Create list
-  createList: async (data: CreateListData & { organizationId: string }): Promise<ListResponse> => {
-    const response = await fetch('/api/kanban/lists', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+  createList: async (
+    data: CreateListData & { organizationId: string }
+  ): Promise<ListResponse> => {
+    const response = await fetch("/api/kanban/lists", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create list');
+      throw new Error(errorData.error || "Failed to create list");
     }
     const result = await response.json();
     return { list: result.list };
   },
 
   // Update list
-  updateList: async (id: string, data: UpdateListData & { organizationId: string }): Promise<ListResponse> => {
+  updateList: async (
+    id: string,
+    data: UpdateListData & { organizationId: string }
+  ): Promise<ListResponse> => {
     const response = await fetch(`/api/kanban/lists/${id}`, {
-      method: 'PATCH',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update list');
+      throw new Error(errorData.error || "Failed to update list");
     }
     const result = await response.json();
     return { list: result.list };
@@ -598,30 +648,38 @@ export const kanbanAPI = {
   // Delete list
   deleteList: async (id: string, organizationId: string): Promise<void> => {
     const response = await fetch(`/api/kanban/lists/${id}`, {
-      method: 'DELETE',
+      method: "DELETE",
       headers: {
-        'x-organization-id': organizationId,
-      }
+        "x-organization-id": organizationId,
+      },
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete list');
+      throw new Error(errorData.error || "Failed to delete list");
     }
   },
 
   // Reorder lists
-  reorderLists: async (boardId: string, listPositions: ListPosition[], organizationId: string): Promise<ReorderResponse> => {
-    const response = await fetch('/api/kanban/lists/reorder', {
-      method: 'PATCH',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': organizationId,
+  reorderLists: async (
+    boardId: string,
+    listPositions: ListPosition[],
+    organizationId: string
+  ): Promise<ReorderResponse> => {
+    const response = await fetch("/api/kanban/lists/reorder", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": organizationId,
       },
-      body: JSON.stringify({ board_id: boardId, list_positions: listPositions, organizationId })
+      body: JSON.stringify({
+        board_id: boardId,
+        list_positions: listPositions,
+        organizationId,
+      }),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to reorder lists');
+      throw new Error(errorData.error || "Failed to reorder lists");
     }
     return await response.json();
   },
@@ -629,85 +687,112 @@ export const kanbanAPI = {
   // ===== CARDS =====
 
   // Get cards by list with optional search
-  getCardsByList: async (listId: string, organizationId: string, search?: string, includeArchived?: boolean): Promise<CardsResponse> => {
-    const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
-    const archivedParam = includeArchived ? '&include_archived=true' : '';
-    const response = await fetch(`/api/kanban/cards?list_id=${listId}&organizationId=${organizationId}${searchParam}${archivedParam}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getCardsByList: async (
+    listId: string,
+    organizationId: string,
+    search?: string,
+    includeArchived?: boolean
+  ): Promise<CardsResponse> => {
+    const searchParam = search ? `&search=${encodeURIComponent(search)}` : "";
+    const archivedParam = includeArchived ? "&include_archived=true" : "";
+    const response = await fetch(
+      `/api/kanban/cards?list_id=${listId}&organizationId=${organizationId}${searchParam}${archivedParam}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch cards');
+      throw new Error(errorData.error || "Failed to fetch cards");
     }
     const data = await response.json();
     return { cards: data.cards || [] };
   },
 
   // Get cards by board with optional search
-  getCardsByBoard: async (boardId: string, organizationId: string, search?: string, includeArchived?: boolean): Promise<CardsResponse> => {
-    const searchParam = search ? `&search=${encodeURIComponent(search)}` : '';
-    const archivedParam = includeArchived ? '&include_archived=true' : '';
-    const response = await fetch(`/api/kanban/cards?board_id=${boardId}&organizationId=${organizationId}${searchParam}${archivedParam}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getCardsByBoard: async (
+    boardId: string,
+    organizationId: string,
+    search?: string,
+    includeArchived?: boolean
+  ): Promise<CardsResponse> => {
+    const searchParam = search ? `&search=${encodeURIComponent(search)}` : "";
+    const archivedParam = includeArchived ? "&include_archived=true" : "";
+    const response = await fetch(
+      `/api/kanban/cards?board_id=${boardId}&organizationId=${organizationId}${searchParam}${archivedParam}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch cards');
+      throw new Error(errorData.error || "Failed to fetch cards");
     }
     const data = await response.json();
     return { cards: data.cards || [] };
   },
 
   // Get single card
-  getCard: async (id: string, organizationId: string): Promise<CardResponse> => {
-    const response = await fetch(`/api/kanban/cards/${id}?organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getCard: async (
+    id: string,
+    organizationId: string
+  ): Promise<CardResponse> => {
+    const response = await fetch(
+      `/api/kanban/cards/${id}?organizationId=${organizationId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch card');
+      throw new Error(errorData.error || "Failed to fetch card");
     }
     const data = await response.json();
     return { card: data.card };
   },
 
   // Create card
-  createCard: async (data: CreateCardData & { organizationId: string }): Promise<CardResponse> => {
-    const response = await fetch('/api/kanban/cards', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+  createCard: async (
+    data: CreateCardData & { organizationId: string }
+  ): Promise<CardResponse> => {
+    const response = await fetch("/api/kanban/cards", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create card');
+      throw new Error(errorData.error || "Failed to create card");
     }
     const result = await response.json();
     return { card: result.card };
   },
 
   // Update card
-  updateCard: async (id: string, data: UpdateCardData & { organizationId: string }): Promise<CardResponse> => {
+  updateCard: async (
+    id: string,
+    data: UpdateCardData & { organizationId: string }
+  ): Promise<CardResponse> => {
     const response = await fetch(`/api/kanban/cards/${id}`, {
-      method: 'PATCH',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update card');
+      throw new Error(errorData.error || "Failed to update card");
     }
     const result = await response.json();
     return { card: result.card };
@@ -716,41 +801,51 @@ export const kanbanAPI = {
   // Delete card
   deleteCard: async (id: string, organizationId: string): Promise<void> => {
     const response = await fetch(`/api/kanban/cards/${id}`, {
-      method: 'DELETE',
+      method: "DELETE",
       headers: {
-        'x-organization-id': organizationId,
-      }
+        "x-organization-id": organizationId,
+      },
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete card');
+      throw new Error(errorData.error || "Failed to delete card");
     }
   },
 
   // Bulk card operations
-  bulkCardOperations: async (data: BulkCardOperation): Promise<BulkOperationResponse> => {
-    const response = await fetch('/api/kanban/cards/bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+  bulkCardOperations: async (
+    data: BulkCardOperation
+  ): Promise<BulkOperationResponse> => {
+    const response = await fetch("/api/kanban/cards/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to perform bulk operation');
+      throw new Error(errorData.error || "Failed to perform bulk operation");
     }
     return await response.json();
   },
 
   // Reorder cards
-  reorderCards: async (listId: string, cardPositions: CardPosition[]): Promise<ReorderResponse> => {
-    const response = await fetch('/api/kanban/cards/reorder', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ list_id: listId, card_positions: cardPositions })
+  reorderCards: async (
+    listId: string,
+    cardPositions: CardPosition[],
+    organizationId: string
+  ): Promise<ReorderResponse> => {
+    const response = await fetch("/api/kanban/cards/reorder", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        list_id: listId,
+        card_positions: cardPositions,
+        organizationId,
+      }),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to reorder cards');
+      throw new Error(errorData.error || "Failed to reorder cards");
     }
     return await response.json();
   },
@@ -758,81 +853,107 @@ export const kanbanAPI = {
   // ===== CARD MEMBERS =====
 
   // Assign project member to card
-  assignCardMember: async (cardId: string, projectMemberId: string, organizationId: string): Promise<{ card_member: CardMember }> => {
-    const response = await fetch('/api/kanban/card-members', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': organizationId,
+  assignCardMember: async (
+    cardId: string,
+    projectMemberId: string,
+    organizationId: string
+  ): Promise<{ card_member: CardMember }> => {
+    const response = await fetch("/api/kanban/card-members", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": organizationId,
       },
-      body: JSON.stringify({ card_id: cardId, project_member_id: projectMemberId, organizationId })
+      body: JSON.stringify({
+        card_id: cardId,
+        project_member_id: projectMemberId,
+        organizationId,
+      }),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to assign card member');
+      throw new Error(errorData.error || "Failed to assign card member");
     }
     return await response.json();
   },
 
   // Remove project member from card
-  removeCardMember: async (cardId: string, projectMemberId: string, organizationId: string): Promise<void> => {
-    const response = await fetch(`/api/kanban/card-members?card_id=${cardId}&project_member_id=${projectMemberId}&organizationId=${organizationId}`, {
-      method: 'DELETE',
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  removeCardMember: async (
+    cardId: string,
+    projectMemberId: string,
+    organizationId: string
+  ): Promise<void> => {
+    const response = await fetch(
+      `/api/kanban/card-members?card_id=${cardId}&project_member_id=${projectMemberId}&organizationId=${organizationId}`,
+      {
+        method: "DELETE",
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to remove card member');
+      throw new Error(errorData.error || "Failed to remove card member");
     }
   },
 
   // ===== LABELS =====
 
   // Get labels by board
-  getLabels: async (boardId: string, organizationId: string): Promise<LabelsResponse> => {
-    const response = await fetch(`/api/kanban/labels?board_id=${boardId}&organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getLabels: async (
+    boardId: string,
+    organizationId: string
+  ): Promise<LabelsResponse> => {
+    const response = await fetch(
+      `/api/kanban/labels?board_id=${boardId}&organizationId=${organizationId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch labels');
+      throw new Error(errorData.error || "Failed to fetch labels");
     }
     const data = await response.json();
     return { labels: data.labels || [] };
   },
 
   // Create label
-  createLabel: async (data: CreateLabelData & { organizationId: string }): Promise<LabelResponse> => {
-    const response = await fetch('/api/kanban/labels', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+  createLabel: async (
+    data: CreateLabelData & { organizationId: string }
+  ): Promise<LabelResponse> => {
+    const response = await fetch("/api/kanban/labels", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create label');
+      throw new Error(errorData.error || "Failed to create label");
     }
     const result = await response.json();
     return { label: result.label };
   },
 
   // Update label
-  updateLabel: async (id: string, data: UpdateLabelData): Promise<LabelResponse> => {
+  updateLabel: async (
+    id: string,
+    data: UpdateLabelData
+  ): Promise<LabelResponse> => {
     const response = await fetch(`/api/kanban/labels/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update label');
+      throw new Error(errorData.error || "Failed to update label");
     }
     const result = await response.json();
     return { label: result.label };
@@ -841,92 +962,118 @@ export const kanbanAPI = {
   // Delete label
   deleteLabel: async (id: string): Promise<void> => {
     const response = await fetch(`/api/kanban/labels/${id}`, {
-      method: 'DELETE'
+      method: "DELETE",
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete label');
+      throw new Error(errorData.error || "Failed to delete label");
     }
   },
 
   // ===== CARD LABELS =====
 
   // Assign label to card
-  assignCardLabel: async (cardId: string, labelId: string, organizationId: string): Promise<{ card_label: CardLabel }> => {
-    const response = await fetch('/api/kanban/card-labels', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': organizationId,
+  assignCardLabel: async (
+    cardId: string,
+    labelId: string,
+    organizationId: string
+  ): Promise<{ card_label: CardLabel }> => {
+    const response = await fetch("/api/kanban/card-labels", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": organizationId,
       },
-      body: JSON.stringify({ card_id: cardId, label_id: labelId, organizationId })
+      body: JSON.stringify({
+        card_id: cardId,
+        label_id: labelId,
+        organizationId,
+      }),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to assign card label');
+      throw new Error(errorData.error || "Failed to assign card label");
     }
     return await response.json();
   },
 
   // Remove label from card
-  removeCardLabel: async (cardId: string, labelId: string, organizationId: string): Promise<void> => {
-    const response = await fetch(`/api/kanban/card-labels?card_id=${cardId}&label_id=${labelId}&organizationId=${organizationId}`, {
-      method: 'DELETE',
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  removeCardLabel: async (
+    cardId: string,
+    labelId: string,
+    organizationId: string
+  ): Promise<void> => {
+    const response = await fetch(
+      `/api/kanban/card-labels?card_id=${cardId}&label_id=${labelId}&organizationId=${organizationId}`,
+      {
+        method: "DELETE",
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to remove card label');
+      throw new Error(errorData.error || "Failed to remove card label");
     }
   },
 
   // ===== CHECKLISTS =====
 
   // Get checklists by card
-  getChecklists: async (cardId: string, organizationId: string): Promise<ChecklistsResponse> => {
-    const response = await fetch(`/api/kanban/checklists?card_id=${cardId}&organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getChecklists: async (
+    cardId: string,
+    organizationId: string
+  ): Promise<ChecklistsResponse> => {
+    const response = await fetch(
+      `/api/kanban/checklists?card_id=${cardId}&organizationId=${organizationId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch checklists');
+      throw new Error(errorData.error || "Failed to fetch checklists");
     }
     const data = await response.json();
     return { checklists: data.checklists || [] };
   },
 
   // Create checklist
-  createChecklist: async (data: CreateChecklistData): Promise<ChecklistResponse> => {
-    const response = await fetch('/api/kanban/checklists', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+  createChecklist: async (
+    data: CreateChecklistData
+  ): Promise<ChecklistResponse> => {
+    const response = await fetch("/api/kanban/checklists", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create checklist');
+      throw new Error(errorData.error || "Failed to create checklist");
     }
     const result = await response.json();
     return { checklist: result.checklist };
   },
 
   // Update checklist
-  updateChecklist: async (id: string, data: UpdateChecklistData): Promise<ChecklistResponse> => {
+  updateChecklist: async (
+    id: string,
+    data: UpdateChecklistData
+  ): Promise<ChecklistResponse> => {
     const response = await fetch(`/api/kanban/checklists/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update checklist');
+      throw new Error(errorData.error || "Failed to update checklist");
     }
     const result = await response.json();
     return { checklist: result.checklist };
@@ -935,49 +1082,56 @@ export const kanbanAPI = {
   // Delete checklist
   deleteChecklist: async (id: string): Promise<void> => {
     const response = await fetch(`/api/kanban/checklists/${id}`, {
-      method: 'DELETE'
+      method: "DELETE",
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete checklist');
+      throw new Error(errorData.error || "Failed to delete checklist");
     }
   },
 
   // ===== CHECKLIST ITEMS =====
 
   // Create checklist item
-  createChecklistItem: async (data: CreateChecklistItemData): Promise<ChecklistItemResponse> => {
-    const response = await fetch('/api/kanban/checklist-items', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+  createChecklistItem: async (
+    data: CreateChecklistItemData
+  ): Promise<ChecklistItemResponse> => {
+    const response = await fetch("/api/kanban/checklist-items", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create checklist item');
+      throw new Error(errorData.error || "Failed to create checklist item");
     }
     const result = await response.json();
     return { checklist_item: result.checklist_item };
   },
 
   // Update checklist item
-  updateChecklistItem: async (id: string, data: UpdateChecklistItemData): Promise<ChecklistItemResponse> => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  updateChecklistItem: async (
+    id: string,
+    data: UpdateChecklistItemData
+  ): Promise<ChecklistItemResponse> => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (data.organizationId) {
-      headers['x-organization-id'] = data.organizationId;
+      headers["x-organization-id"] = data.organizationId;
     }
-    
+
     const response = await fetch(`/api/kanban/checklist-items/${id}`, {
-      method: 'PATCH',
+      method: "PATCH",
       headers,
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update checklist item');
+      throw new Error(errorData.error || "Failed to update checklist item");
     }
     const result = await response.json();
     return { checklist_item: result.checklist_item };
@@ -986,26 +1140,32 @@ export const kanbanAPI = {
   // Delete checklist item
   deleteChecklistItem: async (id: string): Promise<void> => {
     const response = await fetch(`/api/kanban/checklist-items/${id}`, {
-      method: 'DELETE'
+      method: "DELETE",
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete checklist item');
+      throw new Error(errorData.error || "Failed to delete checklist item");
     }
   },
 
   // ===== COMMENTS =====
 
   // Get comments by card
-  getComments: async (cardId: string, organizationId: string): Promise<CommentsResponse> => {
-    const response = await fetch(`/api/kanban/comments?card_id=${cardId}&organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getComments: async (
+    cardId: string,
+    organizationId: string
+  ): Promise<CommentsResponse> => {
+    const response = await fetch(
+      `/api/kanban/comments?card_id=${cardId}&organizationId=${organizationId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch comments');
+      throw new Error(errorData.error || "Failed to fetch comments");
     }
     const data = await response.json();
     return { comments: data.comments || [] };
@@ -1013,37 +1173,42 @@ export const kanbanAPI = {
 
   // Create comment
   createComment: async (data: CreateCommentData): Promise<CommentResponse> => {
-    const response = await fetch('/api/kanban/comments', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-organization-id': data.organizationId,
+    const response = await fetch("/api/kanban/comments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-organization-id": data.organizationId,
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create comment');
+      throw new Error(errorData.error || "Failed to create comment");
     }
     const result = await response.json();
     return { comment: result.comment };
   },
 
   // Update comment
-  updateComment: async (id: string, data: UpdateCommentData): Promise<CommentResponse> => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  updateComment: async (
+    id: string,
+    data: UpdateCommentData
+  ): Promise<CommentResponse> => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
     if (data.organizationId) {
-      headers['x-organization-id'] = data.organizationId;
+      headers["x-organization-id"] = data.organizationId;
     }
-    
+
     const response = await fetch(`/api/kanban/comments/${id}`, {
-      method: 'PATCH',
+      method: "PATCH",
       headers,
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update comment');
+      throw new Error(errorData.error || "Failed to update comment");
     }
     const result = await response.json();
     return { comment: result.comment };
@@ -1052,61 +1217,71 @@ export const kanbanAPI = {
   // Delete comment
   deleteComment: async (id: string): Promise<void> => {
     const response = await fetch(`/api/kanban/comments/${id}`, {
-      method: 'DELETE'
+      method: "DELETE",
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete comment');
+      throw new Error(errorData.error || "Failed to delete comment");
     }
   },
 
   // ===== ATTACHMENTS =====
 
   // Get attachments by card
-  getAttachments: async (cardId: string, organizationId: string): Promise<AttachmentsResponse> => {
-    const response = await fetch(`/api/kanban/attachments?card_id=${cardId}&organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getAttachments: async (
+    cardId: string,
+    organizationId: string
+  ): Promise<AttachmentsResponse> => {
+    const response = await fetch(
+      `/api/kanban/attachments?card_id=${cardId}&organizationId=${organizationId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch attachments');
+      throw new Error(errorData.error || "Failed to fetch attachments");
     }
     const data = await response.json();
     return { attachments: data.attachments || [] };
   },
 
   // Create attachment (upload file)
-  createAttachment: async (data: CreateAttachmentData): Promise<AttachmentResponse> => {
+  createAttachment: async (
+    data: CreateAttachmentData
+  ): Promise<AttachmentResponse> => {
     const formData = new FormData();
-    formData.append('file', data.file);
-    formData.append('card_id', data.card_id);
-    formData.append('organizationId', data.organizationId);
+    formData.append("file", data.file);
+    formData.append("card_id", data.card_id);
+    formData.append("organizationId", data.organizationId);
 
-    const response = await fetch('/api/kanban/attachments', {
-      method: 'POST',
+    const response = await fetch("/api/kanban/attachments", {
+      method: "POST",
       headers: {
-        'x-organization-id': data.organizationId,
+        "x-organization-id": data.organizationId,
       },
-      body: formData
+      body: formData,
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to upload attachment');
+      throw new Error(errorData.error || "Failed to upload attachment");
     }
     const result = await response.json();
     return { attachment: result.attachment };
   },
 
   // Get attachment download URL
-  getAttachmentDownload: async (id: string): Promise<AttachmentDownloadResponse> => {
+  getAttachmentDownload: async (
+    id: string
+  ): Promise<AttachmentDownloadResponse> => {
     const response = await fetch(`/api/kanban/attachments/${id}`, {
-      method: 'GET'
+      method: "GET",
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to get attachment');
+      throw new Error(errorData.error || "Failed to get attachment");
     }
     return await response.json();
   },
@@ -1114,36 +1289,50 @@ export const kanbanAPI = {
   // Delete attachment
   deleteAttachment: async (id: string): Promise<void> => {
     const response = await fetch(`/api/kanban/attachments/${id}`, {
-      method: 'DELETE'
+      method: "DELETE",
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to delete attachment');
+      throw new Error(errorData.error || "Failed to delete attachment");
     }
   },
 
   // ===== ACTIVITIES =====
 
   // Get activities by board
-  getActivitiesByBoard: async (boardId: string, limit = 50, offset = 0): Promise<ActivitiesResponse> => {
-    const response = await fetch(`/api/kanban/activities?board_id=${boardId}&limit=${limit}&offset=${offset}`);
+  getActivitiesByBoard: async (
+    boardId: string,
+    limit = 50,
+    offset = 0
+  ): Promise<ActivitiesResponse> => {
+    const response = await fetch(
+      `/api/kanban/activities?board_id=${boardId}&limit=${limit}&offset=${offset}`
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch activities');
+      throw new Error(errorData.error || "Failed to fetch activities");
     }
     return await response.json();
   },
 
   // Get activities by card
-  getActivitiesByCard: async (cardId: string, limit = 50, offset = 0, organizationId: string): Promise<ActivitiesResponse> => {
-    const response = await fetch(`/api/kanban/activities?card_id=${cardId}&limit=${limit}&offset=${offset}&organizationId=${organizationId}`, {
-      headers: {
-        'x-organization-id': organizationId,
-      },
-    });
+  getActivitiesByCard: async (
+    cardId: string,
+    limit = 50,
+    offset = 0,
+    organizationId: string
+  ): Promise<ActivitiesResponse> => {
+    const response = await fetch(
+      `/api/kanban/activities?card_id=${cardId}&limit=${limit}&offset=${offset}&organizationId=${organizationId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch activities');
+      throw new Error(errorData.error || "Failed to fetch activities");
     }
     return await response.json();
   },
@@ -1151,7 +1340,11 @@ export const kanbanAPI = {
   // ===== NOTIFICATIONS =====
 
   // Get user notifications
-  getNotifications: async (isRead?: boolean, limit = 50, offset = 0): Promise<NotificationsResponse> => {
+  getNotifications: async (
+    isRead?: boolean,
+    limit = 50,
+    offset = 0
+  ): Promise<NotificationsResponse> => {
     let url = `/api/kanban/notifications?limit=${limit}&offset=${offset}`;
     if (isRead !== undefined) {
       url += `&is_read=${isRead}`;
@@ -1159,24 +1352,26 @@ export const kanbanAPI = {
     const response = await fetch(url);
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch notifications');
+      throw new Error(errorData.error || "Failed to fetch notifications");
     }
     return await response.json();
   },
 
   // Create notification
-  createNotification: async (data: CreateNotificationData): Promise<{ notification: BoardNotification }> => {
-    const response = await fetch('/api/kanban/notifications', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+  createNotification: async (
+    data: CreateNotificationData
+  ): Promise<{ notification: BoardNotification }> => {
+    const response = await fetch("/api/kanban/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
     });
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create notification');
+      throw new Error(errorData.error || "Failed to create notification");
     }
     return await response.json();
-  }
+  },
 };
 
 // Export all types
@@ -1231,5 +1426,5 @@ export type {
   ActivitiesResponse,
   NotificationsResponse,
   BulkOperationResponse,
-  ReorderResponse
+  ReorderResponse,
 };
