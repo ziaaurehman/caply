@@ -95,6 +95,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const listReorderAbortControllerRef = useRef<AbortController | null>(null);
   const [isListReordering, setIsListReordering] = useState(false);
   const loadingRequestsRef = useRef<Set<string>>(new Set());
+  const [creatingCardForList, setCreatingCardForList] = useState<string | null>(
+    null
+  );
 
   // List Drag & Drop State
   const [listDragState, setListDragState] = useState<{
@@ -1396,125 +1399,180 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     setIsAddTaskModalOpen(true);
   };
 
+  // const handleSaveCard = async (listId: string, cardData: any) => {
+  //   if (!currentOrganization?.id) return;
+
+  //   // Store original state for potential rollback
+  //   const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
+
+  //   try {
+  //     // Create a temporary card with all the data for optimistic update
+  //     const tempCard: Card = {
+  //       id: `temp-${Date.now()}`, // Temporary ID
+  //       list_id: listId,
+  //       title: cardData.title,
+  //       description: cardData.description || undefined,
+  //       due_date: cardData.due_date || undefined,
+  //       cover_color: cardData.cover_color || undefined,
+  //       cover_image: undefined,
+  //       position: 0, // Will be updated by API
+  //       is_completed: false, // Add missing property
+  //       is_archived: false,
+  //       created_by: currentOrganization.id, // Add missing property - using organization ID as fallback
+  //       created_at: new Date().toISOString(),
+  //       updated_at: new Date().toISOString(),
+
+  //       // Add member data optimistically
+  //       card_members:
+  //         cardData.assignee_ids
+  //           ?.map((memberId: string) => {
+  //             const member = projectMembers.find((m) => m.id === memberId);
+  //             return member
+  //               ? {
+  //                   id: `temp-member-${Date.now()}-${memberId}`,
+  //                   card_id: `temp-${Date.now()}`,
+  //                   project_member_id: memberId,
+  //                   assigned_at: new Date().toISOString(),
+  //                   project_members: member,
+  //                 }
+  //               : null;
+  //           })
+  //           .filter(Boolean) || [],
+
+  //       // Add other card properties
+  //       card_labels: [], // Use correct property name from interface
+  //       checklists: [],
+  //       comments: [],
+  //       attachments: [],
+  //     };
+
+  //     // OPTIMISTIC UPDATE: Add the temporary card immediately with all data
+  //     setKanbanState((prev) => ({
+  //       ...prev,
+  //       lists: prev.lists.map((list) =>
+  //         list.id === listId
+  //           ? { ...list, cards: [...(list.cards || []), tempCard] }
+  //           : list
+  //       ),
+  //     }));
+
+  //     // Make API calls in the background
+  //     setTimeout(async () => {
+  //       try {
+  //         // Create the card
+  //         const newCard = await kanbanAPI.createCard({
+  //           list_id: listId,
+  //           title: cardData.title,
+  //           description: cardData.description,
+  //           due_date: cardData.due_date,
+  //           cover_color: cardData.cover_color,
+  //           organizationId: currentOrganization.id,
+  //         });
+
+  //         // Assign members to the card if any were selected
+  //         if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
+  //           for (const projectMemberId of cardData.assignee_ids) {
+  //             await kanbanAPI.assignCardMember(
+  //               newCard.card.id,
+  //               projectMemberId,
+  //               currentOrganization.id
+  //             );
+  //           }
+  //         }
+
+  //         // Replace the temporary card with the real one
+  //         setKanbanState((prev) => ({
+  //           ...prev,
+  //           lists: prev.lists.map((list) =>
+  //             list.id === listId
+  //               ? {
+  //                   ...list,
+  //                   cards:
+  //                     list.cards?.map((card) =>
+  //                       card.id === tempCard.id ? newCard.card : card
+  //                     ) || [],
+  //                 }
+  //               : list
+  //           ),
+  //         }));
+
+  //         setIsAddTaskModalOpen(false);
+  //         toast.success("Card created successfully!");
+  //       } catch (error) {
+  //         console.error("Error creating card:", error);
+  //         toast.error("Failed to create card");
+
+  //         // ROLLBACK: Remove the temporary card
+  //         setKanbanState((prev) => ({
+  //           ...prev,
+  //           lists: originalLists,
+  //         }));
+  //       }
+  //     }, 0);
+  //   } catch (error) {
+  //     console.error("Error creating card:", error);
+  //     toast.error("Failed to create card");
+
+  //     // ROLLBACK: Revert the optimistic update on failure
+  //     setKanbanState((prev) => ({
+  //       ...prev,
+  //       lists: originalLists,
+  //     }));
+  //   }
+  // };
+
   const handleSaveCard = async (listId: string, cardData: any) => {
     if (!currentOrganization?.id) return;
 
-    // Store original state for potential rollback
-    const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
-
     try {
-      // Create a temporary card with all the data for optimistic update
-      const tempCard: Card = {
-        id: `temp-${Date.now()}`, // Temporary ID
+      // Set loading state for this specific list
+      setCreatingCardForList(listId);
+
+      // Close the modal immediately
+      setIsAddTaskModalOpen(false);
+
+      // Create the card via API
+      const newCard = await kanbanAPI.createCard({
         list_id: listId,
         title: cardData.title,
-        description: cardData.description || undefined,
-        due_date: cardData.due_date || undefined,
-        cover_color: cardData.cover_color || undefined,
-        cover_image: undefined,
-        position: 0, // Will be updated by API
-        is_completed: false, // Add missing property
-        is_archived: false,
-        created_by: currentOrganization.id, // Add missing property - using organization ID as fallback
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        description: cardData.description,
+        due_date: cardData.due_date,
+        cover_color: cardData.cover_color,
+        organizationId: currentOrganization.id,
+      });
 
-        // Add member data optimistically
-        card_members:
-          cardData.assignee_ids
-            ?.map((memberId: string) => {
-              const member = projectMembers.find((m) => m.id === memberId);
-              return member
-                ? {
-                    id: `temp-member-${Date.now()}-${memberId}`,
-                    card_id: `temp-${Date.now()}`,
-                    project_member_id: memberId,
-                    assigned_at: new Date().toISOString(),
-                    project_members: member,
-                  }
-                : null;
-            })
-            .filter(Boolean) || [],
+      // Assign members to the card if any were selected
+      if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
+        for (const projectMemberId of cardData.assignee_ids) {
+          await kanbanAPI.assignCardMember(
+            newCard.card.id,
+            projectMemberId,
+            currentOrganization.id
+          );
+        }
+      }
 
-        // Add other card properties
-        card_labels: [], // Use correct property name from interface
-        checklists: [],
-        comments: [],
-        attachments: [],
-      };
-
-      // OPTIMISTIC UPDATE: Add the temporary card immediately with all data
+      // Add the real card to the state
       setKanbanState((prev) => ({
         ...prev,
         lists: prev.lists.map((list) =>
           list.id === listId
-            ? { ...list, cards: [...(list.cards || []), tempCard] }
+            ? {
+                ...list,
+                cards: [...(list.cards || []), newCard.card],
+                isLoadingCards: false, // Ensure loading state is cleared
+              }
             : list
         ),
       }));
 
-      // Make API calls in the background
-      setTimeout(async () => {
-        try {
-          // Create the card
-          const newCard = await kanbanAPI.createCard({
-            list_id: listId,
-            title: cardData.title,
-            description: cardData.description,
-            due_date: cardData.due_date,
-            cover_color: cardData.cover_color,
-            organizationId: currentOrganization.id,
-          });
-
-          // Assign members to the card if any were selected
-          if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
-            for (const projectMemberId of cardData.assignee_ids) {
-              await kanbanAPI.assignCardMember(
-                newCard.card.id,
-                projectMemberId,
-                currentOrganization.id
-              );
-            }
-          }
-
-          // Replace the temporary card with the real one
-          setKanbanState((prev) => ({
-            ...prev,
-            lists: prev.lists.map((list) =>
-              list.id === listId
-                ? {
-                    ...list,
-                    cards:
-                      list.cards?.map((card) =>
-                        card.id === tempCard.id ? newCard.card : card
-                      ) || [],
-                  }
-                : list
-            ),
-          }));
-
-          setIsAddTaskModalOpen(false);
-          toast.success("Card created successfully!");
-        } catch (error) {
-          console.error("Error creating card:", error);
-          toast.error("Failed to create card");
-
-          // ROLLBACK: Remove the temporary card
-          setKanbanState((prev) => ({
-            ...prev,
-            lists: originalLists,
-          }));
-        }
-      }, 0);
+      toast.success("Card created successfully!");
     } catch (error) {
       console.error("Error creating card:", error);
       toast.error("Failed to create card");
-
-      // ROLLBACK: Revert the optimistic update on failure
-      setKanbanState((prev) => ({
-        ...prev,
-        lists: originalLists,
-      }));
+    } finally {
+      // Clear loading state
+      setCreatingCardForList(null);
     }
   };
 

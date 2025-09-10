@@ -30,10 +30,6 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import {
-  hasRole,
-  hasPermission,
-  getUserPermissions,
-  isAdmin,
   isManagerOrAbove,
   canManageRoles,
   canViewLeave,

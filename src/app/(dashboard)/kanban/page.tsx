@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 import KanbanBoard from "@/components/pages/kanban/kanbanPage";
 import { projectAPI } from "@/utils/api/project";
@@ -13,9 +13,25 @@ interface Project {
   kanban_enabled?: boolean;
 }
 
+// Custom debounce hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
 export default function Kanban() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [filteredProjects, setFilteredProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null
   );
@@ -23,6 +39,9 @@ export default function Kanban() {
   const [error, setError] = useState<string | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+
+  // Debounce the search input
+  const debouncedSearch = useDebounce(projectSearch, 300);
 
   // Load persisted project selection on mount
   useEffect(() => {
@@ -46,6 +65,7 @@ export default function Kanban() {
     }
   }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
 
+  // Remove selectedProjectId from dependencies to prevent reloading
   const loadProjects = useCallback(async () => {
     if (!currentOrganization?.id) return;
 
@@ -55,7 +75,6 @@ export default function Kanban() {
       const response = await projectAPI.getProjects(currentOrganization.id);
       const kanbanProjects = response.projects.filter((p) => p.kanban_enabled);
       setProjects(kanbanProjects);
-      setFilteredProjects(kanbanProjects);
 
       // Auto-select first project if available and no saved selection
       if (kanbanProjects.length > 0 && !selectedProjectId) {
@@ -77,7 +96,7 @@ export default function Kanban() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentOrganization?.id, selectedProjectId]);
+  }, [currentOrganization?.id]); // Removed selectedProjectId from dependencies
 
   useEffect(() => {
     if (currentOrganization?.id) {
@@ -85,17 +104,15 @@ export default function Kanban() {
     }
   }, [loadProjects, currentOrganization?.id]);
 
-  // Handle project search
-  useEffect(() => {
-    if (!projectSearch.trim()) {
-      setFilteredProjects(projects);
-    } else {
-      const filtered = projects.filter((project) =>
-        project.name.toLowerCase().includes(projectSearch.toLowerCase())
-      );
-      setFilteredProjects(filtered);
+  // Memoize filtered projects to prevent unnecessary recalculations
+  const filteredProjects = useMemo(() => {
+    if (!debouncedSearch.trim()) {
+      return projects;
     }
-  }, [projectSearch, projects]);
+    return projects.filter((project) =>
+      project.name.toLowerCase().includes(debouncedSearch.toLowerCase())
+    );
+  }, [projects, debouncedSearch]);
 
   // Handle click outside to close dropdown
   useEffect(() => {
@@ -103,29 +120,39 @@ export default function Kanban() {
       const dropdown = document.getElementById("project-dropdown");
       if (dropdown && !dropdown.contains(event.target as Node)) {
         setIsProjectDropdownOpen(false);
+        // Reset search when closing dropdown if no project is selected
+        if (!selectedProjectId) {
+          setProjectSearch("");
+        }
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [selectedProjectId]);
 
   const handleProjectSelect = (projectId: string, projectName: string) => {
-    if (selectedProjectId !== projectId) {
-      setSelectedProjectId(projectId);
-      localStorage.setItem("kanban-selected-project", projectId);
-    }
-    setProjectSearch(projectName);
+    setSelectedProjectId(projectId);
+    localStorage.setItem("kanban-selected-project", projectId);
+    setProjectSearch(""); // Clear search when selecting
     setIsProjectDropdownOpen(false);
-    // Persist selection to localStorage
+  };
+
+  const handleInputFocus = () => {
+    setIsProjectDropdownOpen(true);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setProjectSearch(value);
+    setIsProjectDropdownOpen(true);
   };
 
   const clearProjectSearch = () => {
     setProjectSearch("");
-    // setSelectedProjectId(null)
+    setSelectedProjectId(null);
     setIsProjectDropdownOpen(true);
-    // Remove from localStorage
-    // localStorage.removeItem('kanban-selected-project')
+    localStorage.removeItem("kanban-selected-project");
   };
 
   const getSelectedProjectName = () => {
@@ -207,23 +234,17 @@ export default function Kanban() {
                 <Search className="h-4 w-4 text-gray-400 mr-2" />
                 <input
                   type="text"
-                  value={
-                    selectedProjectId ? getSelectedProjectName() : projectSearch
-                  }
-                  onChange={(e) => {
-                    setProjectSearch(e.target.value);
-                    setIsProjectDropdownOpen(true);
-                  }}
+                  value={projectSearch || getSelectedProjectName()}
+                  onChange={handleInputChange}
+                  onFocus={handleInputFocus}
                   placeholder="Search projects..."
                   className="flex-1 bg-transparent border-none outline-none text-gray-700 placeholder-gray-400"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!selectedProjectId) {
-                      setIsProjectDropdownOpen(true);
-                    }
+                    handleInputFocus();
                   }}
                 />
-                {selectedProjectId && (
+                {(selectedProjectId || projectSearch) && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -277,7 +298,7 @@ export default function Kanban() {
                     ))
                   ) : (
                     <div className="py-2 px-3 text-gray-500 text-sm">
-                      {projectSearch
+                      {debouncedSearch
                         ? "No projects found"
                         : "No Kanban projects available"}
                     </div>

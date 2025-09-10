@@ -215,13 +215,16 @@ export async function GET(request: NextRequest) {
 
       // Use PostgreSQL's text search for better performance
       const searchPattern = `%${search.toLowerCase()}%`;
+      // searchCountQuery = searchCountQuery.or(
+      //   `department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern}`
+      // );
       searchCountQuery = searchCountQuery.or(
-        `department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern}`
+        `(department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern})`
       );
 
       const { count, error: searchCountError } = await searchCountQuery;
       totalCount = count || 0;
-      countError = searchCountError;
+      countError = searchCountError?.message ?? "";
 
       console.log("📊 Optimized search count result:", {
         searchTerm: search,
@@ -309,9 +312,12 @@ export async function GET(request: NextRequest) {
 
       // Use the same optimized search pattern as count query
       const searchPattern = `%${search.toLowerCase()}%`;
-      membersQuery = membersQuery.or(
-        `department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern}`
-      );
+      membersQuery = membersQuery.ilike("users.email", searchPattern);
+      // .ilike("department", searchPattern)
+      // .ilike("users.full_name", searchPattern);
+      // .or(
+      //   `department.ilike.${searchPattern}, users.email.ilike.${searchPattern}, users.full_name.ilike.${searchPattern}`
+      // );
     }
 
     // Add pagination and ordering
