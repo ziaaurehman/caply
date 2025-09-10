@@ -13,7 +13,6 @@ import {
 import Link from "next/link";
 import { toast } from "sonner";
 import { projectAPI, type Project } from "@/utils/api";
-import { formatCurrency, cn } from "@/lib/utils";
 import { useConfirmation } from "@/lib/hooks/useConfirmation";
 import { createDeleteConfirmation } from "@/utils/confirmations";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
@@ -57,6 +56,27 @@ export default function ProjectsPage() {
     userOrganizations,
   } = useOrganizationStore();
 
+  // Initialize organization store if needed
+  useEffect(() => {
+    if (!organizationLoading && userOrganizations.length === 0) {
+      fetchUserOrganizations();
+    }
+  }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
+
+  // Handle clicking outside the status dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const dropdown = document.getElementById("status-dropdown");
+      if (dropdown && !dropdown.contains(event.target as Node)) {
+        setIsStatusDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Fetch projects function
   const fetchProjects = useCallback(
     async (isInitialLoad = false) => {
       if (!currentOrganization?.id) return;
@@ -70,12 +90,21 @@ export default function ProjectsPage() {
 
       setError(null);
       try {
+        console.log("Fetching projects with params:", {
+          page: currentPage,
+          limit: itemsPerPage,
+          search: searchTerm,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+        });
+
         const data = await projectAPI.getProjects(currentOrganization.id, {
           page: currentPage,
           limit: itemsPerPage,
           search: searchTerm,
           status: statusFilter !== "all" ? statusFilter : undefined,
         });
+
+        console.log("Projects API response:", data);
 
         setProjects(data.projects || []);
 
@@ -110,6 +139,31 @@ export default function ProjectsPage() {
       statusFilter,
     ]
   );
+
+  // Fetch projects when organization, page, or filters change
+  useEffect(() => {
+    if (currentOrganization?.id) {
+      fetchProjects(true);
+    }
+  }, [currentOrganization?.id, currentPage, statusFilter]);
+
+  // Handle search with debounce
+  useEffect(() => {
+    if (!currentOrganization?.id) return;
+
+    // Reset to first page when search term changes
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+      return; // This will trigger the above useEffect
+    }
+
+    // Debounce search
+    const timeoutId = setTimeout(() => {
+      fetchProjects(false);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
 
   const fetchProjectsProgress = async (projectIds: string[]) => {
     if (projectIds.length === 0) return;
@@ -146,64 +200,6 @@ export default function ProjectsPage() {
       setProgressLoading(false);
     }
   };
-
-  // Initialize organization store if needed
-  useEffect(() => {
-    if (!organizationLoading && userOrganizations.length === 0) {
-      fetchUserOrganizations();
-    }
-  }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
-
-  // Handle clicking outside the status dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const dropdown = document.getElementById("status-dropdown");
-      if (dropdown && !dropdown.contains(event.target as Node)) {
-        setIsStatusDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (currentOrganization?.id) {
-      // Initial load or pagination change
-      const isInitialLoad = currentPage === 1 && searchTerm === "";
-      fetchProjects(isInitialLoad);
-    }
-  }, [
-    currentOrganization?.id,
-    currentPage,
-    statusFilter,
-    fetchProjects,
-    searchTerm,
-  ]);
-
-  // Optimized search with minimal delay
-  useEffect(() => {
-    // For empty search, load immediately
-    if (searchTerm === "") {
-      if (currentPage !== 1) {
-        setCurrentPage(1);
-      } else if (currentOrganization?.id) {
-        fetchProjects(false); // Not initial load
-      }
-      return;
-    }
-
-    // For search terms, use minimal debounce
-    const timeoutId = setTimeout(() => {
-      if (currentPage !== 1) {
-        setCurrentPage(1); // Reset to first page on search
-      } else if (currentOrganization?.id) {
-        fetchProjects(false); // Not initial load
-      }
-    }, 100); // Reduced to 100ms for fast response
-
-    return () => clearTimeout(timeoutId);
-  }, [searchTerm, currentPage, currentOrganization?.id, fetchProjects]);
 
   const handleEdit = (project: Project) => {
     setSelectedProject(project);
@@ -413,8 +409,6 @@ export default function ProjectsPage() {
         return "bg-green-100 text-green-800";
     }
   };
-
-  // Projects are already filtered by API, no need for client-side filtering
 
   if (error) {
     return (
@@ -655,7 +649,6 @@ export default function ProjectsPage() {
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          {/* <div className={`h-3 w-3 rounded-full border-2 ${statusIcon} mr-3`}></div> */}
                           <div onClick={() => handleProjectDetails(project.id)}>
                             <div className="text-sm font-medium text-gray-900">
                               {project.name}

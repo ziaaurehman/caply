@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Plus,
   Pencil,
@@ -33,12 +33,11 @@ import Pagination from "@/components/ui/Pagination";
 import { Input } from "@/components/ui/Input";
 
 const TeamMembersPage: React.FC = () => {
-  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [allMembers, setAllMembers] = useState<TeamMember[]>([]);
   const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resendingInvitationId, setResendingInvitationId] = useState<
     string | null
@@ -46,8 +45,6 @@ const TeamMembersPage: React.FC = () => {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
   const [itemsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -55,76 +52,75 @@ const TeamMembersPage: React.FC = () => {
     useConfirmation();
   const { currentOrganization } = useOrganizationStore();
 
+  // Client-side filtering
+  const filteredMembers = useMemo(() => {
+    if (!searchTerm.trim()) {
+      return allMembers;
+    }
+
+    const searchLower = searchTerm.toLowerCase();
+    return allMembers.filter((member) => {
+      const fullName = member.users?.full_name?.toLowerCase() || "";
+      const email = member.users?.email?.toLowerCase() || "";
+      const department = member.department?.toLowerCase() || "";
+      const position = member.users?.position?.toLowerCase() || "";
+
+      return (
+        fullName.includes(searchLower) ||
+        email.includes(searchLower) ||
+        department.includes(searchLower) ||
+        position.includes(searchLower)
+      );
+    });
+  }, [allMembers, searchTerm]);
+
+  // Client-side pagination
+  const paginatedMembers = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredMembers.slice(startIndex, endIndex);
+  }, [filteredMembers, currentPage, itemsPerPage]);
+
+  // Calculate pagination metadata
+  const totalItems = filteredMembers.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+
   useEffect(() => {
     if (currentOrganization?.id) {
-      // Initial load or pagination change
-      const isInitialLoad = currentPage === 1 && searchTerm === "";
-      fetchTeamMembers(isInitialLoad);
+      fetchTeamMembers();
     }
-  }, [currentOrganization?.id, currentPage]);
+  }, [currentOrganization?.id]);
 
-  // Optimized search with minimal delay
+  // Reset to first page when search term changes
   useEffect(() => {
-    // For empty search, load immediately
-    if (searchTerm === "") {
       if (currentPage !== 1) {
         setCurrentPage(1);
-      } else if (currentOrganization?.id) {
-        fetchTeamMembers(false); // Not initial load
-      }
-      return;
     }
-
-    // For search terms, use minimal debounce
-    const timeoutId = setTimeout(() => {
-      if (currentPage !== 1) {
-        setCurrentPage(1); // Reset to first page on search
-      } else if (currentOrganization?.id) {
-        fetchTeamMembers(false); // Not initial load
-      }
-    }, 100); // Reduced to 100ms for even faster response
-
-    return () => clearTimeout(timeoutId);
   }, [searchTerm]);
 
-  const fetchTeamMembers = async (isInitialLoad = false) => {
+  const fetchTeamMembers = async () => {
     if (!currentOrganization?.id) return;
 
-    // Use different loading states based on operation type
-    if (isInitialLoad) {
       setIsLoading(true);
-    } else {
-      setIsSearching(true);
-    }
-
     setError(null);
+
     try {
+      // Fetch all members without search parameter
       const data = await teamAPI.getTeamMembers(currentOrganization.id, {
-        page: currentPage,
-        limit: itemsPerPage,
-        search: searchTerm,
+        page: 1,
+        limit: 1000, // Fetch all members for client-side filtering
         status: "active",
       });
 
-      setMembers(data.members || []);
+      setAllMembers(data.members || []);
       setInvitations(data.invitations || []);
-
-      // Update pagination metadata
-      if (data.pagination) {
-        setTotalPages(data.pagination.totalPages);
-        setTotalItems(data.pagination.total);
-      }
     } catch (error: any) {
       console.error("Error fetching team members:", error);
       const errorMessage = error.message || "Failed to connect to server";
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {
-      if (isInitialLoad) {
         setIsLoading(false);
-      } else {
-        setIsSearching(false);
-      }
     }
   };
 
@@ -134,7 +130,7 @@ const TeamMembersPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    const member = members.find((m) => m.id === id);
+    const member = allMembers.find((m) => m.id === id);
     const memberName = member?.users?.full_name || "this team member";
 
     const confirmation = createDeleteConfirmation({
@@ -147,7 +143,7 @@ const TeamMembersPage: React.FC = () => {
             throw new Error("No organization selected");
           }
           await teamAPI.deleteTeamMember(id, currentOrganization.id);
-          await fetchTeamMembers(false); // Refresh the list
+          await fetchTeamMembers(); // Refresh the list
         } catch (error: any) {
           // Handle specific error messages
           if (error.message.includes("organization owner")) {
@@ -208,7 +204,7 @@ const TeamMembersPage: React.FC = () => {
         toast.success("Team member invitation sent successfully");
       }
 
-      await fetchTeamMembers(false); // Refresh the list
+      await fetchTeamMembers(); // Refresh the list
     } catch (error: any) {
       console.error("Error saving member:", error);
       toast.error(error.message || "Failed to save team member");
@@ -293,7 +289,7 @@ const TeamMembersPage: React.FC = () => {
               <p>{error}</p>
             </div>
             <button
-              onClick={() => fetchTeamMembers(false)}
+              onClick={() => fetchTeamMembers()}
               className="mt-4 px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
             >
               Try Again
@@ -425,7 +421,7 @@ const TeamMembersPage: React.FC = () => {
                               toast.success(
                                 "Invitation cancelled successfully!"
                               );
-                              await fetchTeamMembers(false); // Refresh the list
+                              await fetchTeamMembers(); // Refresh the list
                             } catch (error: any) {
                               console.error(
                                 "Error cancelling invitation:",
@@ -456,16 +452,7 @@ const TeamMembersPage: React.FC = () => {
 
         {/* Team Members */}
         <div className="bg-white rounded-lg shadow-md p-6">
-          {isSearching ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
-              <span className="ml-2 text-gray-600">
-                {searchTerm
-                  ? "Searching team members..."
-                  : "Loading team members..."}
-              </span>
-            </div>
-          ) : members.length === 0 ? (
+          {paginatedMembers.length === 0 ? (
             <div className="text-center py-8">
               <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
                 {searchTerm ? (
@@ -551,7 +538,7 @@ const TeamMembersPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {members.map((member) => {
+                  {paginatedMembers.map((member) => {
                     const isActive = member.users?.is_active || false;
                     const statusIcon = isActive
                       ? "border-green-500"
@@ -654,7 +641,7 @@ const TeamMembersPage: React.FC = () => {
         </div>
 
         {/* Pagination */}
-        {!isLoading && members.length > 0 && (
+        {!isLoading && filteredMembers.length > 0 && (
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
