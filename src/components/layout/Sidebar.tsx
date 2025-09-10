@@ -424,21 +424,6 @@ export default function Sidebar({
                   isCollapsed={sidebarCollapsed}
                 />
               ))}
-
-              {/* Leave menu: show skeleton while context is loading, else conditionally render */}
-              {isContextLoading ? (
-                <SkeletonNavItem isCollapsed={sidebarCollapsed} />
-              ) : (
-                userCanViewLeave && (
-                  <NavItem
-                    href="/leave"
-                    icon={<Palmtree size={18} />}
-                    label="Leave"
-                    active={pathname === "/leave"}
-                    isCollapsed={sidebarCollapsed}
-                  />
-                )
-              )}
             </NavSection>
 
             {/* Administration */}
