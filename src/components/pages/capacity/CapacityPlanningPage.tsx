@@ -141,17 +141,18 @@ export default function CapacityPlanningPage() {
     setViewMode(mode);
   };
 
-  // Fetch projects from API
+  // Fetch projects from API - using same pattern as Kanban page
   const fetchProjects = async () => {
     if (!currentOrganization?.id) return;
     
     try {
-      const response = await projectAPI.getProjects(currentOrganization.id, { capacity_planning_enabled: true });
-      const fetchedProjects = response.projects;
-      setProjects(fetchedProjects);
+      const response = await projectAPI.getProjects(currentOrganization.id);
+      // Filter projects with capacity planning enabled (same pattern as Kanban filtering)
+      const capacityProjects = response.projects.filter((p) => p.capacity_planning_enabled);
+      setProjects(capacityProjects);
       
       // Auto-select first project if any projects exist and no project is selected
-      if (fetchedProjects.length > 0 && selectedProject === 'all') {
+      if (capacityProjects.length > 0 && selectedProject === 'all') {
         // Keep 'all' selected by default to show overview of all projects
       }
     } catch (err) {
