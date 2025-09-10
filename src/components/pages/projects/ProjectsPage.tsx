@@ -228,7 +228,6 @@ export default function ProjectsPage() {
       onDelete: async () => {
         try {
           await projectAPI.deleteProject(id, currentOrganization.id);
-          toast.success(`Project "${projectName}" deleted successfully`);
           await fetchProjects(false);
         } catch (err: any) {
           console.error("Error deleting project:", err);
