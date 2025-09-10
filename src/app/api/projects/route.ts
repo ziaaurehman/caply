@@ -3,10 +3,12 @@ import { createClient } from "@/utils/supabase/server";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
-import { redisGetJSON, redisSetJSON, redisDel } from "@/utils/redis";
+// COMMENTED OUT REDIS CACHING FOR NOW
+// import { redisGetJSON, redisSetJSON, redisDel } from "@/utils/redis";
 
 // Cache TTL - 7 days for page 1 only (most frequently accessed)
-const PAGE_ONE_CACHE_TTL = 604800; // 7 days in seconds
+// COMMENTED OUT CACHE TTL FOR NOW
+// const PAGE_ONE_CACHE_TTL = 604800; // 7 days in seconds
 
 export async function GET(req: NextRequest) {
   console.log("🔍 GET /api/projects - Starting request");
@@ -57,27 +59,29 @@ export async function GET(req: NextRequest) {
         (p) => p.resource === "projects" && p.action === "manage"
       );
 
+    // COMMENTED OUT REDIS CACHING FOR NOW
     // Only cache page 1 with 10 items for 7 days (most frequently accessed)
-    const shouldCache = page === 1 && limit === 10;
-    const cacheKey = shouldCache
-      ? `projects:page1:${organizationId}:${search}:${status}:${hasFullAccess ? "all" : userContext.userId}`
-      : null;
+    // const shouldCache = page === 1 && limit === 10;
+    // const cacheKey = shouldCache
+    //   ? `projects:page1:${organizationId}:${search}:${status}:${hasFullAccess ? "all" : userContext.userId}`
+    //   : null;
 
+    // COMMENTED OUT REDIS CACHING FOR NOW
     // Try to get cached result first (only for page 1)
-    if (shouldCache && cacheKey) {
-      try {
-        const cached = await redisGetJSON<any>(cacheKey);
-        if (cached) {
-          console.log("📋 Returning cached projects page 1 result");
-          return NextResponse.json(cached);
-        }
-      } catch (cacheError) {
-        console.log(
-          "⚠️ Cache read failed, proceeding with database query:",
-          cacheError
-        );
-      }
-    }
+    // if (shouldCache && cacheKey) {
+    //   try {
+    //     const cached = await redisGetJSON<any>(cacheKey);
+    //     if (cached) {
+    //       console.log("📋 Returning cached projects page 1 result");
+    //       return NextResponse.json(cached);
+    //     }
+    //   } catch (cacheError) {
+    //     console.log(
+    //       "⚠️ Cache read failed, proceeding with database query:",
+    //       cacheError
+    //     );
+    //   }
+    // }
 
     const supabase = await createClient();
     console.log("✅ Organization access validated for:", organizationId);
@@ -314,15 +318,16 @@ export async function GET(req: NextRequest) {
       pagination: result.pagination,
     });
 
+    // COMMENTED OUT REDIS CACHING FOR NOW
     // Cache the result for future requests (only page 1 for 7 days)
-    if (shouldCache && cacheKey) {
-      try {
-        await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL);
-        console.log("💾 Cached projects page 1 result for 7 days");
-      } catch (cacheError) {
-        console.log("⚠️ Failed to cache result:", cacheError);
-      }
-    }
+    // if (shouldCache && cacheKey) {
+    //   try {
+    //     await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL);
+    //     console.log("💾 Cached projects page 1 result for 7 days");
+    //   } catch (cacheError) {
+    //     console.log("⚠️ Failed to cache result:", cacheError);
+    //   }
+    // }
 
     return NextResponse.json(result);
   } catch (error) {
@@ -635,7 +640,8 @@ export async function POST(req: NextRequest) {
             },
           };
 
-          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
+          // COMMENTED OUT REDIS CACHING FOR NOW
+          // await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
           console.log(
             "🔄 Refreshed projects page 1 cache after project creation"
           );
@@ -866,7 +872,8 @@ export async function PUT(req: NextRequest) {
 
       for (const key of projectCacheKeys) {
         try {
-          await redisDel(key);
+          // COMMENTED OUT REDIS CACHING FOR NOW
+          // await redisDel(key);
           console.log("🗑️ Cleared project cache:", key);
         } catch (cacheError) {
           console.warn("Failed to clear project cache:", key, cacheError);
@@ -945,7 +952,8 @@ export async function PUT(req: NextRequest) {
             },
           };
 
-          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
+          // COMMENTED OUT REDIS CACHING FOR NOW
+          // await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
           console.log(
             "🔄 Refreshed projects page 1 cache after project update"
           );

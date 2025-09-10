@@ -1526,10 +1526,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
     try {
       // Set loading state for this specific list
-      setCreatingCardForList(listId);
-
-      // Close the modal immediately
-      setIsAddTaskModalOpen(false);
+      // setCreatingCardForList(listId);
 
       // Create the card via API
       const newCard = await kanbanAPI.createCard({
@@ -1566,13 +1563,15 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         ),
       }));
 
+      setIsAddTaskModalOpen(false);
+
       toast.success("Card created successfully!");
     } catch (error) {
       console.error("Error creating card:", error);
       toast.error("Failed to create card");
     } finally {
       // Clear loading state
-      setCreatingCardForList(null);
+      // setCreatingCardForList(null);
     }
   };
 
