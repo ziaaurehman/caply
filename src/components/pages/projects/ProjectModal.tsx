@@ -50,6 +50,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
     reset,
   } = useForm<FormData>({
@@ -84,6 +85,8 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
           status: "active",
         },
   });
+
+  const watchedProjectType = watch('project_type');
 
   const onSubmit = async (data: FormData) => {
     if (!currentOrganization?.id) {
@@ -333,94 +336,106 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
               </div>
             )}
 
-            {/* Budget Section */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">
-                Budget & Billing
-              </h3>
+            {/* Budget Section - Only show for billable project types */}
+            {(watchedProjectType === "time_materials" || watchedProjectType === "fixed_fee") && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">
+                  Budget & Billing
+                </h3>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label
-                    htmlFor="budgetHours"
-                    className="block text-sm font-medium text-gray-700 mb-2"
-                  >
-                    Budget Hours
-                  </label>
-                  <input
-                    type="number"
-                    {...register("budget_hours", {
-                      min: { value: 0, message: "Hours must be positive" },
-                    })}
-                    className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
-                      errors.budget_hours
-                        ? "border-red-300 bg-red-50"
-                        : "border-gray-300"
-                    }`}
-                    placeholder="0"
-                  />
-                  {errors.budget_hours && (
-                    <p className="mt-1 text-sm text-red-600">
-                      {errors.budget_hours.message}
-                    </p>
-                  )}
-                </div>
+                {/* Time & Materials fields */}
+                {watchedProjectType === "time_materials" && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label
+                          htmlFor="billingRate"
+                          className="block text-sm font-medium text-gray-700 mb-2"
+                        >
+                          Billing Rate ($/hour) <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          {...register("billing_rate", {
+                            required: watchedProjectType === 'time_materials' ? 'Billing rate is required for Time & Materials projects' : false,
+                            min: { value: 0, message: "Rate must be positive" },
+                          })}
+                          className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                            errors.billing_rate
+                              ? "border-red-300 bg-red-50"
+                              : "border-gray-300"
+                          }`}
+                          placeholder="0.00"
+                        />
+                        {errors.billing_rate && (
+                          <p className="mt-1 text-sm text-red-600">
+                            {errors.billing_rate.message}
+                          </p>
+                        )}
+                      </div>
 
-                <div>
-                  <label
-                    htmlFor="budgetAmount"
-                    className="block text-sm font-medium text-gray-700 mb-2"
-                  >
-                    Budget Amount ($)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    {...register("budget_amount", {
-                      min: { value: 0, message: "Amount must be positive" },
-                    })}
-                    className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
-                      errors.budget_amount
-                        ? "border-red-300 bg-red-50"
-                        : "border-gray-300"
-                    }`}
-                    placeholder="0.00"
-                  />
-                  {errors.budget_amount && (
-                    <p className="mt-1 text-sm text-red-600">
-                      {errors.budget_amount.message}
-                    </p>
-                  )}
-                </div>
-              </div>
+                      <div>
+                        <label
+                          htmlFor="budgetHours"
+                          className="block text-sm font-medium text-gray-700 mb-2"
+                        >
+                          Budget Hours
+                        </label>
+                        <input
+                          type="number"
+                          {...register("budget_hours", {
+                            min: { value: 0, message: "Hours must be positive" },
+                          })}
+                          className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                            errors.budget_hours
+                              ? "border-red-300 bg-red-50"
+                              : "border-gray-300"
+                          }`}
+                          placeholder="0"
+                        />
+                        {errors.budget_hours && (
+                          <p className="mt-1 text-sm text-red-600">
+                            {errors.budget_hours.message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
 
-              <div>
-                <label
-                  htmlFor="billingRate"
-                  className="block text-sm font-medium text-gray-700 mb-2"
-                >
-                  Billing Rate ($/hour)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  {...register("billing_rate", {
-                    min: { value: 0, message: "Rate must be positive" },
-                  })}
-                  className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
-                    errors.billing_rate
-                      ? "border-red-300 bg-red-50"
-                      : "border-gray-300"
-                  }`}
-                  placeholder="0.00"
-                />
-                {errors.billing_rate && (
-                  <p className="mt-1 text-sm text-red-600">
-                    {errors.billing_rate.message}
-                  </p>
+                {/* Fixed Fee fields */}
+                {watchedProjectType === "fixed_fee" && (
+                  <div>
+                    <label
+                      htmlFor="budgetAmount"
+                      className="block text-sm font-medium text-gray-700 mb-2"
+                    >
+                      Fixed Fee Amount ($) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      {...register("budget_amount", {
+                        required: watchedProjectType === 'fixed_fee' ? 'Fixed fee amount is required for Fixed Fee projects' : false,
+                        min: { value: 0, message: "Amount must be positive" },
+                      })}
+                      className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
+                        errors.budget_amount
+                          ? "border-red-300 bg-red-50"
+                          : "border-gray-300"
+                      }`}
+                      placeholder="0.00"
+                    />
+                    {errors.budget_amount && (
+                      <p className="mt-1 text-sm text-red-600">
+                        {errors.budget_amount.message}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
+            )}
           </form>
         </div>
 
