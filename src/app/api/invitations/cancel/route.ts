@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authConfig } from '@/auth'
 import { createClient } from '@/utils/supabase/server'
-import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
+import { validateOrganizationAccessWithId, invalidateOrganizationCaches } from '@/utils/organizationUtils'
 
 export async function POST(request: NextRequest) {
   try {
@@ -66,6 +66,16 @@ export async function POST(request: NextRequest) {
     if (updateError) {
       console.error('Error cancelling invitation:', updateError)
       return NextResponse.json({ error: 'Failed to cancel invitation' }, { status: 500 })
+    }
+
+    // Invalidate team members cache to remove cancelled invitation from pending list
+    console.log('🔄 Invalidating team members cache after invitation cancellation')
+    try {
+      await invalidateOrganizationCaches(invitation.organization_id, undefined, true)
+      console.log('✅ Team members cache invalidated successfully')
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to invalidate team members cache:', cacheError)
+      // Don't fail the request if cache invalidation fails
     }
 
     return NextResponse.json({

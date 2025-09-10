@@ -77,6 +77,11 @@ const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
       // Leave management
       'leave_requests.read',
       'leave_requests.approve',
+       'leave_requests.create',
+      'leave_requests.read',
+      'leave_requests.update',
+      
+
       
       // Capacity planning
       'capacity.read',

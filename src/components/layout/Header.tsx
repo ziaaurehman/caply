@@ -29,7 +29,9 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
     switchOrganization,
     clearOrganizationData,
     fetchOrganizationContext,
-    warmCaches
+    warmCaches,
+    refreshUserOrganizations,
+    handleInvitationAccepted
   } = useOrganizationStore()
 
   // Initialize data with progressive loading
@@ -57,7 +59,27 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
     }
 
     initializeData()
-  }, [session?.user?.id, fetchUserOrganizations, fetchOrganizationContext, switchOrganization, warmCaches, userOrganizations.length, currentOrganization])
+  }, [session?.user?.id, fetchUserOrganizations, fetchOrganizationContext, switchOrganization, warmCaches, userOrganizations, currentOrganization])
+
+  // Listen for invitation acceptance events and refresh organization data
+  useEffect(() => {
+    if (!session?.user?.id) return
+
+    const handleInvitationAccepted = (event: CustomEvent) => {
+      const { organizationId } = event.detail
+      if (organizationId) {
+        // Refresh organization data when invitation is accepted
+        refreshUserOrganizations()
+      }
+    }
+
+    // Listen for custom events from invitation acceptance
+    window.addEventListener('invitation-accepted', handleInvitationAccepted as EventListener)
+
+    return () => {
+      window.removeEventListener('invitation-accepted', handleInvitationAccepted as EventListener)
+    }
+  }, [session?.user?.id, refreshUserOrganizations])
 
   const handleLogout = useCallback(async () => {
     setShowProfileMenu(false)

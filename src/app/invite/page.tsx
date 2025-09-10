@@ -116,6 +116,13 @@ const InvitePageContent = () => {
 
       if (response.ok) {
         setAccepted(true)
+        
+        // Dispatch custom event to notify other components
+        const event = new CustomEvent('invitation-accepted', {
+          detail: { organizationId: data.organizationId }
+        })
+        window.dispatchEvent(event)
+        
         // Redirect to dashboard after 2 seconds
         setTimeout(() => {
           router.push('/dashboard')

@@ -67,6 +67,11 @@ interface OrganizationStore {
   // Cache helper (internal)
   isCacheValid: () => boolean
   
+  // State refresh methods
+  refreshUserOrganizations: () => Promise<void>
+  invalidateCache: () => void
+  handleInvitationAccepted: (organizationId: string) => Promise<void>
+  
   // Permission helpers
   hasPermission: (resource: string, action: string) => boolean
   getUserPermissions: () => Array<{ resource: string; action: string }>
@@ -181,6 +186,7 @@ export const useOrganizationStore = create<OrganizationStore>()(
             loading: false
           })
 
+
         } catch (error) {
           console.error('Error fetching organization context:', error)
           set({ 
@@ -294,6 +300,36 @@ export const useOrganizationStore = create<OrganizationStore>()(
       hasRole: (roleName: string) => {
         const { organizationContext } = get()
         return organizationContext?.membership?.role?.name === roleName
+      },
+
+      // State refresh methods
+      refreshUserOrganizations: async () => {
+        const { fetchUserOrganizations } = get()
+        // Force refresh by clearing cache validity
+        set({ cacheValid: false, lastFetch: null })
+        await fetchUserOrganizations()
+      },
+
+      invalidateCache: () => {
+        set({
+          cacheValid: false,
+          lastFetch: null,
+          loading: false,
+          error: null
+        })
+      },
+
+      handleInvitationAccepted: async (organizationId: string) => {
+        const { refreshUserOrganizations, switchOrganization, userOrganizations } = get()
+        
+        // Refresh organizations list to include the new organization
+        await refreshUserOrganizations()
+        
+        // If this is the user's first organization, switch to it
+        const { userOrganizations: updatedOrgs } = get()
+        if (updatedOrgs.length === 1 && !get().currentOrganization) {
+          await switchOrganization(organizationId)
+        }
       }
     }),
     {

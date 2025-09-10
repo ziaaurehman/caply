@@ -86,33 +86,41 @@ export default function CapacityPlanningPage() {
   // Update date range when month/year changes
   useEffect(() => {
     const newDateRange = calculateDateRange(selectedMonth, selectedYear, viewMode);
+    console.log('Date range updated:', { selectedMonth, selectedYear, viewMode, newDateRange });
     setSelectedDateRange(newDateRange);
   }, [selectedMonth, selectedYear, viewMode]);
 
   // Calculate date range based on view mode and month/year selection
   const calculateDateRange = (month: number, year: number, mode: 'overview' | 'weekly' | 'monthly') => {
-    const today = new Date();
-    const currentWeekStart = new Date(today);
-    const dayOfWeek = today.getDay();
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    currentWeekStart.setDate(today.getDate() - daysToSubtract);
-
+    // Create a date based on the selected month and year
+    const selectedDate = new Date(year, month, 1);
+    
     if (mode === 'weekly') {
-      // For weekly view, show only the current week (7 days)
-      const weekEnd = new Date(currentWeekStart);
-      weekEnd.setDate(currentWeekStart.getDate() + 6);
+      // For weekly view, show the week containing the 1st of the selected month
+      const weekStart = new Date(selectedDate);
+      const dayOfWeek = weekStart.getDay();
+      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      weekStart.setDate(weekStart.getDate() - daysToSubtract);
+      
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
       
       return {
-        startDate: currentWeekStart.toISOString().split('T')[0],
+        startDate: weekStart.toISOString().split('T')[0],
         endDate: weekEnd.toISOString().split('T')[0]
       };
     } else {
-      // For overview and monthly, show 5 weeks from current week
-      const fiveWeeksEnd = new Date(currentWeekStart);
-      fiveWeeksEnd.setDate(currentWeekStart.getDate() + (5 * 7) - 1); // 5 weeks minus 1 day
+      // For overview and monthly, show 5 weeks starting from the week containing the 1st of the selected month
+      const weekStart = new Date(selectedDate);
+      const dayOfWeek = weekStart.getDay();
+      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      weekStart.setDate(weekStart.getDate() - daysToSubtract);
+      
+      const fiveWeeksEnd = new Date(weekStart);
+      fiveWeeksEnd.setDate(weekStart.getDate() + (5 * 7) - 1); // 5 weeks minus 1 day
       
       return {
-        startDate: currentWeekStart.toISOString().split('T')[0],
+        startDate: weekStart.toISOString().split('T')[0],
         endDate: fiveWeeksEnd.toISOString().split('T')[0]
       };
     }
@@ -159,7 +167,7 @@ export default function CapacityPlanningPage() {
   }, [selectedProject, selectedDateRange, filters, selectedMonth, selectedYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchCapacityData = async () => {
-    console.log('fetchCapacityData called');
+    console.log('fetchCapacityData called with date range:', selectedDateRange);
     setLoading(true);
     setError(null);
 

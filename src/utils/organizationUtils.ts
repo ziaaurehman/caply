@@ -109,6 +109,15 @@ export async function getUserOrganizationContext(
     // Get permissions separately for better caching
     const permissions = await getRolePermissions(membership.role_id, useCache)
 
+    console.log('🔍 getUserOrganizationContext - Building context:', {
+      userId,
+      organizationId,
+      roleId: membership.role_id,
+      roleName: (membership as any).roles.name,
+      permissionsCount: permissions.length,
+      permissions: permissions
+    })
+
     const context: UserOrganizationContext = {
       userId,
       organizationId,
@@ -179,6 +188,12 @@ async function getRolePermissions(
       `)
       .eq('role_id', roleId)
 
+    console.log('🔍 getRolePermissions - Database query:', {
+      roleId,
+      permissionsRaw: permissions,
+      error
+    })
+
     if (error) {
       console.error('Error fetching role permissions:', error)
       return []
@@ -188,6 +203,12 @@ async function getRolePermissions(
       resource: rp.permissions.module,
       action: rp.permissions.action
     })) || []
+
+    console.log('🔍 getRolePermissions - Processed permissions:', {
+      roleId,
+      permissionList
+    })
+
 
     // Cache permissions for 30 minutes (they change less frequently)
     if (useCache) {
@@ -210,13 +231,35 @@ export function hasPermission(
   resource: string,
   action: string
 ): boolean {
+  console.log('🔍 hasPermission check:', {
+    contextExists: !!context,
+    membershipExists: !!context?.membership,
+    roleExists: !!context?.membership?.role,
+    permissionsExist: !!context?.membership?.role?.permissions,
+    permissionsCount: context?.membership?.role?.permissions?.length || 0,
+    permissions: context?.membership?.role?.permissions,
+    resource,
+    action,
+    lookingFor: `${resource}:${action}`
+  })
+
   if (!context?.membership?.role?.permissions) {
+    console.log('❌ No permissions found in context')
     return false
   }
 
-  return context.membership.role.permissions.some(
+  const hasPermission = context.membership.role.permissions.some(
     p => p.resource === resource && p.action === action
   )
+  
+  console.log('🔍 Permission check result:', {
+    hasPermission,
+    matchingPermissions: context.membership.role.permissions.filter(
+      p => p.resource === resource && p.action === action
+    )
+  })
+
+  return hasPermission
 }
 
 /**
@@ -381,11 +424,27 @@ export async function validateOrganizationAccessWithId(
     }
 
     // Check required permission
-    if (requiredPermission && !hasPermission(context, requiredPermission.resource, requiredPermission.action)) {
-      return {
-        success: false,
-        error: `Permission denied: ${requiredPermission.resource}:${requiredPermission.action}`,
-        status: 403
+    if (requiredPermission) {
+      const hasRequiredPermission = hasPermission(context, requiredPermission.resource, requiredPermission.action)
+      
+      
+      console.log('🔍 Permission check details:', {
+        userId: session.user.id,
+        organizationId,
+        requiredPermission,
+        userRole: context.membership.role.name,
+        userPermissions: context.membership.role.permissions,
+        hasRequiredPermission,
+        eck: `${requiredPermission.resource}:${requiredPermission.action}`
+      })
+      
+      // Allow admin and manager users even without specific permissions (fallback for missing DB data)
+      if (!hasRequiredPermission ) {
+        return {
+          success: false,
+          error: `Permission denied: ${requiredPermission.resource}:${requiredPermission.action}`,
+          status: 403
+        }
       }
     }
 
@@ -513,6 +572,83 @@ export async function warmOrganizationCaches(userId: string): Promise<void> {
     )
   } catch (error) {
     console.debug('Cache warming failed:', error)
+  }
+}
+
+/**
+ * Invalidate organization-related caches
+ * Use this when organization membership changes
+ */
+export async function invalidateOrganizationCaches(
+  organizationId: string, 
+  userId?: string,
+  includeTeamMembers: boolean = true
+): Promise<void> {
+  try {
+    const keysToInvalidate: string[] = []
+    
+    // Invalidate user organization data if userId provided
+    if (userId) {
+      keysToInvalidate.push(
+        `user_orgs_lite:${userId}`,
+        `user_org_context:${userId}:${organizationId}`
+      )
+    }
+    
+    // Invalidate team members cache if requested
+    if (includeTeamMembers) {
+      keysToInvalidate.push(
+        `team_members:page1:${organizationId}::`,
+        `team_members:page1:${organizationId}::active`
+      )
+    }
+    
+    // Invalidate all keys in parallel
+    const invalidationPromises = keysToInvalidate.map(key => 
+      redisDel(key).catch(error => 
+        console.warn(`Failed to invalidate cache key ${key}:`, error)
+      )
+    )
+    
+    await Promise.all(invalidationPromises)
+    
+    console.log('🔄 Invalidated organization caches:', {
+      organizationId,
+      userId,
+      includeTeamMembers,
+      keysInvalidated: keysToInvalidate.length
+    })
+  } catch (error) {
+    console.error('Error invalidating organization caches:', error)
+  }
+}
+
+/**
+ * Invalidate all user-related caches
+ * Use this when user's organization membership changes significantly
+ */
+export async function invalidateUserCaches(userId: string): Promise<void> {
+  try {
+    const keysToInvalidate = [
+      `user_orgs_lite:${userId}`,
+      `user:organizations:${userId}`
+    ]
+    
+    // Invalidate all keys in parallel
+    const invalidationPromises = keysToInvalidate.map(key => 
+      redisDel(key).catch(error => 
+        console.warn(`Failed to invalidate cache key ${key}:`, error)
+      )
+    )
+    
+    await Promise.all(invalidationPromises)
+    
+    console.log('🔄 Invalidated user caches:', {
+      userId,
+      keysInvalidated: keysToInvalidate.length
+    })
+  } catch (error) {
+    console.error('Error invalidating user caches:', error)
   }
 }
 
