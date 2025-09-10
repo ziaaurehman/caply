@@ -468,7 +468,7 @@ export default function CapacityPlanningPage() {
               onRefresh={fetchCapacityData}
               onProjectClick={(projectId) => {
                 // Navigate to Kanban tab for the project
-                window.location.href = `/dashboard/kanban?project=${projectId}`;
+                window.location.href = `/projects`;
               }}
               onAddResource={() => setShowAddResourceModal(true)}
               viewMode={viewMode}
