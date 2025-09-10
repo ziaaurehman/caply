@@ -1,30 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/utils/supabase/server'
-import { getServerSession } from 'next-auth'
-import { authConfig } from '@/auth'
-import { redisSetJSON } from '@/utils/redis'
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
+import { redisSetJSON } from "@/utils/redis";
+import { refreshTeamMembersCache } from "@/app/api/team-members/route";
 
 // POST /api/invitations/accept - Accept an invitation
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authConfig)
+    const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json()
-    const { token } = body
+    const body = await request.json();
+    const { token } = body;
 
     if (!token) {
-      return NextResponse.json({ error: 'Invitation token is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Invitation token is required" },
+        { status: 400 }
+      );
     }
 
-    const supabase = await createClient()
+    const supabase = await createClient();
 
     // Get the invitation
     const { data: invitation, error: inviteError } = await supabase
-      .from('organization_invitations')
-      .select(`
+      .from("organization_invitations")
+      .select(
+        `
         id,
         organization_id,
         email,
@@ -44,49 +49,60 @@ export async function POST(request: NextRequest) {
           name,
           logo_url
         )
-      `)
-      .eq('token', token)
-      .eq('status', 'pending')
-      .single()
+      `
+      )
+      .eq("token", token)
+      .eq("status", "pending")
+      .single();
 
     if (inviteError || !invitation) {
-      return NextResponse.json({ error: 'Invalid or expired invitation' }, { status: 404 })
+      return NextResponse.json(
+        { error: "Invalid or expired invitation" },
+        { status: 404 }
+      );
     }
 
     // Check if invitation has expired
     if (new Date(invitation.expires_at) < new Date()) {
-      return NextResponse.json({ error: 'Invitation has expired' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Invitation has expired" },
+        { status: 400 }
+      );
     }
 
     // Verify the user's email matches the invitation (for security)
     if (invitation.email !== session.user.email) {
-      return NextResponse.json({ error: 'Email mismatch' }, { status: 403 })
+      return NextResponse.json({ error: "Email mismatch" }, { status: 403 });
     }
 
     // Check if user is already a member of this organization
     const { data: existingMember } = await supabase
-      .from('organization_members')
-      .select('id')
-      .eq('organization_id', invitation.organization_id)
-      .eq('user_id', session.user.id)
-      .single()
+      .from("organization_members")
+      .select("id")
+      .eq("organization_id", invitation.organization_id)
+      .eq("user_id", session.user.id)
+      .single();
 
     if (existingMember) {
-      return NextResponse.json({ error: 'You are already a member of this organization' }, { status: 400 })
+      return NextResponse.json(
+        { error: "You are already a member of this organization" },
+        { status: 400 }
+      );
     }
 
     // Add user to organization
     const { data: newMember, error: memberError } = await supabase
-      .from('organization_members')
+      .from("organization_members")
       .insert({
         organization_id: invitation.organization_id,
         user_id: session.user.id,
         role_id: invitation.role_id,
-        status: 'active',
+        status: "active",
         invited_by: invitation.invited_by,
-        joined_at: new Date().toISOString()
+        joined_at: new Date().toISOString(),
       })
-      .select(`
+      .select(
+        `
         id,
         user_id,
         role_id,
@@ -105,33 +121,48 @@ export async function POST(request: NextRequest) {
           display_name,
           description
         )
-      `)
-      .single()
+      `
+      )
+      .single();
 
     if (memberError) {
-      console.error('Error adding member:', memberError)
-      return NextResponse.json({ error: 'Failed to join organization' }, { status: 500 })
+      console.error("Error adding member:", memberError);
+      return NextResponse.json(
+        { error: "Failed to join organization" },
+        { status: 500 }
+      );
     }
 
     // Update invitation status to accepted
     const { error: updateError } = await supabase
-      .from('organization_invitations')
+      .from("organization_invitations")
       .update({
-        status: 'accepted',
-        accepted_at: new Date().toISOString()
+        status: "accepted",
+        accepted_at: new Date().toISOString(),
       })
-      .eq('id', invitation.id)
+      .eq("id", invitation.id);
 
     if (updateError) {
-      console.error('Error updating invitation:', updateError)
+      console.error("Error updating invitation:", updateError);
       // Don't fail the request if invitation update fails
+    }
+
+    // Refresh team members cache to remove the accepted invitation
+    try {
+      await refreshTeamMembersCache(invitation.organization_id, supabase);
+      console.log(
+        "✅ Team members cache refreshed after invitation acceptance"
+      );
+    } catch (cacheError) {
+      console.warn("Failed to refresh team members cache:", cacheError);
     }
 
     // Refresh organizations cache for the current user (15 days)
     try {
       const { data: orgs } = await supabase
-        .from('organization_members')
-        .select(`
+        .from("organization_members")
+        .select(
+          `
           id,
           organization_id,
           user_id,
@@ -163,9 +194,10 @@ export async function POST(request: NextRequest) {
               )
             )
           )
-        `)
-        .eq('user_id', session.user.id)
-        .eq('status', 'active')
+        `
+        )
+        .eq("user_id", session.user.id)
+        .eq("status", "active");
 
       const transformed = (orgs || []).map((org: any) => ({
         id: org.organizations.id,
@@ -192,48 +224,62 @@ export async function POST(request: NextRequest) {
             name: org.roles.name,
             display_name: org.roles.display_name,
             description: org.roles.description,
-            permissions: org.roles.role_permissions?.map((rp: any) => ({
-              resource: rp.permissions.module,
-              action: rp.permissions.action
-            })) || []
-          }
-        }
-      }))
+            permissions:
+              org.roles.role_permissions?.map((rp: any) => ({
+                resource: rp.permissions.module,
+                action: rp.permissions.action,
+              })) || [],
+          },
+        },
+      }));
 
-      await redisSetJSON(`user:organizations:${session.user.id}`, transformed, 1296000)
+      await redisSetJSON(
+        `user:organizations:${session.user.id}`,
+        transformed,
+        1296000
+      );
     } catch (e) {
-      console.warn('Failed to refresh user organizations cache after accept:', e)
+      console.warn(
+        "Failed to refresh user organizations cache after accept:",
+        e
+      );
     }
 
     return NextResponse.json({
       success: true,
       member: newMember,
       organization: invitation.organizations,
-      message: 'Successfully joined organization'
-    })
-
+      message: "Successfully joined organization",
+    });
   } catch (error) {
-    console.error('Error accepting invitation:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error accepting invitation:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
 // GET /api/invitations/accept - Get invitation details (for verification)
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const token = searchParams.get('token')
+    const { searchParams } = new URL(request.url);
+    const token = searchParams.get("token");
 
     if (!token) {
-      return NextResponse.json({ error: 'Invitation token is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Invitation token is required" },
+        { status: 400 }
+      );
     }
 
-    const supabase = await createClient()
+    const supabase = await createClient();
 
     // Get the invitation details
     const { data: invitation, error: inviteError } = await supabase
-      .from('organization_invitations')
-      .select(`
+      .from("organization_invitations")
+      .select(
+        `
         id,
         organization_id,
         email,
@@ -251,18 +297,25 @@ export async function GET(request: NextRequest) {
           name,
           logo_url
         )
-      `)
-      .eq('token', token)
-      .eq('status', 'pending')
-      .single()
+      `
+      )
+      .eq("token", token)
+      .eq("status", "pending")
+      .single();
 
     if (inviteError || !invitation) {
-      return NextResponse.json({ error: 'Invalid or expired invitation' }, { status: 404 })
+      return NextResponse.json(
+        { error: "Invalid or expired invitation" },
+        { status: 404 }
+      );
     }
 
     // Check if invitation has expired
     if (new Date(invitation.expires_at) < new Date()) {
-      return NextResponse.json({ error: 'Invitation has expired' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Invitation has expired" },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({
@@ -271,12 +324,14 @@ export async function GET(request: NextRequest) {
         email: invitation.email,
         role: invitation.roles,
         organization: invitation.organizations,
-        expires_at: invitation.expires_at
-      }
-    })
-
+        expires_at: invitation.expires_at,
+      },
+    });
   } catch (error) {
-    console.error('Error getting invitation:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error getting invitation:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
-} 
+}

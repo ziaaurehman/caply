@@ -1,47 +1,47 @@
-import { createClient } from '@/utils/supabase/server'
-import { getServerSession } from 'next-auth'
-import { authConfig } from '@/auth'
-import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis'
+import { createClient } from "@/utils/supabase/server";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
+import { redisGetJSON, redisSetJSON, redisDel } from "@/utils/redis";
 
 // Cache TTL in seconds (1 week)
 const CACHE_TTL = 604800;
 
 interface Permission {
-  resource: string
-  action: string
+  resource: string;
+  action: string;
 }
 
 interface Role {
-  id: string
-  name: string
-  display_name: string
-  description: string
-  permissions: Permission[]
+  id: string;
+  name: string;
+  display_name: string;
+  description: string;
+  permissions: Permission[];
 }
 
 interface OrganizationMembership {
-  id: string
-  organization_id: string
-  user_id: string
-  role_id: string
-  status: string
-  role: Role
+  id: string;
+  organization_id: string;
+  user_id: string;
+  role_id: string;
+  status: string;
+  role: Role;
 }
 
 interface UserOrganizationContext {
-  userId: string
-  organizationId: string
-  membership: OrganizationMembership
+  userId: string;
+  organizationId: string;
+  membership: OrganizationMembership;
 }
 
 interface CachedUserContext {
-  userId: string
-  organizationId: string
-  roleId: string
-  roleName: string
-  permissions: Permission[]
-  status: string
-  cached_at: number
+  userId: string;
+  organizationId: string;
+  roleId: string;
+  roleName: string;
+  permissions: Permission[];
+  status: string;
+  cached_at: number;
 }
 
 /**
@@ -52,18 +52,18 @@ export async function getUserOrganizationContext(
   organizationId: string,
   useCache: boolean = true
 ): Promise<UserOrganizationContext | null> {
-  const cacheKey = `user_org_context:${userId}:${organizationId}`
-  
+  const cacheKey = `user_org_context:${userId}:${organizationId}`;
+
   try {
     // Try cache first if enabled
     if (useCache) {
-      const cached = await redisGetJSON<CachedUserContext>(cacheKey)
-      if (cached && (Date.now() - cached.cached_at) < (CACHE_TTL * 1000)) {
+      const cached = await redisGetJSON<CachedUserContext>(cacheKey);
+      if (cached && Date.now() - cached.cached_at < CACHE_TTL * 1000) {
         return {
           userId: cached.userId,
           organizationId: cached.organizationId,
           membership: {
-            id: '', // Not needed for most operations
+            id: "", // Not needed for most operations
             organization_id: cached.organizationId,
             user_id: cached.userId,
             role_id: cached.roleId,
@@ -72,20 +72,21 @@ export async function getUserOrganizationContext(
               id: cached.roleId,
               name: cached.roleName,
               display_name: cached.roleName,
-              description: '',
-              permissions: cached.permissions
-            }
-          }
-        }
+              description: "",
+              permissions: cached.permissions,
+            },
+          },
+        };
       }
     }
 
-    const supabase = await createClient()
+    const supabase = await createClient();
 
     // Optimized query with selective fields
     const { data: membership, error } = await supabase
-      .from('organization_members')
-      .select(`
+      .from("organization_members")
+      .select(
+        `
         id,
         organization_id,
         user_id,
@@ -96,27 +97,28 @@ export async function getUserOrganizationContext(
           name,
           display_name
         )
-      `)
-      .eq('user_id', userId)
-      .eq('organization_id', organizationId)
-      .eq('status', 'active')
-      .single()
+      `
+      )
+      .eq("user_id", userId)
+      .eq("organization_id", organizationId)
+      .eq("status", "active")
+      .single();
 
     if (error || !membership) {
-      return null
+      return null;
     }
 
     // Get permissions separately for better caching
-    const permissions = await getRolePermissions(membership.role_id, useCache)
+    const permissions = await getRolePermissions(membership.role_id, useCache);
 
-    console.log('🔍 getUserOrganizationContext - Building context:', {
+    console.log("🔍 getUserOrganizationContext - Building context:", {
       userId,
       organizationId,
       roleId: membership.role_id,
       roleName: (membership as any).roles.name,
       permissionsCount: permissions.length,
-      permissions: permissions
-    })
+      permissions: permissions,
+    });
 
     const context: UserOrganizationContext = {
       userId,
@@ -131,11 +133,11 @@ export async function getUserOrganizationContext(
           id: (membership as any).roles.id,
           name: (membership as any).roles.name,
           display_name: (membership as any).roles.display_name,
-          description: '',
-          permissions
-        }
-      }
-    }
+          description: "",
+          permissions,
+        },
+      },
+    };
 
     // Cache the result
     if (useCache) {
@@ -146,16 +148,15 @@ export async function getUserOrganizationContext(
         roleName: (membership as any).roles.name,
         permissions,
         status: membership.status,
-        cached_at: Date.now()
-      }
-      await redisSetJSON(cacheKey, cacheData, CACHE_TTL)
+        cached_at: Date.now(),
+      };
+      await redisSetJSON(cacheKey, cacheData, CACHE_TTL);
     }
 
-    return context
-
+    return context;
   } catch (error) {
-    console.error('Error getting user organization context:', error)
-    return null
+    console.error("Error getting user organization context:", error);
+    return null;
   }
 }
 
@@ -163,63 +164,64 @@ export async function getUserOrganizationContext(
  * Get role permissions with caching
  */
 async function getRolePermissions(
-  roleId: string, 
+  roleId: string,
   useCache: boolean = true
 ): Promise<Permission[]> {
-  const cacheKey = `role_permissions:${roleId}`
-  
+  const cacheKey = `role_permissions:${roleId}`;
+
   try {
     if (useCache) {
-      const cached = await redisGetJSON<Permission[]>(cacheKey)
+      const cached = await redisGetJSON<Permission[]>(cacheKey);
       if (cached) {
-        return cached
+        return cached;
       }
     }
 
-    const supabase = await createClient()
-    
+    const supabase = await createClient();
+
     const { data: permissions, error } = await supabase
-      .from('role_permissions')
-      .select(`
+      .from("role_permissions")
+      .select(
+        `
         permissions!inner(
           module,
           action
         )
-      `)
-      .eq('role_id', roleId)
+      `
+      )
+      .eq("role_id", roleId);
 
-    console.log('🔍 getRolePermissions - Database query:', {
+    console.log("🔍 getRolePermissions - Database query:", {
       roleId,
       permissionsRaw: permissions,
-      error
-    })
+      error,
+    });
 
     if (error) {
-      console.error('Error fetching role permissions:', error)
-      return []
+      console.error("Error fetching role permissions:", error);
+      return [];
     }
 
-    const permissionList = permissions?.map((rp: any) => ({
-      resource: rp.permissions.module,
-      action: rp.permissions.action
-    })) || []
+    const permissionList =
+      permissions?.map((rp: any) => ({
+        resource: rp.permissions.module,
+        action: rp.permissions.action,
+      })) || [];
 
-    console.log('🔍 getRolePermissions - Processed permissions:', {
+    console.log("🔍 getRolePermissions - Processed permissions:", {
       roleId,
-      permissionList
-    })
-
+      permissionList,
+    });
 
     // Cache permissions for 30 minutes (they change less frequently)
     if (useCache) {
-      await redisSetJSON(cacheKey, permissionList, 1800)
+      await redisSetJSON(cacheKey, permissionList, 1800);
     }
 
-    return permissionList
-
+    return permissionList;
   } catch (error) {
-    console.error('Error getting role permissions:', error)
-    return []
+    console.error("Error getting role permissions:", error);
+    return [];
   }
 }
 
@@ -231,35 +233,23 @@ export function hasPermission(
   resource: string,
   action: string
 ): boolean {
-  console.log('🔍 hasPermission check:', {
-    contextExists: !!context,
-    membershipExists: !!context?.membership,
-    roleExists: !!context?.membership?.role,
-    permissionsExist: !!context?.membership?.role?.permissions,
-    permissionsCount: context?.membership?.role?.permissions?.length || 0,
-    permissions: context?.membership?.role?.permissions,
-    resource,
-    action,
-    lookingFor: `${resource}:${action}`
-  })
-
   if (!context?.membership?.role?.permissions) {
-    console.log('❌ No permissions found in context')
-    return false
+    console.log("❌ No permissions found in context");
+    return false;
   }
 
   const hasPermission = context.membership.role.permissions.some(
-    p => p.resource === resource && p.action === action
-  )
-  
-  console.log('🔍 Permission check result:', {
+    (p) => p.resource === resource && p.action === action
+  );
+
+  console.log("🔍 Permission check result:", {
     hasPermission,
     matchingPermissions: context.membership.role.permissions.filter(
-      p => p.resource === resource && p.action === action
-    )
-  })
+      (p) => p.resource === resource && p.action === action
+    ),
+  });
 
-  return hasPermission
+  return hasPermission;
 }
 
 /**
@@ -269,7 +259,7 @@ export function hasRole(
   context: UserOrganizationContext | null,
   roleName: string
 ): boolean {
-  return context?.membership?.role?.name === roleName
+  return context?.membership?.role?.name === roleName;
 }
 
 /**
@@ -280,22 +270,22 @@ export async function isOrganizationOwner(
   organizationId: string
 ): Promise<boolean> {
   try {
-    const supabase = await createClient()
+    const supabase = await createClient();
 
     const { data: organization, error } = await supabase
-      .from('organizations')
-      .select('owner_id')
-      .eq('id', organizationId)
-      .single()
+      .from("organizations")
+      .select("owner_id")
+      .eq("id", organizationId)
+      .single();
 
     if (error || !organization) {
-      return false
+      return false;
     }
 
-    return organization.owner_id === userId
+    return organization.owner_id === userId;
   } catch (error) {
-    console.error('Error checking organization ownership:', error)
-    return false
+    console.error("Error checking organization ownership:", error);
+    return false;
   }
 }
 
@@ -306,61 +296,68 @@ export async function validateOrganizationAccess(
   requiredPermission?: { resource: string; action: string },
   requiredRole?: string
 ): Promise<{
-  success: boolean
-  context?: UserOrganizationContext
-  error?: string
-  status?: number
+  success: boolean;
+  context?: UserOrganizationContext;
+  error?: string;
+  status?: number;
 }> {
   try {
-    const session = await getServerSession(authConfig)
+    const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
       return {
         success: false,
-        error: 'Unauthorized',
-        status: 401
-      }
+        error: "Unauthorized",
+        status: 401,
+      };
     }
 
     // For now, we'll use the first organization the user belongs to
     // Later this should come from request headers or body
-    const supabase = await createClient()
-    
+    const supabase = await createClient();
+
     const { data: userOrg, error: orgError } = await supabase
-      .from('organization_members')
-      .select('organization_id')
-      .eq('user_id', session.user.id)
-      .eq('status', 'active')
+      .from("organization_members")
+      .select("organization_id")
+      .eq("user_id", session.user.id)
+      .eq("status", "active")
       .limit(1)
-      .single()
+      .single();
 
     if (orgError || !userOrg) {
       return {
         success: false,
-        error: 'No organization found',
-        status: 404
-      }
+        error: "No organization found",
+        status: 404,
+      };
     }
 
     const context = await getUserOrganizationContext(
       session.user.id,
       userOrg.organization_id
-    )
+    );
 
     if (!context) {
       return {
         success: false,
-        error: 'Organization access denied',
-        status: 403
-      }
+        error: "Organization access denied",
+        status: 403,
+      };
     }
 
     // Check required permission
-    if (requiredPermission && !hasPermission(context, requiredPermission.resource, requiredPermission.action)) {
+    if (
+      requiredPermission &&
+      !hasPermission(
+        context,
+        requiredPermission.resource,
+        requiredPermission.action
+      )
+    ) {
       return {
         success: false,
         error: `Permission denied: ${requiredPermission.resource}:${requiredPermission.action}`,
-        status: 403
-      }
+        status: 403,
+      };
     }
 
     // Check required role
@@ -368,22 +365,21 @@ export async function validateOrganizationAccess(
       return {
         success: false,
         error: `Role required: ${requiredRole}`,
-        status: 403
-      }
+        status: 403,
+      };
     }
 
     return {
       success: true,
-      context
-    }
-
+      context,
+    };
   } catch (error) {
-    console.error('Error validating organization access:', error)
+    console.error("Error validating organization access:", error);
     return {
       success: false,
-      error: 'Internal server error',
-      status: 500
-    }
+      error: "Internal server error",
+      status: 500,
+    };
   }
 }
 
@@ -395,56 +391,49 @@ export async function validateOrganizationAccessWithId(
   requiredPermission?: { resource: string; action: string },
   requiredRole?: string
 ): Promise<{
-  success: boolean
-  context?: UserOrganizationContext
-  error?: string
-  status?: number
+  success: boolean;
+  context?: UserOrganizationContext;
+  error?: string;
+  status?: number;
 }> {
   try {
-    const session = await getServerSession(authConfig)
+    const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
       return {
         success: false,
-        error: 'Unauthorized',
-        status: 401
-      }
+        error: "Unauthorized",
+        status: 401,
+      };
     }
 
     const context = await getUserOrganizationContext(
       session.user.id,
       organizationId
-    )
+    );
 
     if (!context) {
       return {
         success: false,
-        error: 'Organization access denied',
-        status: 403
-      }
+        error: "Organization access denied",
+        status: 403,
+      };
     }
 
     // Check required permission
     if (requiredPermission) {
-      const hasRequiredPermission = hasPermission(context, requiredPermission.resource, requiredPermission.action)
-      
-      
-      console.log('🔍 Permission check details:', {
-        userId: session.user.id,
-        organizationId,
-        requiredPermission,
-        userRole: context.membership.role.name,
-        userPermissions: context.membership.role.permissions,
-        hasRequiredPermission,
-        eck: `${requiredPermission.resource}:${requiredPermission.action}`
-      })
-      
+      const hasRequiredPermission = hasPermission(
+        context,
+        requiredPermission.resource,
+        requiredPermission.action
+      );
+
       // Allow admin and manager users even without specific permissions (fallback for missing DB data)
-      if (!hasRequiredPermission ) {
+      if (!hasRequiredPermission) {
         return {
           success: false,
           error: `Permission denied: ${requiredPermission.resource}:${requiredPermission.action}`,
-          status: 403
-        }
+          status: 403,
+        };
       }
     }
 
@@ -453,49 +442,51 @@ export async function validateOrganizationAccessWithId(
       return {
         success: false,
         error: `Role required: ${requiredRole}`,
-        status: 403
-      }
+        status: 403,
+      };
     }
 
     return {
       success: true,
-      context
-    }
-
+      context,
+    };
   } catch (error) {
-    console.error('Error validating organization access:', error)
+    console.error("Error validating organization access:", error);
     return {
       success: false,
-      error: 'Internal server error',
-      status: 500
-    }
+      error: "Internal server error",
+      status: 500,
+    };
   }
 }
 
 /**
  * Get user's organizations with minimal data (for header dropdown)
  */
-export async function getUserOrganizationsLite(userId: string): Promise<Array<{
-  id: string
-  name: string
-  logo_url?: string
-  role: string
-  is_owner: boolean
-}>> {
-  const cacheKey = `user_orgs_lite:${userId}`
-  
+export async function getUserOrganizationsLite(userId: string): Promise<
+  Array<{
+    id: string;
+    name: string;
+    logo_url?: string;
+    role: string;
+    is_owner: boolean;
+  }>
+> {
+  const cacheKey = `user_orgs_lite:${userId}`;
+
   try {
     // Check cache first
-    const cached = await redisGetJSON<any[]>(cacheKey)
+    const cached = await redisGetJSON<any[]>(cacheKey);
     if (cached) {
-      return cached
+      return cached;
     }
 
-    const supabase = await createClient()
+    const supabase = await createClient();
 
     const { data: memberships, error } = await supabase
-      .from('organization_members')
-      .select(`
+      .from("organization_members")
+      .select(
+        `
         organization_id,
         role_id,
         organizations!inner(
@@ -508,12 +499,13 @@ export async function getUserOrganizationsLite(userId: string): Promise<Array<{
           name,
           display_name
         )
-      `)
-      .eq('user_id', userId)
-      .eq('status', 'active')
+      `
+      )
+      .eq("user_id", userId)
+      .eq("status", "active");
 
     if (error || !memberships) {
-      return []
+      return [];
     }
 
     const orgs = memberships.map((m: any) => ({
@@ -521,17 +513,16 @@ export async function getUserOrganizationsLite(userId: string): Promise<Array<{
       name: m.organizations.name,
       logo_url: m.organizations.logo_url,
       role: m.roles.display_name,
-      is_owner: m.organizations.owner_id === userId
-    }))
+      is_owner: m.organizations.owner_id === userId,
+    }));
 
     // Cache for 24 hours (organizations rarely change)
-    await redisSetJSON(cacheKey, orgs, 86400)
+    await redisSetJSON(cacheKey, orgs, 86400);
 
-    return orgs
-
+    return orgs;
   } catch (error) {
-    console.error('Error getting user organizations:', error)
-    return []
+    console.error("Error getting user organizations:", error);
+    return [];
   }
 }
 
@@ -545,10 +536,10 @@ export async function prefetchOrganizationContext(
 ): Promise<void> {
   try {
     // This will cache the data for future use
-    await getUserOrganizationContext(userId, organizationId, true)
+    await getUserOrganizationContext(userId, organizationId, true);
   } catch (error) {
     // Silent fail for prefetching
-    console.debug('Prefetch failed for organization context:', error)
+    console.debug("Prefetch failed for organization context:", error);
   }
 }
 
@@ -559,19 +550,19 @@ export async function prefetchOrganizationContext(
 export async function warmOrganizationCaches(userId: string): Promise<void> {
   try {
     // First get the organizations list
-    const orgs = await getUserOrganizationsLite(userId)
-    
+    const orgs = await getUserOrganizationsLite(userId);
+
     // Prefetch context for first 3 organizations (most likely to be used)
-    const prefetchPromises = orgs.slice(0, 3).map(org => 
-      prefetchOrganizationContext(userId, org.id)
-    )
-    
+    const prefetchPromises = orgs
+      .slice(0, 3)
+      .map((org) => prefetchOrganizationContext(userId, org.id));
+
     // Don't await - let these run in background
-    Promise.all(prefetchPromises).catch(error => 
-      console.debug('Cache warming failed:', error)
-    )
+    Promise.all(prefetchPromises).catch((error) =>
+      console.debug("Cache warming failed:", error)
+    );
   } catch (error) {
-    console.debug('Cache warming failed:', error)
+    console.debug("Cache warming failed:", error);
   }
 }
 
@@ -580,46 +571,46 @@ export async function warmOrganizationCaches(userId: string): Promise<void> {
  * Use this when organization membership changes
  */
 export async function invalidateOrganizationCaches(
-  organizationId: string, 
+  organizationId: string,
   userId?: string,
   includeTeamMembers: boolean = true
 ): Promise<void> {
   try {
-    const keysToInvalidate: string[] = []
-    
+    const keysToInvalidate: string[] = [];
+
     // Invalidate user organization data if userId provided
     if (userId) {
       keysToInvalidate.push(
         `user_orgs_lite:${userId}`,
         `user_org_context:${userId}:${organizationId}`
-      )
+      );
     }
-    
+
     // Invalidate team members cache if requested
     if (includeTeamMembers) {
       keysToInvalidate.push(
         `team_members:page1:${organizationId}::`,
         `team_members:page1:${organizationId}::active`
-      )
+      );
     }
-    
+
     // Invalidate all keys in parallel
-    const invalidationPromises = keysToInvalidate.map(key => 
-      redisDel(key).catch(error => 
+    const invalidationPromises = keysToInvalidate.map((key) =>
+      redisDel(key).catch((error) =>
         console.warn(`Failed to invalidate cache key ${key}:`, error)
       )
-    )
-    
-    await Promise.all(invalidationPromises)
-    
-    console.log('🔄 Invalidated organization caches:', {
+    );
+
+    await Promise.all(invalidationPromises);
+
+    console.log("🔄 Invalidated organization caches:", {
       organizationId,
       userId,
       includeTeamMembers,
-      keysInvalidated: keysToInvalidate.length
-    })
+      keysInvalidated: keysToInvalidate.length,
+    });
   } catch (error) {
-    console.error('Error invalidating organization caches:', error)
+    console.error("Error invalidating organization caches:", error);
   }
 }
 
@@ -631,25 +622,23 @@ export async function invalidateUserCaches(userId: string): Promise<void> {
   try {
     const keysToInvalidate = [
       `user_orgs_lite:${userId}`,
-      `user:organizations:${userId}`
-    ]
-    
+      `user:organizations:${userId}`,
+    ];
+
     // Invalidate all keys in parallel
-    const invalidationPromises = keysToInvalidate.map(key => 
-      redisDel(key).catch(error => 
+    const invalidationPromises = keysToInvalidate.map((key) =>
+      redisDel(key).catch((error) =>
         console.warn(`Failed to invalidate cache key ${key}:`, error)
       )
-    )
-    
-    await Promise.all(invalidationPromises)
-    
-    console.log('🔄 Invalidated user caches:', {
+    );
+
+    await Promise.all(invalidationPromises);
+
+    console.log("🔄 Invalidated user caches:", {
       userId,
-      keysInvalidated: keysToInvalidate.length
-    })
+      keysInvalidated: keysToInvalidate.length,
+    });
   } catch (error) {
-    console.error('Error invalidating user caches:', error)
+    console.error("Error invalidating user caches:", error);
   }
 }
-
- 
