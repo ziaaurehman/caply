@@ -222,26 +222,8 @@ export default function Sidebar({
     loading
   });
 
-  // Show loading state if organization context is not loaded
-  if (loading || (currentOrganization && !organizationContext)) {
-    return (
-      <>
-        {/* Desktop Sidebar Loading */}
-        <div
-          className={cn(
-            "hidden md:flex md:flex-col md:fixed md:inset-y-0 transition-all duration-300",
-            sidebarCollapsed ? "md:w-16" : "md:w-56"
-          )}
-        >
-          <div className="flex flex-col flex-grow bg-white border-r border-gray-200 pt-5 pb-4 overflow-y-auto">
-            <div className="flex items-center justify-center h-32">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
+  // Use lightweight loading indicator only for specific menu items
+  const isContextLoading = loading || (currentOrganization && !organizationContext);
 
 
   const coreMenuItems = [
@@ -278,13 +260,26 @@ export default function Sidebar({
       icon: <Clock size={18} />,
       label: "Timesheets",
     },
-    // Only show leave if user has permission
-    ...(userCanViewLeave ? [{
-      href: "/leave",
-      icon: <Palmtree size={18} />,
-      label: "Leave",
-    }] : []),
   ];
+
+  // Render helper for a skeleton nav item
+  const SkeletonNavItem: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed }) => (
+    <div
+      className={cn(
+        "flex items-center rounded-lg mb-1",
+        isCollapsed ? "px-3 py-3 justify-center" : "px-3 py-2.5"
+      )}
+    >
+      <span className={cn("flex-shrink-0", isCollapsed ? "" : "mr-3")}
+        aria-hidden
+      >
+        <div className="h-4 w-4 bg-gray-200 rounded animate-pulse" />
+      </span>
+      {!isCollapsed && (
+        <span className="h-4 w-20 bg-gray-200 rounded animate-pulse" aria-hidden />
+      )}
+    </div>
+  );
 
   const financeMenuItems = [
     {
@@ -379,19 +374,40 @@ export default function Sidebar({
                   isCollapsed={sidebarCollapsed}
                 />
               ))}
+
+              {/* Leave menu: show skeleton while context is loading, else conditionally render */}
+              {isContextLoading ? (
+                <SkeletonNavItem isCollapsed={sidebarCollapsed} />
+              ) : (
+                userCanViewLeave && (
+                  <NavItem
+                    href="/leave"
+                    icon={<Palmtree size={18} />}
+                    label="Leave"
+                    active={pathname === "/leave"}
+                    isCollapsed={sidebarCollapsed}
+                  />
+                )
+              )}
             </NavSection>
 
             {/* Administration */}
-            {userCanManageRoles && (
+            {isContextLoading ? (
               <NavSection title="Administration" isCollapsed={sidebarCollapsed}>
-                <NavItem
-                  href="/roles"
-                  icon={<Shield size={18} />}
-                  label="Roles & Permissions"
-                  active={pathname === "/roles"}
-                  isCollapsed={sidebarCollapsed}
-                />
+                <SkeletonNavItem isCollapsed={sidebarCollapsed} />
               </NavSection>
+            ) : (
+              userCanManageRoles && (
+                <NavSection title="Administration" isCollapsed={sidebarCollapsed}>
+                  <NavItem
+                    href="/roles"
+                    icon={<Shield size={18} />}
+                    label="Roles & Permissions"
+                    active={pathname === "/roles"}
+                    isCollapsed={sidebarCollapsed}
+                  />
+                </NavSection>
+              )
             )}
 
             {/* Finance */}
