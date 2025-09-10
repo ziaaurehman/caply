@@ -259,6 +259,8 @@ export default function Sidebar({
     );
   }
 
+  const isContextLoading = loading && currentOrganization?.id;
+
   const coreMenuItems = [
     {
       href: "/dashboard",
@@ -305,20 +307,26 @@ export default function Sidebar({
   ];
 
   // Render helper for a skeleton nav item
-  const SkeletonNavItem: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed }) => (
+  const SkeletonNavItem: React.FC<{ isCollapsed?: boolean }> = ({
+    isCollapsed,
+  }) => (
     <div
       className={cn(
         "flex items-center rounded-lg mb-1",
         isCollapsed ? "px-3 py-3 justify-center" : "px-3 py-2.5"
       )}
     >
-      <span className={cn("flex-shrink-0", isCollapsed ? "" : "mr-3")}
+      <span
+        className={cn("flex-shrink-0", isCollapsed ? "" : "mr-3")}
         aria-hidden
       >
         <div className="h-4 w-4 bg-gray-200 rounded animate-pulse" />
       </span>
       {!isCollapsed && (
-        <span className="h-4 w-20 bg-gray-200 rounded animate-pulse" aria-hidden />
+        <span
+          className="h-4 w-20 bg-gray-200 rounded animate-pulse"
+          aria-hidden
+        />
       )}
     </div>
   );
@@ -440,7 +448,10 @@ export default function Sidebar({
               </NavSection>
             ) : (
               userCanManageRoles && (
-                <NavSection title="Administration" isCollapsed={sidebarCollapsed}>
+                <NavSection
+                  title="Administration"
+                  isCollapsed={sidebarCollapsed}
+                >
                   <NavItem
                     href="/roles"
                     icon={<Shield size={18} />}
