@@ -99,16 +99,23 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
 
   // Update form when member changes
   useEffect(() => {
-    if (member && isOpen) {
-      setValue("email", member.users.email);
-      setValue("roleId", member.role_id);
-      setValue("department", member.department || "");
-      setValue("hourlyRate", member.hourly_rate || 50);
-      setValue("weeklyCapacity", member.weekly_capacity || 40);
-    } else if (isOpen) {
+    if (member && isOpen && roles.length > 0) {
+      // Only set values when roles are loaded
+      // Use setTimeout to ensure the form is ready
+      const timer = setTimeout(() => {
+        setValue("email", member.users.email);
+        setValue("roleId", member.role_id);
+        setValue("department", member.department || "");
+        setValue("hourlyRate", member.hourly_rate || 50);
+        setValue("weeklyCapacity", member.weekly_capacity || 40);
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    } else if (isOpen && !member) {
+      // Only reset for new members
       reset();
     }
-  }, [member, isOpen, setValue, reset]);
+  }, [member, isOpen, setValue, reset, roles.length]);
 
   // Update selected role when roleId changes
   useEffect(() => {
@@ -256,6 +263,11 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
               {errors.roleId && (
                 <p className="mt-1 text-sm text-red-600">
                   {errors.roleId.message}
+                </p>
+              )}
+              {loadingRoles && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Loading available roles...
                 </p>
               )}
             </div>
