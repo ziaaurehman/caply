@@ -239,7 +239,6 @@ export default function Sidebar({
 
   const shouldShowLoading = loading && currentOrganization?.id;
 
-  // Show loading state if organization context is not loaded
   if (shouldShowLoading) {
     return (
       <>
@@ -294,7 +293,6 @@ export default function Sidebar({
       icon: <Clock size={18} />,
       label: "Timesheets",
     },
-    // Only show leave if user has permission
     ...(userCanViewLeave
       ? [
           {
@@ -305,6 +303,25 @@ export default function Sidebar({
         ]
       : []),
   ];
+
+  // Render helper for a skeleton nav item
+  const SkeletonNavItem: React.FC<{ isCollapsed?: boolean }> = ({ isCollapsed }) => (
+    <div
+      className={cn(
+        "flex items-center rounded-lg mb-1",
+        isCollapsed ? "px-3 py-3 justify-center" : "px-3 py-2.5"
+      )}
+    >
+      <span className={cn("flex-shrink-0", isCollapsed ? "" : "mr-3")}
+        aria-hidden
+      >
+        <div className="h-4 w-4 bg-gray-200 rounded animate-pulse" />
+      </span>
+      {!isCollapsed && (
+        <span className="h-4 w-20 bg-gray-200 rounded animate-pulse" aria-hidden />
+      )}
+    </div>
+  );
 
   const financeMenuItems = [
     {
@@ -399,19 +416,40 @@ export default function Sidebar({
                   isCollapsed={sidebarCollapsed}
                 />
               ))}
+
+              {/* Leave menu: show skeleton while context is loading, else conditionally render */}
+              {isContextLoading ? (
+                <SkeletonNavItem isCollapsed={sidebarCollapsed} />
+              ) : (
+                userCanViewLeave && (
+                  <NavItem
+                    href="/leave"
+                    icon={<Palmtree size={18} />}
+                    label="Leave"
+                    active={pathname === "/leave"}
+                    isCollapsed={sidebarCollapsed}
+                  />
+                )
+              )}
             </NavSection>
 
             {/* Administration */}
-            {userCanManageRoles && (
+            {isContextLoading ? (
               <NavSection title="Administration" isCollapsed={sidebarCollapsed}>
-                <NavItem
-                  href="/roles"
-                  icon={<Shield size={18} />}
-                  label="Roles & Permissions"
-                  active={pathname === "/roles"}
-                  isCollapsed={sidebarCollapsed}
-                />
+                <SkeletonNavItem isCollapsed={sidebarCollapsed} />
               </NavSection>
+            ) : (
+              userCanManageRoles && (
+                <NavSection title="Administration" isCollapsed={sidebarCollapsed}>
+                  <NavItem
+                    href="/roles"
+                    icon={<Shield size={18} />}
+                    label="Roles & Permissions"
+                    active={pathname === "/roles"}
+                    isCollapsed={sidebarCollapsed}
+                  />
+                </NavSection>
+              )
             )}
 
             {/* Finance */}
