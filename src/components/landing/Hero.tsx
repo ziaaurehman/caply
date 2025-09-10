@@ -64,20 +64,20 @@ export default function Hero() {
           </p>
 
           {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
+          <div className="flex flex-row gap-2 sm:gap-4 justify-center mb-16">
             <button
               onClick={() => router.push("/signup")}
-              className="bg-primary-600 hover:bg-primary-700 text-white px-8 py-4 rounded-full font-semibold text-lg transition-all duration-300 hover:shadow-lg hover:scale-105 flex items-center justify-center"
+              className="bg-primary-600 hover:bg-primary-700 text-white px-4 sm:px-8 py-3 sm:py-4 rounded-full font-semibold text-sm sm:text-lg transition-all duration-300 hover:shadow-lg hover:scale-105 flex items-center justify-center w-40 sm:w-64 h-10 sm:h-14"
             >
               Start Free
-              <ArrowRight className="ml-2 w-5 h-5" />
+              <ArrowRight className="ml-1 sm:ml-2 w-4 h-4 sm:w-5 sm:h-5" />
             </button>
             <button
               onClick={() => router.push("/contact")}
-              className="bg-white hover:bg-gray-100 text-gray-900 px-8 py-4 rounded-full font-semibold text-lg transition-all duration-300 hover:shadow-lg hover:scale-105 flex items-center justify-center"
+              className="bg-white hover:bg-gray-100 text-gray-900 px-4 sm:px-8 py-3 sm:py-4 rounded-full font-semibold text-sm sm:text-lg transition-all duration-300 hover:shadow-lg hover:scale-105 flex items-center justify-center w-40 sm:w-64 h-10 sm:h-14"
             >
               Book a Demo
-              <ArrowRight className="ml-2 w-5 h-5" />
+              <ArrowRight className="ml-1 sm:ml-2 w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>
