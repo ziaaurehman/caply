@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { Dispatch, SetStateAction, useEffect } from "react";
+import { Dispatch, SetStateAction, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -29,14 +29,14 @@ import {
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
-import { 
-  hasRole, 
-  hasPermission, 
-  getUserPermissions, 
-  isAdmin, 
-  isManagerOrAbove, 
-  canManageRoles, 
-  canViewLeave 
+import {
+  hasRole,
+  hasPermission,
+  getUserPermissions,
+  isAdmin,
+  isManagerOrAbove,
+  canManageRoles,
+  canViewLeave,
 } from "@/utils/clientOrganizationUtils";
 
 interface SidebarProps {
@@ -195,35 +195,52 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const { currentOrganization, organizationContext, fetchOrganizationContext, loading } = useOrganizationStore();
+  const {
+    currentOrganization,
+    organizationContext,
+    fetchOrganizationContext,
+    loading,
+  } = useOrganizationStore();
+
+  const fetchContext = useCallback(async () => {
+    if (
+      session?.user?.id &&
+      currentOrganization?.id &&
+      !organizationContext &&
+      !loading
+    ) {
+      console.log(
+        "Sidebar: Fetching organization context for",
+        currentOrganization.id
+      );
+      try {
+        await fetchOrganizationContext(currentOrganization.id);
+      } catch (error) {
+        console.error("Error fetching organization context:", error);
+      }
+    }
+  }, [
+    session?.user?.id,
+    currentOrganization?.id,
+    organizationContext,
+    loading,
+    fetchOrganizationContext,
+  ]);
 
   // Ensure organization context is loaded
   useEffect(() => {
-    if (session?.user?.id && currentOrganization?.id && !organizationContext) {
-      console.log('Sidebar: Fetching organization context for', currentOrganization.id);
-      fetchOrganizationContext(currentOrganization.id);
-    }
-  }, [session?.user?.id, currentOrganization?.id, organizationContext, fetchOrganizationContext]);
+    fetchContext();
+  }, [fetchContext]);
 
   // Check permissions using the client-side organizationUtils approach
-  const userIsAdmin = isAdmin(organizationContext);
   const userIsManagerOrAbove = isManagerOrAbove(organizationContext);
   const userCanManageRoles = canManageRoles(organizationContext);
   const userCanViewLeave = canViewLeave(organizationContext);
 
-  // Debug logging
-  console.log('Sidebar Debug:', {
-    organizationContext,
-    userIsAdmin,
-    userIsManagerOrAbove,
-    userCanManageRoles,
-    userCanViewLeave,
-    permissions: organizationContext?.membership?.role?.permissions,
-    loading
-  });
+  const shouldShowLoading = loading && currentOrganization?.id;
 
   // Show loading state if organization context is not loaded
-  if (loading || (currentOrganization && !organizationContext)) {
+  if (shouldShowLoading) {
     return (
       <>
         {/* Desktop Sidebar Loading */}
@@ -242,7 +259,6 @@ export default function Sidebar({
       </>
     );
   }
-
 
   const coreMenuItems = [
     {
@@ -279,11 +295,15 @@ export default function Sidebar({
       label: "Timesheets",
     },
     // Only show leave if user has permission
-    ...(userCanViewLeave ? [{
-      href: "/leave",
-      icon: <Palmtree size={18} />,
-      label: "Leave",
-    }] : []),
+    ...(userCanViewLeave
+      ? [
+          {
+            href: "/leave",
+            icon: <Palmtree size={18} />,
+            label: "Leave",
+          },
+        ]
+      : []),
   ];
 
   const financeMenuItems = [

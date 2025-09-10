@@ -1,178 +1,200 @@
-"use client"
+"use client";
 
-import React, { useState, useEffect } from "react"
-import { Plus, Pencil, Trash2, Mail, Clock, Shield, AlertCircle, Search } from "lucide-react"
-import Image from "next/image"
-import { toast } from "sonner"
-import Button from "@/components/ui/Button"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
-import ConfirmationModal from "@/components/ui/ConfirmationModal"
-import { formatCurrency } from "@/lib/utils"
-import { useConfirmation } from "@/lib/hooks/useConfirmation"
-import { createDeleteConfirmation } from "@/utils/confirmations"
-import { teamAPI, type TeamMember, type PendingInvitation, type CreateTeamMemberData, type UpdateTeamMemberData } from "@/utils/api"
-import TeamMemberModal from "./TeamMemberModal"
-import TeamMembersSkeleton from "./TeamMembersSkeleton"
-import { useOrganizationStore } from "@/lib/stores/organizationStore"
-import Pagination from "@/components/ui/Pagination"
-import { Input } from "@/components/ui/Input"
+import React, { useState, useEffect } from "react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Mail,
+  Clock,
+  Shield,
+  AlertCircle,
+  Search,
+} from "lucide-react";
+import Image from "next/image";
+import { toast } from "sonner";
+import Button from "@/components/ui/Button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import ConfirmationModal from "@/components/ui/ConfirmationModal";
+import { formatCurrency } from "@/lib/utils";
+import { useConfirmation } from "@/lib/hooks/useConfirmation";
+import { createDeleteConfirmation } from "@/utils/confirmations";
+import {
+  teamAPI,
+  type TeamMember,
+  type PendingInvitation,
+  type CreateTeamMemberData,
+  type UpdateTeamMemberData,
+} from "@/utils/api";
+import TeamMemberModal from "./TeamMemberModal";
+import TeamMembersSkeleton from "./TeamMembersSkeleton";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import Pagination from "@/components/ui/Pagination";
+import { Input } from "@/components/ui/Input";
 
 const TeamMembersPage: React.FC = () => {
-  const [members, setMembers] = useState<TeamMember[]>([])
-  const [invitations, setInvitations] = useState<PendingInvitation[]>([])
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSearching, setIsSearching] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null)
-  
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resendingInvitationId, setResendingInvitationId] = useState<
+    string | null
+  >(null);
+
   // Pagination state
-  const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [totalItems, setTotalItems] = useState(0)
-  const [itemsPerPage] = useState(10)
-  const [searchTerm, setSearchTerm] = useState('')
-  
-  const { confirmation, confirm, handleConfirm, handleClose } = useConfirmation()
-  const { currentOrganization } = useOrganizationStore()
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [itemsPerPage] = useState(10);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const { confirmation, confirm, handleConfirm, handleClose } =
+    useConfirmation();
+  const { currentOrganization } = useOrganizationStore();
 
   useEffect(() => {
     if (currentOrganization?.id) {
       // Initial load or pagination change
-      const isInitialLoad = currentPage === 1 && searchTerm === ''
-      fetchTeamMembers(isInitialLoad)
+      const isInitialLoad = currentPage === 1 && searchTerm === "";
+      fetchTeamMembers(isInitialLoad);
     }
-  }, [currentOrganization?.id, currentPage])
+  }, [currentOrganization?.id, currentPage]);
 
   // Optimized search with minimal delay
   useEffect(() => {
     // For empty search, load immediately
-    if (searchTerm === '') {
+    if (searchTerm === "") {
       if (currentPage !== 1) {
-        setCurrentPage(1)
+        setCurrentPage(1);
       } else if (currentOrganization?.id) {
-        fetchTeamMembers(false) // Not initial load
+        fetchTeamMembers(false); // Not initial load
       }
-      return
+      return;
     }
 
     // For search terms, use minimal debounce
     const timeoutId = setTimeout(() => {
       if (currentPage !== 1) {
-        setCurrentPage(1) // Reset to first page on search
+        setCurrentPage(1); // Reset to first page on search
       } else if (currentOrganization?.id) {
-        fetchTeamMembers(false) // Not initial load
+        fetchTeamMembers(false); // Not initial load
       }
-    }, 100) // Reduced to 100ms for even faster response
+    }, 100); // Reduced to 100ms for even faster response
 
-    return () => clearTimeout(timeoutId)
-  }, [searchTerm])
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
 
   const fetchTeamMembers = async (isInitialLoad = false) => {
-    if (!currentOrganization?.id) return
-    
+    if (!currentOrganization?.id) return;
+
     // Use different loading states based on operation type
     if (isInitialLoad) {
-      setIsLoading(true)
+      setIsLoading(true);
     } else {
-      setIsSearching(true)
+      setIsSearching(true);
     }
-    
-    setError(null)
+
+    setError(null);
     try {
       const data = await teamAPI.getTeamMembers(currentOrganization.id, {
         page: currentPage,
         limit: itemsPerPage,
         search: searchTerm,
-        status: 'active'
-      })
-      
-      setMembers(data.members || [])
-      setInvitations(data.invitations || [])
-      
+        status: "active",
+      });
+
+      setMembers(data.members || []);
+      setInvitations(data.invitations || []);
+
       // Update pagination metadata
       if (data.pagination) {
-        setTotalPages(data.pagination.totalPages)
-        setTotalItems(data.pagination.total)
+        setTotalPages(data.pagination.totalPages);
+        setTotalItems(data.pagination.total);
       }
     } catch (error: any) {
-      console.error('Error fetching team members:', error)
-      const errorMessage = error.message || 'Failed to connect to server'
-      setError(errorMessage)
-      toast.error(errorMessage)
+      console.error("Error fetching team members:", error);
+      const errorMessage = error.message || "Failed to connect to server";
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       if (isInitialLoad) {
-        setIsLoading(false)
+        setIsLoading(false);
       } else {
-        setIsSearching(false)
+        setIsSearching(false);
       }
     }
-  }
+  };
 
   const handleEdit = (member: TeamMember) => {
-    setSelectedMember(member)
-    setIsModalOpen(true)
-  }
+    setSelectedMember(member);
+    setIsModalOpen(true);
+  };
 
   const handleDelete = async (id: string) => {
-    const member = members.find(m => m.id === id)
-    const memberName = member?.users?.full_name || 'this team member'
-    
+    const member = members.find((m) => m.id === id);
+    const memberName = member?.users?.full_name || "this team member";
+
     const confirmation = createDeleteConfirmation({
       itemName: memberName,
-      itemType: 'Team Member',
-      additionalMessage: 'will remove all associated data',
+      itemType: "Team Member",
+      additionalMessage: "will remove all associated data",
       onDelete: async () => {
         try {
           if (!currentOrganization?.id) {
-            throw new Error('No organization selected')
+            throw new Error("No organization selected");
           }
-          await teamAPI.deleteTeamMember(id, currentOrganization.id)
-          await fetchTeamMembers(false) // Refresh the list
+          await teamAPI.deleteTeamMember(id, currentOrganization.id);
+          await fetchTeamMembers(false); // Refresh the list
         } catch (error: any) {
           // Handle specific error messages
-          if (error.message.includes('organization owner')) {
-            throw new Error('Cannot remove organization owner. Please transfer ownership first.')
-          } else if (error.message.includes('Cannot remove yourself')) {
-            throw new Error('You cannot remove yourself from the organization.')
+          if (error.message.includes("organization owner")) {
+            throw new Error(
+              "Cannot remove organization owner. Please transfer ownership first."
+            );
+          } else if (error.message.includes("Cannot remove yourself")) {
+            throw new Error(
+              "You cannot remove yourself from the organization."
+            );
           }
-          throw error
+          throw error;
         }
-      }
-    })
-    
-    confirm(confirmation.action, confirmation)
-  }
+      },
+    });
+
+    confirm(confirmation.action, confirmation);
+  };
 
   const handleAddNew = () => {
-    setSelectedMember(null)
-    setIsModalOpen(true)
-  }
+    setSelectedMember(null);
+    setIsModalOpen(true);
+  };
 
   const handleSave = async (data: any) => {
     try {
       if (data.id) {
         // Update existing member
         if (!currentOrganization?.id) {
-          throw new Error('No organization selected')
+          throw new Error("No organization selected");
         }
-        
+
         const updateData: UpdateTeamMemberData & { organizationId: string } = {
           roleId: data.roleId,
           department: data.department,
           hourlyRate: data.hourlyRate,
           weeklyCapacity: data.weeklyCapacity,
-          organizationId: currentOrganization.id
-        }
-        await teamAPI.updateTeamMember(data.id, updateData)
-        toast.success('Team member updated successfully')
+          organizationId: currentOrganization.id,
+        };
+        await teamAPI.updateTeamMember(data.id, updateData);
+        toast.success("Team member updated successfully");
       } else {
         // Create new invitation
         if (!currentOrganization?.id) {
-          throw new Error('No organization selected')
+          throw new Error("No organization selected");
         }
-        
+
         const createData: CreateTeamMemberData & { organizationId: string } = {
           email: data.email,
           roleId: data.roleId,
@@ -180,57 +202,77 @@ const TeamMembersPage: React.FC = () => {
           hourlyRate: data.hourlyRate,
           weeklyCapacity: data.weeklyCapacity,
           message: data.message,
-          organizationId: currentOrganization.id
-        }
-        await teamAPI.createTeamMember(createData)
-        toast.success('Team member invitation sent successfully')
+          organizationId: currentOrganization.id,
+        };
+        await teamAPI.createTeamMember(createData);
+        toast.success("Team member invitation sent successfully");
       }
 
-      await fetchTeamMembers(false) // Refresh the list
+      await fetchTeamMembers(false); // Refresh the list
     } catch (error: any) {
-      console.error('Error saving member:', error)
-      toast.error(error.message || 'Failed to save team member')
-      throw error // Re-throw so modal can handle it
+      console.error("Error saving member:", error);
+      toast.error(error.message || "Failed to save team member");
+      throw error; // Re-throw so modal can handle it
     }
-  }
+  };
 
   const getStatusBadge = (status: string, isActive: boolean) => {
     if (!isActive) {
-      return <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Inactive</span>
+      return (
+        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+          Inactive
+        </span>
+      );
     }
-    
+
     switch (status) {
-      case 'active':
-        return <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
-      case 'pending':
-        return <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Pending</span>
+      case "active":
+        return (
+          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+            Active
+          </span>
+        );
+      case "pending":
+        return (
+          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+            Pending
+          </span>
+        );
       default:
-        return <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">{status}</span>
+        return (
+          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+            {status}
+          </span>
+        );
     }
-  }
+  };
 
   const getRoleBadge = (role: any) => {
     if (!role) {
-      return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-        <Shield className="w-3 h-3 mr-1" />
-        Unknown Role
-      </span>;
+      return (
+        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+          <Shield className="w-3 h-3 mr-1" />
+          Unknown Role
+        </span>
+      );
     }
-    
+
     const colors: any = {
-      admin: 'bg-red-100 text-red-800',
-      manager: 'bg-blue-100 text-blue-800',
-      member: 'bg-green-100 text-green-800',
-      guest: 'bg-gray-100 text-gray-800'
-    }
-    
+      admin: "bg-red-100 text-red-800",
+      manager: "bg-blue-100 text-blue-800",
+      member: "bg-green-100 text-green-800",
+      guest: "bg-gray-100 text-gray-800",
+    };
+
     return (
-      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${colors[role.name] || 'bg-purple-100 text-purple-800'}`}>
+      <span
+        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${colors[role.name] || "bg-purple-100 text-purple-800"}`}
+      >
         <Shield className="w-3 h-3 mr-1" />
-        {role.display_name || role.name || 'Unknown Role'}
+        {role.display_name || role.name || "Unknown Role"}
       </span>
-    )
-  }
+    );
+  };
 
   if (error) {
     return (
@@ -239,7 +281,9 @@ const TeamMembersPage: React.FC = () => {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Team Members</h1>
-              <p className="mt-1 text-sm text-gray-500">Manage your team members and their permissions</p>
+              <p className="mt-1 text-sm text-gray-500">
+                Manage your team members and their permissions
+              </p>
             </div>
           </div>
 
@@ -257,7 +301,7 @@ const TeamMembersPage: React.FC = () => {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   if (isLoading) {
@@ -270,7 +314,9 @@ const TeamMembersPage: React.FC = () => {
         {/* Title */}
         <div className="mb-6">
           <h1 className="text-2xl font-semibold text-gray-800">Team Members</h1>
-          <p className="text-sm text-gray-500">Manage your team members and their permissions</p>
+          <p className="text-sm text-gray-500">
+            Manage your team members and their permissions
+          </p>
         </div>
 
         {/* Search and Invite Button Row */}
@@ -285,11 +331,11 @@ const TeamMembersPage: React.FC = () => {
               className="pl-10"
             />
           </div>
-          
+
           <div className="flex items-center gap-3">
             {searchTerm && (
               <button
-                onClick={() => setSearchTerm('')}
+                onClick={() => setSearchTerm("")}
                 className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
                 Clear
@@ -325,11 +371,14 @@ const TeamMembersPage: React.FC = () => {
                       </div>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {invitation.email}
+                      </p>
                       <div className="flex items-center space-x-2">
                         {getRoleBadge(invitation.roles)}
                         <span className="text-xs text-gray-500">
-                          Invited {new Date(invitation.created_at).toLocaleDateString()}
+                          Invited{" "}
+                          {new Date(invitation.created_at).toLocaleDateString()}
                         </span>
                       </div>
                     </div>
@@ -337,19 +386,22 @@ const TeamMembersPage: React.FC = () => {
                   <div className="flex items-center space-x-2">
                     <Clock className="h-4 w-4 text-yellow-500" />
                     <span className="text-xs text-yellow-600">
-                      Expires {new Date(invitation.expires_at).toLocaleDateString()}
+                      Expires{" "}
+                      {new Date(invitation.expires_at).toLocaleDateString()}
                     </span>
                     <button
                       onClick={async () => {
-                        setResendingInvitationId(invitation.id)
+                        setResendingInvitationId(invitation.id);
                         try {
-                          await teamAPI.resendInvitation(invitation.id)
-                          toast.success('Invitation resent successfully!')
+                          await teamAPI.resendInvitation(invitation.id);
+                          toast.success("Invitation resent successfully!");
                         } catch (error: any) {
-                          console.error('Error resending invitation:', error)
-                          toast.error(error.message || 'Failed to resend invitation')
+                          console.error("Error resending invitation:", error);
+                          toast.error(
+                            error.message || "Failed to resend invitation"
+                          );
                         } finally {
-                          setResendingInvitationId(null)
+                          setResendingInvitationId(null);
                         }
                       }}
                       disabled={resendingInvitationId === invitation.id}
@@ -361,7 +413,7 @@ const TeamMembersPage: React.FC = () => {
                           Resending...
                         </>
                       ) : (
-                        'Resend'
+                        "Resend"
                       )}
                     </button>
                     <button
@@ -369,20 +421,27 @@ const TeamMembersPage: React.FC = () => {
                         confirm(
                           async () => {
                             try {
-                              await teamAPI.cancelInvitation(invitation.id)
-                              toast.success('Invitation cancelled successfully!')
-                              await fetchTeamMembers(false) // Refresh the list
+                              await teamAPI.cancelInvitation(invitation.id);
+                              toast.success(
+                                "Invitation cancelled successfully!"
+                              );
+                              await fetchTeamMembers(false); // Refresh the list
                             } catch (error: any) {
-                              console.error('Error cancelling invitation:', error)
-                              toast.error(error.message || 'Failed to cancel invitation')
+                              console.error(
+                                "Error cancelling invitation:",
+                                error
+                              );
+                              toast.error(
+                                error.message || "Failed to cancel invitation"
+                              );
                             }
                           },
                           {
-                            title: 'Cancel Invitation',
+                            title: "Cancel Invitation",
                             message: `Are you sure you want to cancel the invitation for ${invitation.email}?`,
-                            type: 'danger'
+                            type: "danger",
                           }
-                        )
+                        );
                       }}
                       className="px-3 py-1 text-xs font-medium text-red-600 bg-red-100 hover:bg-red-200 rounded transition-colors"
                     >
@@ -401,7 +460,9 @@ const TeamMembersPage: React.FC = () => {
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
               <span className="ml-2 text-gray-600">
-                {searchTerm ? 'Searching team members...' : 'Loading team members...'}
+                {searchTerm
+                  ? "Searching team members..."
+                  : "Loading team members..."}
               </span>
             </div>
           ) : members.length === 0 ? (
@@ -415,10 +476,15 @@ const TeamMembersPage: React.FC = () => {
               </div>
               {searchTerm ? (
                 <>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No results found</h3>
-                  <p className="text-gray-500 mb-4">No team members match your search criteria for "{searchTerm}".</p>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No results found
+                  </h3>
+                  <p className="text-gray-500 mb-4">
+                    No team members match your search criteria for "{searchTerm}
+                    ".
+                  </p>
                   <button
-                    onClick={() => setSearchTerm('')}
+                    onClick={() => setSearchTerm("")}
                     className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
                   >
                     Clear Search
@@ -426,8 +492,12 @@ const TeamMembersPage: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No team members yet</h3>
-                  <p className="text-gray-500 mb-4">Start building your team by inviting your first member.</p>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No team members yet
+                  </h3>
+                  <p className="text-gray-500 mb-4">
+                    Start building your team by inviting your first member.
+                  </p>
                   <button
                     onClick={handleAddNew}
                     className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
@@ -483,18 +553,22 @@ const TeamMembersPage: React.FC = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {members.map((member) => {
                     const isActive = member.users?.is_active || false;
-                    const statusIcon = isActive ? 'border-green-500' : 'border-gray-500';
-                    
+                    const statusIcon = isActive
+                      ? "border-green-500"
+                      : "border-gray-500";
+
                     return (
                       <tr key={member.id}>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                          
                             <div className="flex items-center">
                               {member?.users?.avatar_url ? (
                                 <Image
                                   className="h-10 w-10 rounded-full object-cover"
-                                  src={member.users.avatar_url || "/placeholder.svg"}
+                                  src={
+                                    member.users.avatar_url ||
+                                    "/placeholder.svg"
+                                  }
                                   alt={member.users?.full_name || "User"}
                                   width={40}
                                   height={40}
@@ -502,7 +576,11 @@ const TeamMembersPage: React.FC = () => {
                               ) : (
                                 <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
                                   <span className="text-orange-700 font-medium text-lg">
-                                    {member.users?.full_name ? member.users.full_name.charAt(0).toUpperCase() : "?"}
+                                    {member.users?.full_name
+                                      ? member.users.full_name
+                                          .charAt(0)
+                                          .toUpperCase()
+                                      : "?"}
                                   </span>
                                 </div>
                               )}
@@ -510,9 +588,13 @@ const TeamMembersPage: React.FC = () => {
                                 <div className="text-sm font-medium text-gray-900">
                                   {member.users?.full_name || "Unknown User"}
                                 </div>
-                                <div className="text-sm text-gray-500">{member.users?.email || "No email"}</div>
+                                <div className="text-sm text-gray-500">
+                                  {member.users?.email || "No email"}
+                                </div>
                                 {member.users?.position && (
-                                  <div className="text-xs text-gray-400">{member.users.position}</div>
+                                  <div className="text-xs text-gray-400">
+                                    {member.users.position}
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -521,7 +603,11 @@ const TeamMembersPage: React.FC = () => {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="space-y-1">
                             {getRoleBadge(member.roles)}
-                            {member.department && <div className="text-sm text-gray-500">{member.department}</div>}
+                            {member.department && (
+                              <div className="text-sm text-gray-500">
+                                {member.department}
+                              </div>
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -529,7 +615,9 @@ const TeamMembersPage: React.FC = () => {
                             {member.weekly_capacity || 0}h / week
                           </div>
                           <div className="text-sm text-gray-500">
-                            {member.hourly_rate ? formatCurrency(member.hourly_rate) + "/h" : "Rate not set"}
+                            {member.hourly_rate
+                              ? formatCurrency(member.hourly_rate) + "/h"
+                              : "Rate not set"}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -537,7 +625,9 @@ const TeamMembersPage: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
-                            {member.joined_at ? new Date(member.joined_at).toLocaleDateString() : "N/A"}
+                            {member.joined_at
+                              ? new Date(member.joined_at).toLocaleDateString()
+                              : "N/A"}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -594,7 +684,7 @@ const TeamMembersPage: React.FC = () => {
         />
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default TeamMembersPage
+export default TeamMembersPage;

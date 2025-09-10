@@ -1,28 +1,54 @@
-"use client"
+"use client";
 
-import { useState, Dispatch, SetStateAction, useEffect, useCallback } from "react"
-import { Bell, Search, Menu, ChevronDown, User, Settings, LogOut, PanelLeftClose, PanelLeftOpen, CreditCard, Building2, Check } from "lucide-react"
-import { useSession, signOut } from "next-auth/react"
-import { getInitials } from "@/lib/utils"
-import { useRouter } from "next/navigation"
-import { useSubscriptionModal } from "@/lib/hooks/useSubscriptionModal"
-import { useOrganizationStore, useCurrentOrganization } from "@/lib/stores/organizationStore"
+import {
+  useState,
+  Dispatch,
+  SetStateAction,
+  useEffect,
+  useCallback,
+} from "react";
+import {
+  Bell,
+  Search,
+  Menu,
+  ChevronDown,
+  User,
+  Settings,
+  LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
+  CreditCard,
+  Building2,
+  Check,
+} from "lucide-react";
+import { useSession, signOut } from "next-auth/react";
+import { getInitials } from "@/lib/utils";
+import { useRouter } from "next/navigation";
+import { useSubscriptionModal } from "@/lib/hooks/useSubscriptionModal";
+import {
+  useOrganizationStore,
+  useCurrentOrganization,
+} from "@/lib/stores/organizationStore";
 
 interface HeaderProps {
-  setSidebarOpen: Dispatch<SetStateAction<boolean>>
-  sidebarCollapsed: boolean
-  setSidebarCollapsed: Dispatch<SetStateAction<boolean>>
+  setSidebarOpen: Dispatch<SetStateAction<boolean>>;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
 }
 
-export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCollapsed }: HeaderProps) {
-  const { data: session } = useSession()
-  const router = useRouter()
-  const [showProfileMenu, setShowProfileMenu] = useState(false)
-  const [showOrgDropdown, setShowOrgDropdown] = useState(false)
-  const { openSubscriptionModal } = useSubscriptionModal()
-  
+export default function Header({
+  setSidebarOpen,
+  sidebarCollapsed,
+  setSidebarCollapsed,
+}: HeaderProps) {
+  const { data: session } = useSession();
+  const router = useRouter();
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showOrgDropdown, setShowOrgDropdown] = useState(false);
+  const { openSubscriptionModal } = useSubscriptionModal();
+
   // Use optimized store hooks
-  const { currentOrganization, loading } = useCurrentOrganization()
+  const { currentOrganization, loading } = useCurrentOrganization();
   const {
     userOrganizations,
     fetchUserOrganizations,
@@ -31,73 +57,118 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
     fetchOrganizationContext,
     warmCaches,
     refreshUserOrganizations,
-    handleInvitationAccepted
-  } = useOrganizationStore()
+    handleInvitationAccepted,
+  } = useOrganizationStore();
 
   // Initialize data with progressive loading
   useEffect(() => {
-    if (!session?.user?.id) return
+    if (!session?.user?.id) return;
 
     const initializeData = async () => {
       // First, fetch organizations (lightweight)
-      await fetchUserOrganizations()
-      
+      await fetchUserOrganizations();
+
       // Warm caches for likely organizations in background
-      warmCaches()
-      
+      warmCaches();
+
       // Then, if we have a current organization, fetch its context
-      const selectedOrgId = typeof window !== 'undefined' 
-        ? localStorage.getItem('selectedOrganizationId')
-        : null
+      const selectedOrgId =
+        typeof window !== "undefined"
+          ? localStorage.getItem("selectedOrganizationId")
+          : null;
 
       if (selectedOrgId) {
-        await fetchOrganizationContext(selectedOrgId)
+        await fetchOrganizationContext(selectedOrgId);
       } else if (userOrganizations.length > 0 && !currentOrganization) {
         // Auto-select first organization and fetch its context
-        await switchOrganization(userOrganizations[0].id)
+        await switchOrganization(userOrganizations[0].id);
       }
-    }
+    };
 
-    initializeData()
-  }, [session?.user?.id, fetchUserOrganizations, fetchOrganizationContext, switchOrganization, warmCaches, userOrganizations, currentOrganization])
+    initializeData();
+  }, [
+    session?.user?.id,
+    fetchUserOrganizations,
+    fetchOrganizationContext,
+    switchOrganization,
+    warmCaches,
+    userOrganizations,
+    currentOrganization,
+  ]);
 
   // Listen for invitation acceptance events and refresh organization data
   useEffect(() => {
-    if (!session?.user?.id) return
+    if (!session?.user?.id) return;
 
     const handleInvitationAccepted = (event: CustomEvent) => {
-      const { organizationId } = event.detail
+      const { organizationId } = event.detail;
       if (organizationId) {
         // Refresh organization data when invitation is accepted
-        refreshUserOrganizations()
+        refreshUserOrganizations();
       }
-    }
+    };
 
     // Listen for custom events from invitation acceptance
-    window.addEventListener('invitation-accepted', handleInvitationAccepted as EventListener)
+    window.addEventListener(
+      "invitation-accepted",
+      handleInvitationAccepted as EventListener
+    );
 
     return () => {
-      window.removeEventListener('invitation-accepted', handleInvitationAccepted as EventListener)
-    }
-  }, [session?.user?.id, refreshUserOrganizations])
+      window.removeEventListener(
+        "invitation-accepted",
+        handleInvitationAccepted as EventListener
+      );
+    };
+  }, [session?.user?.id, refreshUserOrganizations]);
+
+  useEffect(() => {
+    const handleInvitationAcceptedEvent = (event: CustomEvent) => {
+      const { organizationId } = event.detail;
+      console.log(
+        "Header: Invitation accepted event received:",
+        organizationId
+      );
+      if (organizationId) {
+        handleInvitationAccepted(organizationId);
+      }
+    };
+
+    // Add event listener
+    window.addEventListener(
+      "invitation-accepted",
+      handleInvitationAcceptedEvent as EventListener
+    );
+
+    // Cleanup
+    return () => {
+      window.removeEventListener(
+        "invitation-accepted",
+        handleInvitationAcceptedEvent as EventListener
+      );
+    };
+  }, [handleInvitationAccepted]);
 
   const handleLogout = useCallback(async () => {
-    setShowProfileMenu(false)
-    clearOrganizationData()
-    await signOut({ 
-      callbackUrl: '/',
-      redirect: true 
-    })
-  }, [clearOrganizationData])
+    setShowProfileMenu(false);
+    clearOrganizationData();
+    await signOut({
+      callbackUrl: "/",
+      redirect: true,
+    });
+  }, [clearOrganizationData]);
 
-  const handleOrganizationSwitch = useCallback(async (organizationId: string) => {
-    await switchOrganization(organizationId)
-    setShowOrgDropdown(false)
-  }, [switchOrganization])
+  const handleOrganizationSwitch = useCallback(
+    async (organizationId: string) => {
+      await switchOrganization(organizationId);
+      setShowOrgDropdown(false);
+    },
+    [switchOrganization]
+  );
 
-  const user = session?.user
-  const showOrgSelector = userOrganizations.length > 1
-  const showOrgDisplay = currentOrganization && userOrganizations.length >= 1
+  const user = session?.user;
+  const showOrgSelector = userOrganizations.length > 1;
+  const showOrgDisplay = currentOrganization && userOrganizations.length >= 1;
 
   return (
     <header className="bg-white border-b border-gray-200 z-30 sticky top-0 h-16">
@@ -118,7 +189,11 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             aria-label="Toggle sidebar"
           >
-            {sidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={20} />
+            ) : (
+              <PanelLeftClose size={20} />
+            )}
           </button>
 
           {/* Search bar */}
@@ -182,11 +257,11 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
               {showOrgDropdown && showOrgSelector && (
                 <>
                   {/* Backdrop */}
-                  <div 
-                    className="fixed inset-0 z-40" 
+                  <div
+                    className="fixed inset-0 z-40"
                     onClick={() => setShowOrgDropdown(false)}
                   />
-                  
+
                   {/* Dropdown Menu */}
                   <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border border-gray-200 z-50 py-1">
                     <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -197,14 +272,16 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
                         Select the organization you want to work with
                       </p>
                     </div>
-                    
+
                     <div className="py-1 max-h-64 overflow-y-auto">
                       {userOrganizations.map((org) => (
                         <button
                           key={org.id}
                           onClick={() => handleOrganizationSwitch(org.id)}
                           className={`flex items-center w-full px-4 py-3 text-sm hover:bg-orange-50 transition-colors group ${
-                            currentOrganization?.id === org.id ? 'bg-orange-50 border-r-2 border-orange-500' : ''
+                            currentOrganization?.id === org.id
+                              ? "bg-orange-50 border-r-2 border-orange-500"
+                              : ""
                           }`}
                         >
                           <div className="flex items-center space-x-3 min-w-0 flex-1">
@@ -278,55 +355,66 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
                 </div>
               )}
               <div className="hidden lg:block text-left min-w-0">
-                <p className="text-sm font-medium text-gray-700 truncate">{user?.name || "User"}</p>
-                <p className="text-xs text-gray-500 truncate">{user?.email || "user@example.com"}</p>
+                <p className="text-sm font-medium text-gray-700 truncate">
+                  {user?.name || "User"}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {user?.email || "user@example.com"}
+                </p>
               </div>
-              <ChevronDown size={16} className="text-gray-400 hidden lg:block flex-shrink-0" />
+              <ChevronDown
+                size={16}
+                className="text-gray-400 hidden lg:block flex-shrink-0"
+              />
             </button>
 
             {/* Dropdown Menu */}
             {showProfileMenu && (
               <>
                 {/* Backdrop */}
-                <div 
-                  className="fixed inset-0 z-40" 
+                <div
+                  className="fixed inset-0 z-40"
                   onClick={() => setShowProfileMenu(false)}
                 />
-                
+
                 {/* Menu */}
                 <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg ring-1 ring-black ring-opacity-5 z-50 py-1">
                   {/* User info header */}
                   <div className="px-4 py-3 border-b border-gray-100">
-                    <p className="text-sm font-medium text-gray-900 truncate">{user?.name || "User"}</p>
-                    <p className="text-sm text-gray-500 truncate">{user?.email || "user@example.com"}</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {user?.name || "User"}
+                    </p>
+                    <p className="text-sm text-gray-500 truncate">
+                      {user?.email || "user@example.com"}
+                    </p>
                   </div>
-                  
+
                   {/* Menu items */}
                   <div className="py-1">
-                    <button 
+                    <button
                       onClick={() => {
-                        router.push('/profile')
-                        setShowProfileMenu(false)
+                        router.push("/profile");
+                        setShowProfileMenu(false);
                       }}
                       className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                     >
                       <User size={16} className="mr-3 text-gray-400" />
                       Your Profile
                     </button>
-                    <button 
+                    <button
                       onClick={() => {
-                        router.push('/settings')
-                        setShowProfileMenu(false)
+                        router.push("/settings");
+                        setShowProfileMenu(false);
                       }}
                       className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                     >
                       <Settings size={16} className="mr-3 text-gray-400" />
                       Settings
                     </button>
-                    <button 
+                    <button
                       onClick={() => {
-                        openSubscriptionModal()
-                        setShowProfileMenu(false)
+                        openSubscriptionModal();
+                        setShowProfileMenu(false);
                       }}
                       className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                     >
@@ -334,7 +422,7 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
                       Subscription
                     </button>
                   </div>
-                  
+
                   <div className="border-t border-gray-100 py-1">
                     <button
                       onClick={handleLogout}
@@ -351,5 +439,5 @@ export default function Header({ setSidebarOpen, sidebarCollapsed, setSidebarCol
         </div>
       </div>
     </header>
-  )
+  );
 }
