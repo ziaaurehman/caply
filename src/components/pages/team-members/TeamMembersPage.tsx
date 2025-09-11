@@ -31,8 +31,10 @@ import TeamMembersSkeleton from "./TeamMembersSkeleton";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import Pagination from "@/components/ui/Pagination";
 import { Input } from "@/components/ui/Input";
+import { useSession } from "next-auth/react";
 
 const TeamMembersPage: React.FC = () => {
+  const { data: session } = useSession();
   const [allMembers, setAllMembers] = useState<TeamMember[]>([]);
   const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -93,15 +95,15 @@ const TeamMembersPage: React.FC = () => {
 
   // Reset to first page when search term changes
   useEffect(() => {
-      if (currentPage !== 1) {
-        setCurrentPage(1);
+    if (currentPage !== 1) {
+      setCurrentPage(1);
     }
   }, [searchTerm]);
 
   const fetchTeamMembers = async () => {
     if (!currentOrganization?.id) return;
 
-      setIsLoading(true);
+    setIsLoading(true);
     setError(null);
 
     try {
@@ -120,7 +122,7 @@ const TeamMembersPage: React.FC = () => {
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -544,6 +546,10 @@ const TeamMembersPage: React.FC = () => {
                       ? "border-green-500"
                       : "border-gray-500";
 
+                    // Check if this member is the current user
+                    const isCurrentUser =
+                      member.users?.email === session?.user?.email;
+
                     return (
                       <tr key={member.id}>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -573,7 +579,8 @@ const TeamMembersPage: React.FC = () => {
                               )}
                               <div className="ml-4">
                                 <div className="text-sm font-medium text-gray-900">
-                                  {member.users?.full_name || "Unknown User"}
+                                  {member.users?.full_name ||
+                                    "Unknown User"}{" "}
                                 </div>
                                 <div className="text-sm text-gray-500">
                                   {member.users?.email || "No email"}
@@ -626,7 +633,17 @@ const TeamMembersPage: React.FC = () => {
                           </button>
                           <button
                             onClick={() => handleDelete(member.id)}
-                            className="text-red-600 hover:text-red-900"
+                            disabled={isCurrentUser}
+                            className={`${
+                              isCurrentUser
+                                ? "text-gray-400 cursor-not-allowed"
+                                : "text-red-600 hover:text-red-900"
+                            }`}
+                            title={
+                              isCurrentUser
+                                ? "You cannot delete yourself"
+                                : "Delete member"
+                            }
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
