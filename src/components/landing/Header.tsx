@@ -1,30 +1,30 @@
-"use client"
+"use client";
 
-import { ArrowRight, Menu, X } from "lucide-react"
-import Link from "next/link"
-import { PieChart, UserCircle, LogOut, LayoutDashboard } from "lucide-react"
-import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
-import { useSession, signOut } from "next-auth/react"
+import { ArrowRight, Menu, X } from "lucide-react";
+import Link from "next/link";
+import { PieChart, UserCircle, LogOut, LayoutDashboard } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 
 interface NavbarProps {
-  activeSection?: string
-  isScrolled?: boolean
-  onSectionClick?: (sectionId: string) => void
+  activeSection?: string;
+  isScrolled?: boolean;
+  onSectionClick?: (sectionId: string) => void;
 }
 
-export default function LandingHeader({ 
-  activeSection = "Home", 
-  isScrolled = false, 
-  onSectionClick = () => {} 
+export default function LandingHeader({
+  activeSection = "Home",
+  isScrolled = false,
+  onSectionClick = () => {},
 }: NavbarProps) {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const { data: session, status } = useSession()
-  const [dropdownOpen, setDropdownOpen] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-  const router = useRouter()
-  const isAuthenticated = status === 'authenticated' && session
-  const [scrolled, setScrolled] = useState(isScrolled)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { data: session, status } = useSession();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const isAuthenticated = status === "authenticated" && session;
+  const [scrolled, setScrolled] = useState(isScrolled);
 
   // Handle scroll events
   useEffect(() => {
@@ -34,49 +34,52 @@ export default function LandingHeader({
     };
 
     // Add scroll event listener
-    window.addEventListener('scroll', handleScroll);
-    
+    window.addEventListener("scroll", handleScroll);
+
     // Initial check
     handleScroll();
-    
+
     // Remove event listener on cleanup
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false)
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setDropdownOpen(false);
       }
     }
-    
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleLogout = async () => {
-    setDropdownOpen(false) // Close dropdown before logout
-    await signOut({ redirect: false })
-    router.push("/login")
-  }
+    setDropdownOpen(false); // Close dropdown before logout
+    await signOut({ redirect: false });
+    router.push("/login");
+  };
 
   const handleDashboardClick = () => {
-    setDropdownOpen(false)
-    router.push("/dashboard")
-  }
+    setDropdownOpen(false);
+    router.push("/dashboard");
+  };
 
   const navItems = [
     { id: "Home", label: "Home" },
     { id: "features", label: "Features" },
     { id: "pricing", label: "Pricing" },
     { id: "contact", label: "Contact" },
-  ]
+  ];
 
   const handleSectionClick = (sectionId: string) => {
-    onSectionClick(sectionId)
-    setIsMobileMenuOpen(false)
-  }
+    onSectionClick(sectionId);
+    setIsMobileMenuOpen(false);
+  };
 
   return (
     <header
@@ -91,14 +94,18 @@ export default function LandingHeader({
           {/* Logo */}
           <div className="flex items-center">
             <PieChart className="h-10 w-10 text-primary-600" />
-            <span className="ml-2 text-2xl font-bold text-primary-600">Caply</span>
+            <span className="ml-2 text-2xl font-bold text-primary-600">
+              Caply
+            </span>
           </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden lg:flex">
             <div
               className={`rounded-full px-2 py-2 flex space-x-1 transition-all duration-300 ${
-                scrolled ? "bg-gray-100/90 backdrop-blur-sm" : "bg-gray-100/70 backdrop-blur-sm"
+                scrolled
+                  ? "bg-gray-100/90 backdrop-blur-sm"
+                  : "bg-gray-100/70 backdrop-blur-sm"
               }`}
             >
               {navItems.map((item) => (
@@ -125,41 +132,49 @@ export default function LandingHeader({
             className="lg:hidden text-gray-700 p-2 rounded-lg hover:bg-gray-100 transition-colors"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           >
-            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            {isMobileMenuOpen ? (
+              <X className="w-6 h-6" />
+            ) : (
+              <Menu className="w-6 h-6" />
+            )}
           </button>
 
           {/* Desktop CTA Buttons */}
           {isAuthenticated ? (
             <div className="relative" ref={dropdownRef}>
-              <button 
+              <button
                 className="flex items-center text-gray-700 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 rounded-full p-1 transition-colors"
                 onClick={() => setDropdownOpen(!dropdownOpen)}
               >
                 {session.user?.image ? (
-                  <img 
-                    src={session.user.image} 
-                    alt={session.user.name || "User"} 
+                  <img
+                    src={session.user.image}
+                    alt={session.user.name || "User"}
                     className="h-10 w-10 rounded-full border-2 border-primary-200 hover:border-primary-300"
                   />
                 ) : (
                   <UserCircle className="h-10 w-10 text-primary-600" />
                 )}
               </button>
-              
+
               {dropdownOpen && (
                 <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-primary-200 py-1">
                   <div className="px-4 py-2 border-b border-primary-100">
-                    <p className="text-sm font-medium text-gray-900">{session.user?.name}</p>
-                    <p className="text-xs text-gray-500 truncate">{session.user?.email}</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {session.user?.name}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {session.user?.email}
+                    </p>
                   </div>
-                  <button 
+                  <button
                     className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700"
                     onClick={handleDashboardClick}
                   >
                     <LayoutDashboard className="h-4 w-4 mr-2 text-primary-500" />
                     <span>Dashboard</span>
                   </button>
-                  <button 
+                  <button
                     className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700"
                     onClick={handleLogout}
                   >
@@ -171,20 +186,20 @@ export default function LandingHeader({
             </div>
           ) : (
             <div className="hidden lg:flex items-center space-x-4">
-              <button 
-                onClick={() => router.push("/login")} 
+              <button
+                onClick={() => router.push("/login")}
                 className="text-gray-700 hover:text-primary-600 font-medium text-sm transition-colors"
               >
                 Login
               </button>
-              <button 
-                onClick={() => router.push("/signup")} 
+              <button
+                onClick={() => router.push("/signup")}
                 className="text-gray-700 hover:text-primary-600 font-medium text-sm transition-colors"
               >
                 Sign Up
               </button>
-              <button 
-                onClick={() => router.push("/login")} 
+              <button
+                onClick={() => router.push("/signup")}
                 className="bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-2 rounded-full font-medium text-xs transition-all duration-300 hover:shadow-md flex items-center"
               >
                 Start Free Trial
@@ -215,20 +230,20 @@ export default function LandingHeader({
               </button>
             ))}
             <div className="pt-2 border-t border-gray-300">
-              <button 
-                onClick={() => router.push("/login")} 
+              <button
+                onClick={() => router.push("/login")}
                 className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 text-gray-700 hover:text-primary-600"
               >
                 Login
               </button>
-              <button 
-                onClick={() => router.push("/signup")} 
+              <button
+                onClick={() => router.push("/signup")}
                 className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 text-gray-700 hover:text-primary-600"
               >
                 Sign Up
               </button>
-              <button 
-                onClick={() => router.push("/login")} 
+              <button
+                onClick={() => router.push("/login")}
                 className="w-full bg-primary-600 hover:bg-primary-700 transition-colors text-white px-4 py-2 rounded-full font-medium text-sm transition-colors flex items-center justify-center mt-2"
               >
                 Start Free Trial
@@ -239,5 +254,5 @@ export default function LandingHeader({
         </div>
       </div>
     </header>
-  )
+  );
 }
