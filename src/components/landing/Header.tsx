@@ -87,15 +87,15 @@ export default function LandingHeader({
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center relative">
           {/* Logo */}
           <div className="flex items-center">
             <PieChart className="h-10 w-10 text-primary-600" />
             <span className="ml-2 text-2xl font-bold text-primary-600">Caply</span>
           </div>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden lg:flex">
+          {/* Desktop Navigation - Centered */}
+          <nav className="hidden lg:flex absolute left-1/2 transform -translate-x-1/2">
             <div
               className={`rounded-full px-2 py-2 flex space-x-1 transition-all duration-300 ${
                 scrolled ? "bg-gray-100/90 backdrop-blur-sm" : "bg-gray-100/70 backdrop-blur-sm"

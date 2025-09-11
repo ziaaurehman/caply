@@ -1,6 +1,6 @@
 "use client"
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { X } from 'lucide-react';
 import { CreateClientData } from '@/lib/types';
@@ -13,14 +13,18 @@ interface ClientModalProps {
 
 export default function ClientModal({ isOpen, onClose, onSave }: ClientModalProps) {
   const { register, handleSubmit, formState: { errors }, reset } = useForm<CreateClientData>();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const onSubmit = async (data: CreateClientData) => {
+    setIsSubmitting(true);
     try {
       await onSave(data);
       reset();
       onClose();
     } catch (error) {
       console.error('Failed to create client:', error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -100,15 +104,20 @@ export default function ClientModal({ isOpen, onClose, onSave }: ClientModalProp
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-orange-500 flex items-center gap-2"
             >
-              Create Client
+              {isSubmitting && (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              )}
+              {isSubmitting ? 'Creating...' : 'Create Client'}
             </button>
           </div>
         </form>
