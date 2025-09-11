@@ -402,6 +402,33 @@ export const projectAPI = {
 
     return await response.json();
   },
+
+  // Get ALL projects with capacity planning enabled (no pagination limits)
+  getAllCapacityProjects: async (
+    organizationId: string
+  ): Promise<ProjectsResponse> => {
+    const url = "/api/capacity/projects/all";
+
+    const requestParams = {
+      organizationId,
+    };
+
+    const searchParams = new URLSearchParams(requestParams);
+    const fullUrl = `${url}?${searchParams.toString()}`;
+
+    const response = await fetch(fullUrl, {
+      headers: {
+        "x-organization-id": organizationId,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to fetch all projects");
+    }
+
+    return await response.json();
+  },
 };
 
 export type {

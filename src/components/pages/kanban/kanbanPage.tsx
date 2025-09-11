@@ -1981,8 +1981,14 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               return;
             }
 
-            // No need to refetch data since we already updated the card in state above
-            // This prevents unnecessary loading skeletons from appearing
+            // If card was unarchived and we're showing archived items,
+            // show success message but keep modal open
+            if (
+              !updatedCard.is_archived &&
+              updatedCard.is_archived !== cardModal.card?.is_archived
+            ) {
+              toast.success("Card unarchived successfully!");
+            }
           }}
         />
       )}
