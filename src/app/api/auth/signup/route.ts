@@ -52,6 +52,28 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
     });
 
     if (authError) {
+      // Check for common Supabase auth errors and provide user-friendly messages
+      if (authError.message.includes('User already registered')) {
+        return NextResponse.json(
+          { success: false, error: 'A user with this email address already exists. Please try logging in instead.' },
+          { status: 400 }
+        );
+      }
+      
+      if (authError.message.includes('Invalid email')) {
+        return NextResponse.json(
+          { success: false, error: 'Please enter a valid email address.' },
+          { status: 400 }
+        );
+      }
+      
+      if (authError.message.includes('Password should be at least')) {
+        return NextResponse.json(
+          { success: false, error: 'Password must be at least 6 characters long.' },
+          { status: 400 }
+        );
+      }
+      
       return NextResponse.json(
         { success: false, error: `Authentication error: ${authError.message}` },
         { status: 400 }
@@ -78,6 +100,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
       }]);
 
     if (userProfileError) {
+      // Check if it's a duplicate email error
+      if (userProfileError.code === '23505' && userProfileError.message.includes('users_email_key')) {
+        return NextResponse.json(
+          { success: false, error: 'A user with this email address already exists. Please try logging in instead.' },
+          { status: 400 }
+        );
+      }
+      
       return NextResponse.json(
         { success: false, error: `Failed to create user profile: ${userProfileError.message}` },
         { status: 500 }

@@ -233,27 +233,6 @@ export default function Sidebar({
   const userCanManageRoles = canManageRoles(organizationContext);
   const userCanViewLeave = canViewLeave(organizationContext);
 
-  const shouldShowLoading = loading && currentOrganization?.id;
-
-  if (shouldShowLoading) {
-    return (
-      <>
-        {/* Desktop Sidebar Loading */}
-        <div
-          className={cn(
-            "hidden md:flex md:flex-col md:fixed md:inset-y-0 transition-all duration-300",
-            sidebarCollapsed ? "md:w-16" : "md:w-56"
-          )}
-        >
-          <div className="flex flex-col flex-grow bg-white border-r border-gray-200 pt-5 pb-4 overflow-y-auto">
-            <div className="flex items-center justify-center h-32">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
 
   const isContextLoading = loading && currentOrganization?.id;
 
@@ -291,16 +270,13 @@ export default function Sidebar({
       icon: <Clock size={18} />,
       label: "Timesheets",
     },
-    ...(userCanViewLeave
-      ? [
-          {
-            href: "/leave",
-            icon: <Palmtree size={18} />,
-            label: "Leave",
-          },
-        ]
-      : []),
   ];
+
+  const leaveMenuItem = {
+    href: "/leave",
+    icon: <Palmtree size={18} />,
+    label: "Leave",
+  };
 
   // Render helper for a skeleton nav item
   const SkeletonNavItem: React.FC<{ isCollapsed?: boolean }> = ({
@@ -420,6 +396,21 @@ export default function Sidebar({
                   isCollapsed={sidebarCollapsed}
                 />
               ))}
+              
+              {/* Leave section with skeleton loading */}
+              {isContextLoading ? (
+                <SkeletonNavItem isCollapsed={sidebarCollapsed} />
+              ) : (
+                userCanViewLeave && (
+                  <NavItem
+                    href={leaveMenuItem.href}
+                    icon={leaveMenuItem.icon}
+                    label={leaveMenuItem.label}
+                    active={pathname === leaveMenuItem.href}
+                    isCollapsed={sidebarCollapsed}
+                  />
+                )
+              )}
             </NavSection>
 
             {/* Administration */}
@@ -555,14 +546,32 @@ export default function Sidebar({
                 />
               ))}
 
-              {/* Roles & Permissions for mobile */}
-              {userCanManageRoles && (
-                <NavItem
-                  href="/roles"
-                  icon={<Shield size={18} />}
-                  label="Roles & Permissions"
-                  active={pathname === "/roles"}
-                />
+              {/* Leave section for mobile with skeleton loading */}
+              {isContextLoading ? (
+                <SkeletonNavItem />
+              ) : (
+                userCanViewLeave && (
+                  <NavItem
+                    href={leaveMenuItem.href}
+                    icon={leaveMenuItem.icon}
+                    label={leaveMenuItem.label}
+                    active={pathname === leaveMenuItem.href}
+                  />
+                )
+              )}
+
+              {/* Roles & Permissions for mobile with skeleton loading */}
+              {isContextLoading ? (
+                <SkeletonNavItem />
+              ) : (
+                userCanManageRoles && (
+                  <NavItem
+                    href="/roles"
+                    icon={<Shield size={18} />}
+                    label="Roles & Permissions"
+                    active={pathname === "/roles"}
+                  />
+                )
               )}
 
               <NavItem

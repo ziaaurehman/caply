@@ -62,7 +62,14 @@ export default function SignUpForm() {
 
       if (!response.ok || !result.success) {
         console.error("Signup API error:", result.error)
-        setError(result.error || "Registration failed")
+        
+        // Check if it's a duplicate email error and provide helpful message
+        if (result.error && result.error.includes('already exists')) {
+          setError(`${result.error} You can sign in using the link below.`)
+        } else {
+          setError(result.error || "Registration failed")
+        }
+        
         setIsLoading(false)
         return
       }
@@ -125,6 +132,13 @@ export default function SignUpForm() {
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
           {error}
+          {error.includes('already exists') && (
+            <div className="mt-2">
+              <Link href="/login" className="font-medium text-red-700 hover:text-red-800 underline">
+                Sign in to your account →
+              </Link>
+            </div>
+          )}
         </div>
       )}
       {success && (

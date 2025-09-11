@@ -90,7 +90,7 @@ export default function LandingHeader({
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center relative">
           {/* Logo */}
           <div className="flex items-center">
             <PieChart className="h-10 w-10 text-primary-600" />
@@ -99,8 +99,8 @@ export default function LandingHeader({
             </span>
           </div>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden lg:flex">
+          {/* Desktop Navigation - Centered */}
+          <nav className="hidden lg:flex absolute left-1/2 transform -translate-x-1/2">
             <div
               className={`rounded-full px-2 py-2 flex space-x-1 transition-all duration-300 ${
                 scrolled

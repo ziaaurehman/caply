@@ -17,16 +17,6 @@ function ResetPasswordForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  useEffect(() => {
-    // Check if we have the required parameters
-    const accessToken = searchParams.get('access_token')
-    const refreshToken = searchParams.get('refresh_token')
-    
-    if (!accessToken || !refreshToken) {
-      setError('Invalid reset link. Please request a new password reset.')
-    }
-  }, [searchParams])
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
