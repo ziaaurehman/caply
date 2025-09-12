@@ -22,6 +22,8 @@ import {
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import { useAuthStore } from "@/lib/stores/authStore";
+import { useSession } from "next-auth/react";
 
 interface TeamMemberModalProps {
   isOpen: boolean;
@@ -59,6 +61,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   member,
   onSave,
 }) => {
+  const { data: session } = useSession();
   const [roles, setRoles] = useState<Role[]>([]);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -67,6 +70,9 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   const [showAllPermissions, setShowAllPermissions] = useState(false);
 
   const { currentOrganization } = useOrganizationStore();
+
+  const isEditingSelf = member?.user_id === session?.user?.id;
+  const isAdminEditingSelf = member?.roles.name === "admin" && isEditingSelf;
 
   const {
     register,
@@ -109,7 +115,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
         setValue("hourlyRate", member.hourly_rate || 50);
         setValue("weeklyCapacity", member.weekly_capacity || 40);
       }, 100);
-      
+
       return () => clearTimeout(timer);
     } else if (isOpen && !member) {
       // Only reset for new members
@@ -248,11 +254,16 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
               </label>
               <Select
                 {...register("roleId", { required: "Role is required" })}
-                disabled={loadingRoles}
+                disabled={loadingRoles || isAdminEditingSelf}
                 error={!!errors.roleId}
               >
                 <option value="">
-                  {loadingRoles ? "Loading roles..." : "Select a role"}
+                  {loadingRoles && !isAdminEditingSelf
+                    ? "Loading roles..."
+                    : "Select a role"}
+                  {loadingRoles && isAdminEditingSelf
+                    ? "You cannot change your own role"
+                    : ""}
                 </option>
                 {roles.map((role) => (
                   <option key={role.id} value={role.id}>
@@ -265,9 +276,15 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
                   {errors.roleId.message}
                 </p>
               )}
-              {loadingRoles && (
+              {loadingRoles && !isAdminEditingSelf && (
                 <p className="mt-1 text-xs text-gray-500">
                   Loading available roles...
+                </p>
+              )}
+              {isAdminEditingSelf && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Admins cannot change their own role. Please ask another admin
+                  to update your role.
                 </p>
               )}
             </div>
