@@ -1,83 +1,87 @@
-"use client"
-import { useState, useEffect } from "react"
-import type React from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import Link from "next/link"
-import Button from "../../ui/Button"
-import { Eye, EyeOff } from "lucide-react"
-import { signIn } from "next-auth/react"
+"use client";
+import { useState, useEffect } from "react";
+import type React from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import Button from "../../ui/Button";
+import { Eye, EyeOff } from "lucide-react";
+import { signIn } from "next-auth/react";
 
 export default function LoginForm() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [showPassword, setShowPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   // Handle URL search params in a safe way for SSR
   useEffect(() => {
     if (!searchParams) return;
-    
+
     // Check for verification success
-    const verified = searchParams.get('verified')
-    if (verified === 'true') {
-      setSuccess('Email verified successfully! You can now log in.')
+    const verified = searchParams.get("verified");
+    if (verified === "true") {
+      setSuccess("Email verified successfully! You can now log in.");
     }
 
     // Check for verification error
-    const verificationError = searchParams.get('error')
-    if (verificationError === 'verification_failed') {
-      setError('Email verification failed. Please try again or contact support.')
+    const verificationError = searchParams.get("error");
+    if (verificationError === "verification_failed") {
+      setError(
+        "Email verification failed. Please try again or contact support."
+      );
     }
-  }, [searchParams])
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setError("")
-    setSuccess("")
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
+    setSuccess("");
 
     try {
-      console.log("Attempting to sign in with:", email)
+      console.log("Attempting to sign in with:", email);
       const result = await signIn("credentials", {
         redirect: false,
         email,
         password,
-      })
+      });
 
-      console.log("Sign in result:", result)
+      console.log("Sign in result:", result);
 
       if (result?.error) {
-        setError(result.error === "CredentialsSignin" 
-          ? "Invalid email or password" 
-          : `Authentication error: ${result.error}`)
-        setIsLoading(false)
-        return
+        setError(
+          result.error === "CredentialsSignin"
+            ? "Invalid email or password"
+            : `Authentication error: ${result.error}`
+        );
+        setIsLoading(false);
+        return;
       }
 
       // Use window.location.href instead of router.push to force a full page reload
       // This avoids React Hook inconsistencies by ensuring a clean mount of all components
-      window.location.href = "/dashboard"
+      window.location.href = "/dashboard";
     } catch (error) {
-      console.error("Login error:", error)
-      setError("Something went wrong. Please try again.")
-      setIsLoading(false)
+      console.error("Login error:", error);
+      setError("Something went wrong. Please try again.");
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleGoogleSignIn = async () => {
-    setIsLoading(true)
+    setIsLoading(true);
     try {
-      await signIn("google", { callbackUrl: "/dashboard" })
+      await signIn("google", { callbackUrl: "/dashboard" });
     } catch (error) {
-      console.error("Google sign in error:", error)
-      setError("Failed to sign in with Google")
-      setIsLoading(false)
+      console.error("Google sign in error:", error);
+      setError("Failed to sign in with Google");
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <div className="space-y-6">
@@ -93,7 +97,10 @@ export default function LoginForm() {
       )}
       <form className="space-y-6" onSubmit={handleSubmit}>
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+          <label
+            htmlFor="email"
+            className="block text-sm font-medium text-gray-700"
+          >
             Email address
           </label>
           <div className="mt-1">
@@ -112,7 +119,10 @@ export default function LoginForm() {
         </div>
 
         <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+          <label
+            htmlFor="password"
+            className="block text-sm font-medium text-gray-700"
+          >
             Password
           </label>
           <div className="mt-1 relative">
@@ -132,7 +142,11 @@ export default function LoginForm() {
               className="absolute inset-y-0 right-0 pr-3 flex items-center"
               onClick={() => setShowPassword(!showPassword)}
             >
-              {showPassword ? <EyeOff className="h-4 w-4 text-gray-400" /> : <Eye className="h-4 w-4 text-gray-400" />}
+              {showPassword ? (
+                <EyeOff className="h-4 w-4 text-gray-400" />
+              ) : (
+                <Eye className="h-4 w-4 text-gray-400" />
+              )}
             </button>
           </div>
         </div>
@@ -145,20 +159,31 @@ export default function LoginForm() {
               type="checkbox"
               className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
             />
-            <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
+            <label
+              htmlFor="remember-me"
+              className="ml-2 block text-sm text-gray-900"
+            >
               Remember me
             </label>
           </div>
 
           <p className="text-sm text-gray-600">
-          <Link href="/forgot-password" className="font-medium text-primary-600 hover:text-primary-500">
-            Forgot your password?
-          </Link>
-        </p>
+            <Link
+              href="/forgot-password"
+              className="font-medium text-primary-600 hover:text-primary-500"
+            >
+              Forgot your password?
+            </Link>
+          </p>
         </div>
 
         <div>
-          <Button type="submit" size="lg" isLoading={isLoading} className="w-full">
+          <Button
+            type="submit"
+            size="lg"
+            isLoading={isLoading}
+            className="w-full"
+          >
             {isLoading ? "Signing in..." : "Sign in"}
           </Button>
         </div>
@@ -205,14 +230,16 @@ export default function LoginForm() {
       </div>
 
       <div className="text-center space-y-2">
-       
         <p className="text-sm text-gray-600">
           Don't have an account?{" "}
-          <Link href="/signup" className="font-medium text-primary-600 hover:text-primary-500">
+          <Link
+            href="/signup"
+            className="font-medium text-primary-600 hover:text-primary-500"
+          >
             Sign up
           </Link>
         </p>
       </div>
     </div>
-  )
+  );
 }

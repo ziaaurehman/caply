@@ -194,13 +194,14 @@ export default function CapacityPlanningPage() {
     if (!currentOrganization?.id) return;
 
     try {
-
       // const response = await projectAPI.getProjects(currentOrganization.id, {
       //   capacity_planning_enabled: true,
       // });
       const response = await projectAPI.getAllCapacityProjects(
         currentOrganization.id
       );
+      console.log("response", response);
+      console.log("Here is orgnaization id", currentOrganization.id);
       const fetchedProjects = response.projects;
       setProjects(fetchedProjects);
 
@@ -596,7 +597,7 @@ export default function CapacityPlanningPage() {
               onRefresh={fetchCapacityData}
               onProjectClick={(projectId) => {
                 // Navigate to Kanban tab for the project
-                window.location.href = `/projects`;
+                window.location.href = `/kanban?projectId=${projectId}`;
               }}
               onAddResource={() => setShowAddResourceModal(true)}
               viewMode={viewMode}

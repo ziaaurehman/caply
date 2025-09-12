@@ -1711,7 +1711,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               </div>
 
               {/* Show Archived Toggle */}
-              <div className="flex items-center space-x-2">
+              {/* <div className="flex items-center space-x-2">
                 <input
                   type="checkbox"
                   id="showArchived"
@@ -1725,7 +1725,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                 >
                   Show Archived
                 </label>
-              </div>
+              </div> */}
 
               {/* Assignee Filter */}
               <div className="relative">

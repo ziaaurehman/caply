@@ -6,6 +6,7 @@ import KanbanBoard from "@/components/pages/kanban/kanbanPage";
 import { projectAPI } from "@/utils/api/project";
 import KanbanSkeleton from "@/components/pages/kanban/KanbanSkeleton";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { useSearchParams } from "next/navigation";
 
 interface Project {
   id: string;
@@ -32,8 +33,10 @@ function useDebounce<T>(value: T, delay: number): T {
 
 export default function Kanban() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    null
+    projectId || null
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,11 +48,13 @@ export default function Kanban() {
 
   // Load persisted project selection on mount
   useEffect(() => {
-    const savedProjectId = localStorage.getItem("kanban-selected-project");
-    if (savedProjectId) {
-      setSelectedProjectId(savedProjectId);
+    // const savedProjectId = localStorage.getItem("kanban-selected-project");
+    if (projectId) {
+      setSelectedProjectId(projectId);
+    }else if(projects.length > 0) {
+      setSelectedProjectId(projects[0].id);
     }
-  }, []);
+  }, [projectId, projects]);
 
   const {
     currentOrganization,

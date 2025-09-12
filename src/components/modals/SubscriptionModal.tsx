@@ -8,6 +8,7 @@ import { useSession } from "next-auth/react";
 import { formatPrice, SubscriptionPlan } from "@/lib/stripe";
 import { CheckCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
 
 interface SubscriptionModalProps {
   isOpen: boolean;
@@ -151,7 +152,7 @@ export default function SubscriptionModal({
     currentSubscription,
     checkoutLoading,
   } = useSubscriptionStore();
-  const { organization } = useAuthStore();
+  const { currentOrganization } = useOrganizationStore();
   const { data: session } = useSession();
   const [processingPlanId, setProcessingPlanId] = useState<string | null>(null);
 
@@ -162,22 +163,17 @@ export default function SubscriptionModal({
   }, [isOpen, plans.length, fetchPlans]);
 
   const handleSubscribe = async (planId?: string, stripePriceId?: string) => {
-    if (!session || !organization || !planId || !stripePriceId) {
-      console.error("Missing required data for subscription");
-      console.log(
-        "handleSubscribe",
-        planId,
-        stripePriceId,
-        session,
-        organization
-      );
+    if (!session || !currentOrganization || !planId || !stripePriceId) {
       return;
     }
 
     setProcessingPlanId(planId);
 
     try {
-      const checkoutUrl = await createCheckoutSession(planId, organization.id);
+      const checkoutUrl = await createCheckoutSession(
+        planId,
+        currentOrganization.id
+      );
       // Close modal before redirecting
       onClose();
       window.location.href = checkoutUrl;
