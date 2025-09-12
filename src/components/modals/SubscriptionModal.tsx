@@ -174,6 +174,7 @@ export default function SubscriptionModal({
         planId,
         currentOrganization.id
       );
+      setProcessingPlanId(null);
       // Close modal before redirecting
       onClose();
       window.location.href = checkoutUrl;
