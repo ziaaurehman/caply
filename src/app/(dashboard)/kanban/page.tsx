@@ -42,6 +42,7 @@ function KanbanPageComponent() {
   const [error, setError] = useState<string | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+  const [isSearchMode, setIsSearchMode] = useState(false);
 
   // Debounce the search input
   const debouncedSearch = useDebounce(projectSearch, 300);
@@ -83,18 +84,18 @@ function KanbanPageComponent() {
 
       // Auto-select first project if available and no saved selection
       if (kanbanProjects.length > 0 && !selectedProjectId) {
-        const savedProjectId = localStorage.getItem("kanban-selected-project");
-        if (
-          savedProjectId &&
-          kanbanProjects.find((p) => p.id === savedProjectId)
-        ) {
-          // Saved project exists in current list
-          setSelectedProjectId(savedProjectId);
-        } else {
-          // Select first project and save it
-          setSelectedProjectId(kanbanProjects[0].id);
-          localStorage.setItem("kanban-selected-project", kanbanProjects[0].id);
-        }
+        // const savedProjectId = localStorage.getItem("kanban-selected-project");
+        // if (
+        //   // savedProjectId &&
+        //   kanbanProjects.find((p) => p.id === savedProjectId)
+        // ) {
+        //   // Saved project exists in current list
+        //   setSelectedProjectId(savedProjectId);
+        // } else {
+        // Select first project and save it
+        setSelectedProjectId(kanbanProjects[0].id);
+        // localStorage.setItem("kanban-selected-project", kanbanProjects[0].id);
+        // }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load projects");
@@ -138,29 +139,36 @@ function KanbanPageComponent() {
 
   const handleProjectSelect = (projectId: string, projectName: string) => {
     setSelectedProjectId(projectId);
-    localStorage.setItem("kanban-selected-project", projectId);
+    // localStorage.setItem("kanban-selected-project", projectId);
     setProjectSearch(""); // Clear search when selecting
     setIsProjectDropdownOpen(false);
+    setIsSearchMode(false);
   };
 
   const handleInputFocus = () => {
     setIsProjectDropdownOpen(true);
+    setIsSearchMode(true);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setProjectSearch(value);
     setIsProjectDropdownOpen(true);
+    setIsSearchMode(true);
   };
 
   const clearProjectSearch = () => {
     setProjectSearch("");
     setSelectedProjectId(null);
     setIsProjectDropdownOpen(true);
-    localStorage.removeItem("kanban-selected-project");
+    setIsSearchMode(true);
+    // localStorage.removeItem("kanban-selected-project");
   };
 
   const getSelectedProjectName = () => {
+    if (isSearchMode) {
+      return projectSearch;
+    }
     const selectedProject = projects.find((p) => p.id === selectedProjectId);
     return selectedProject?.name || "";
   };
