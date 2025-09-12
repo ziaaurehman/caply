@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 import KanbanBoard from "@/components/pages/kanban/kanbanPage";
 import { projectAPI } from "@/utils/api/project";
@@ -31,7 +31,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-export default function Kanban() {
+function KanbanPageComponent() {
   const [projects, setProjects] = useState<Project[]>([]);
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId");
@@ -51,7 +51,7 @@ export default function Kanban() {
     // const savedProjectId = localStorage.getItem("kanban-selected-project");
     if (projectId) {
       setSelectedProjectId(projectId);
-    }else if(projects.length > 0) {
+    } else if (projects.length > 0) {
       setSelectedProjectId(projects[0].id);
     }
   }, [projectId, projects]);
@@ -318,5 +318,18 @@ export default function Kanban() {
       {/* Kanban Board */}
       {selectedProjectId && <KanbanBoard projectId={selectedProjectId} />}
     </div>
+  );
+}
+
+// Loading fallback component
+function KanbanLoading() {
+  return <KanbanSkeleton />;
+}
+
+export default function Kanabn() {
+  return (
+    <Suspense fallback={<KanbanLoading />}>
+      <KanbanPageComponent />
+    </Suspense>
   );
 }
