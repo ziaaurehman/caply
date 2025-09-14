@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { 
-  createOrganizationWithRoles, 
-  addUserAsAdmin, 
-  generateOrgSlug 
-} from '@/utils/rbac/organizationSetup';
-import { redisSetJSON } from '@/utils/redis';
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import {
+  createOrganizationWithRoles,
+  addUserAsAdmin,
+  generateOrgSlug,
+} from "@/utils/rbac/organizationSetup";
+import { redisSetJSON } from "@/utils/redis";
 
 export interface SignupRequest {
   email: string;
@@ -25,7 +25,9 @@ export interface SignupResponse {
  * POST /api/auth/signup
  * Handles user signup with organization creation
  */
-export async function POST(request: NextRequest): Promise<NextResponse<SignupResponse>> {
+export async function POST(
+  request: NextRequest
+): Promise<NextResponse<SignupResponse>> {
   try {
     const body: SignupRequest = await request.json();
     const { email, password, full_name, organization_name } = body;
@@ -33,7 +35,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
     // Validate required fields
     if (!email || !password || !full_name) {
       return NextResponse.json(
-        { success: false, error: 'Email, password, and full name are required' },
+        {
+          success: false,
+          error: "Email, password, and full name are required",
+        },
         { status: 400 }
       );
     }
@@ -48,32 +53,40 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
         data: {
           full_name,
         },
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/login`,
       },
     });
 
     if (authError) {
       // Check for common Supabase auth errors and provide user-friendly messages
-      if (authError.message.includes('User already registered')) {
+      if (authError.message.includes("User already registered")) {
         return NextResponse.json(
-          { success: false, error: 'A user with this email address already exists. Please try logging in instead.' },
+          {
+            success: false,
+            error:
+              "A user with this email address already exists. Please try logging in instead.",
+          },
           { status: 400 }
         );
       }
-      
-      if (authError.message.includes('Invalid email')) {
+
+      if (authError.message.includes("Invalid email")) {
         return NextResponse.json(
-          { success: false, error: 'Please enter a valid email address.' },
+          { success: false, error: "Please enter a valid email address." },
           { status: 400 }
         );
       }
-      
-      if (authError.message.includes('Password should be at least')) {
+
+      if (authError.message.includes("Password should be at least")) {
         return NextResponse.json(
-          { success: false, error: 'Password must be at least 6 characters long.' },
+          {
+            success: false,
+            error: "Password must be at least 6 characters long.",
+          },
           { status: 400 }
         );
       }
-      
+
       return NextResponse.json(
         { success: false, error: `Authentication error: ${authError.message}` },
         { status: 400 }
@@ -82,7 +95,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
 
     if (!authData.user) {
       return NextResponse.json(
-        { success: false, error: 'Failed to create user' },
+        { success: false, error: "Failed to create user" },
         { status: 500 }
       );
     }
@@ -90,26 +103,36 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
     const userId = authData.user.id;
 
     // 2. Create user profile in users table
-    const { error: userProfileError } = await supabase
-      .from('users')
-      .insert([{
+    const { error: userProfileError } = await supabase.from("users").insert([
+      {
         id: userId,
         email,
         full_name,
         email_verified: authData.user.email_confirmed_at !== null,
-      }]);
+      },
+    ]);
 
     if (userProfileError) {
       // Check if it's a duplicate email error
-      if (userProfileError.code === '23505' && userProfileError.message.includes('users_email_key')) {
+      if (
+        userProfileError.code === "23505" &&
+        userProfileError.message.includes("users_email_key")
+      ) {
         return NextResponse.json(
-          { success: false, error: 'A user with this email address already exists. Please try logging in instead.' },
+          {
+            success: false,
+            error:
+              "A user with this email address already exists. Please try logging in instead.",
+          },
           { status: 400 }
         );
       }
-      
+
       return NextResponse.json(
-        { success: false, error: `Failed to create user profile: ${userProfileError.message}` },
+        {
+          success: false,
+          error: `Failed to create user profile: ${userProfileError.message}`,
+        },
         { status: 500 }
       );
     }
@@ -134,18 +157,29 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
     // Cache: organization and roles
     try {
       if (organizationResult.organization) {
-        await redisSetJSON(`organization:${organizationResult.organization.id}`, organizationResult.organization, 1296000);
+        await redisSetJSON(
+          `organization:${organizationResult.organization.id}`,
+          organizationResult.organization,
+          1296000
+        );
       }
       if (organizationResult.roles && organizationResult.organization) {
-        await redisSetJSON(`organization:roles:${organizationResult.organization.id}`, organizationResult.roles, 1296000);
+        await redisSetJSON(
+          `organization:roles:${organizationResult.organization.id}`,
+          organizationResult.roles,
+          1296000
+        );
       }
     } catch (e) {
-      console.warn('Redis cache set failed (organization/roles):', e);
+      console.warn("Redis cache set failed (organization/roles):", e);
     }
 
     // 4. Add user as admin to the organization
-    const adminResult = await addUserAsAdmin(userId, organizationResult.organization.id);
-    
+    const adminResult = await addUserAsAdmin(
+      userId,
+      organizationResult.organization.id
+    );
+
     if (adminResult.error) {
       return NextResponse.json(
         { success: false, error: adminResult.error },
@@ -156,52 +190,66 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
     // Cache: organization membership for the created user
     try {
       const { data: memberData } = await supabase
-        .from('organization_members')
-        .select(`
+        .from("organization_members")
+        .select(
+          `
           *,
           users(*),
           roles(*)
-        `)
-        .eq('organization_id', organizationResult.organization.id)
-        .eq('user_id', userId)
+        `
+        )
+        .eq("organization_id", organizationResult.organization.id)
+        .eq("user_id", userId)
         .single();
 
       if (memberData) {
-        await redisSetJSON(`organization:member:${organizationResult.organization.id}:${userId}`, memberData, 1296000);
+        await redisSetJSON(
+          `organization:member:${organizationResult.organization.id}:${userId}`,
+          memberData,
+          1296000
+        );
       }
 
       // Also cache all organization members (list) for quick org-level lookups
       const { data: allMembers } = await supabase
-        .from('organization_members')
-        .select(`
+        .from("organization_members")
+        .select(
+          `
           *,
           users(*),
           roles(*)
-        `)
-        .eq('organization_id', organizationResult.organization.id);
+        `
+        )
+        .eq("organization_id", organizationResult.organization.id);
       if (allMembers) {
-        await redisSetJSON(`organization:members:${organizationResult.organization.id}`, allMembers, 1296000);
+        await redisSetJSON(
+          `organization:members:${organizationResult.organization.id}`,
+          allMembers,
+          1296000
+        );
       }
     } catch (e) {
-      console.warn('Redis cache set failed (organization member):', e);
+      console.warn("Redis cache set failed (organization member):", e);
     }
 
     // 5. Fetch complete user data with organization info
     const { data: userData, error: userFetchError } = await supabase
-      .from('users')
-      .select(`
+      .from("users")
+      .select(
+        `
         *,
         organization_memberships:organization_members(
           *,
           organization:organizations(*),
           role:roles(*)
         )
-      `)
-      .eq('id', userId)
+      `
+      )
+      .eq("id", userId)
       .single();
 
     if (userFetchError) {
-      console.warn('Failed to fetch complete user data:', userFetchError);
+      console.warn("Failed to fetch complete user data:", userFetchError);
     }
 
     return NextResponse.json({
@@ -209,9 +257,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<SignupRes
       user: userData || authData.user,
       organization: organizationResult.organization,
     });
-
   } catch (error: any) {
-    console.error('Signup error:', error);
+    console.error("Signup error:", error);
     return NextResponse.json(
       { success: false, error: `Internal server error: ${error.message}` },
       { status: 500 }

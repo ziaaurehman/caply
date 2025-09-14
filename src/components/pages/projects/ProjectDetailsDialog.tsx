@@ -128,14 +128,20 @@ const ProjectDetailsDialog: React.FC<ProjectDetailsDialogProps> = ({
         currentOrganization.id
       );
 
-      // Create a temporary link element to trigger download
+      // Fetch the file as a blob
+      const fileResponse = await fetch(response.download_url);
+      const blob = await fileResponse.blob();
+      // Create object URL and download
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = response.download_url;
+      link.href = url;
       link.download = doc.original_filename;
-      link.target = "_blank";
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+
+      // Clean up the object URL
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Error downloading document:", error);
       // You might want to show a toast notification here

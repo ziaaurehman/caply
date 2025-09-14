@@ -1,66 +1,66 @@
-"use client"
+"use client";
 
-import { useState, useEffect, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
-import { Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react'
-import { createClient } from '@/utils/supabase/client'
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { Eye, EyeOff, CheckCircle, AlertCircle } from "lucide-react";
+import { createClient } from "@/utils/supabase/client";
 
 function ResetPasswordForm() {
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
-  const router = useRouter()
-  const searchParams = useSearchParams()
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
+    e.preventDefault();
+
     if (!password) {
-      setError('Please enter a new password')
-      return
+      setError("Please enter a new password");
+      return;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters long')
-      return
+      setError("Password must be at least 6 characters long");
+      return;
     }
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match')
-      return
+      setError("Passwords do not match");
+      return;
     }
 
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
 
     try {
-      const supabase = createClient()
-      
+      const supabase = createClient();
+
       // Update the password
       const { error } = await supabase.auth.updateUser({
-        password: password
-      })
+        password: password,
+      });
 
       if (error) {
-        setError(error.message)
+        setError(error.message);
       } else {
-        setSuccess(true)
+        setSuccess(true);
         // Redirect to login after 3 seconds
         setTimeout(() => {
-          router.push('/login')
-        }, 3000)
+          router.push("/login");
+        }, 3000);
       }
     } catch (err) {
-      setError('An unexpected error occurred. Please try again.')
+      setError("An unexpected error occurred. Please try again.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   if (success) {
     return (
@@ -74,7 +74,8 @@ function ResetPasswordForm() {
               Password Updated!
             </h2>
             <p className="mt-2 text-sm text-gray-600">
-              Your password has been successfully updated. You will be redirected to the login page shortly.
+              Your password has been successfully updated. You will be
+              redirected to the login page shortly.
             </p>
           </div>
 
@@ -88,7 +89,7 @@ function ResetPasswordForm() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -118,14 +119,17 @@ function ResetPasswordForm() {
           )}
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+            <label
+              htmlFor="password"
+              className="block text-sm font-medium text-gray-700"
+            >
               New Password
             </label>
             <div className="mt-1 relative">
               <input
                 id="password"
                 name="password"
-                type={showPassword ? 'text' : 'password'}
+                type={showPassword ? "text" : "password"}
                 autoComplete="new-password"
                 required
                 value={password}
@@ -135,7 +139,7 @@ function ResetPasswordForm() {
               />
               <button
                 type="button"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center z-20"
                 onClick={() => setShowPassword(!showPassword)}
               >
                 {showPassword ? (
@@ -148,14 +152,17 @@ function ResetPasswordForm() {
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
+            <label
+              htmlFor="confirmPassword"
+              className="block text-sm font-medium text-gray-700"
+            >
               Confirm New Password
             </label>
             <div className="mt-1 relative">
               <input
                 id="confirmPassword"
                 name="confirmPassword"
-                type={showConfirmPassword ? 'text' : 'password'}
+                type={showConfirmPassword ? "text" : "password"}
                 autoComplete="new-password"
                 required
                 value={confirmPassword}
@@ -165,7 +172,7 @@ function ResetPasswordForm() {
               />
               <button
                 type="button"
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center z-20"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
               >
                 {showConfirmPassword ? (
@@ -189,7 +196,7 @@ function ResetPasswordForm() {
                   Updating...
                 </div>
               ) : (
-                'Update Password'
+                "Update Password"
               )}
             </button>
           </div>
@@ -205,7 +212,7 @@ function ResetPasswordForm() {
         </form>
       </div>
     </div>
-  )
+  );
 }
 
 export default function ResetPasswordPage() {
@@ -213,5 +220,5 @@ export default function ResetPasswordPage() {
     <Suspense fallback={<div>Loading...</div>}>
       <ResetPasswordForm />
     </Suspense>
-  )
-} 
+  );
+}

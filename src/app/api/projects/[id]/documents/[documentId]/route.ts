@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
-import { redisGetJSON, redisSetJSON } from "@/utils/redis";
 
 export async function GET(
   req: NextRequest,
@@ -48,13 +47,6 @@ export async function GET(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    // Try cache first (15 days TTL)
-    const cacheKey = `project:document:${projectId}:${documentId}:${organizationId}`;
-    const cached = await redisGetJSON<any>(cacheKey);
-    if (cached) {
-      return NextResponse.json(cached);
-    }
-
     // Get document details
     const { data: document, error: documentError } = await supabase
       .from("project_documents")
@@ -75,65 +67,16 @@ export async function GET(
       );
     }
 
-    // Debug logging
-    console.log("Document found:", {
-      id: document.id,
-      filename: document.filename,
-      file_path: document.file_path,
-      project_id: document.project_id,
-    });
-
     // Check if file exists in storage with better debugging
     console.log("Checking storage for file path:", document.file_path);
 
-    // First, try to list all files in the project directory
-    const { data: projectFiles, error: projectListError } =
-      await supabase.storage.from("caply").list(`projects/${projectId}`);
-
-    if (projectListError) {
-      console.error("Error listing project files:", projectListError);
-    } else {
-      console.log("All files in project directory:", projectFiles);
-    }
-
-    // Also try to list the entire projects directory
-    const { data: allProjects, error: allProjectsError } =
-      await supabase.storage.from("caply").list("projects");
-
-    if (allProjectsError) {
-      console.error("Error listing projects directory:", allProjectsError);
-    } else {
-      console.log("All project directories:", allProjects);
-    }
-
-    // Try to get file info directly
-    const { data: fileInfo, error: fileInfoError } = await supabase.storage
+    const { data: publicUrlObj } = await supabase.storage
       .from("caply")
-      .list(document.file_path.split("/").slice(0, -1).join("/"), {
-        search: document.filename,
-      });
+      .getPublicUrl(document.file_path);
 
-    if (fileInfoError) {
-      console.error("Error getting file info:", fileInfoError);
-    } else {
-      console.log("File info search result:", fileInfo);
-    }
+    const publicUrl = publicUrlObj.publicUrl;
 
-    // Generate signed URL for download
-    const { data: signedUrl, error: urlError } = await supabase.storage
-      .from("caply")
-      .createSignedUrl(document.file_path, 60); // 60 seconds expiry
-
-    console.log("Signed URL:", signedUrl);
-
-    if (urlError) {
-      console.error("Error generating signed URL:", {
-        error: urlError,
-        file_path: document.file_path,
-        filename: document.filename,
-        projectId: projectId,
-      });
-
+    if (!publicUrl) {
       return NextResponse.json(
         {
           error: `File not found in storage. The file may have been deleted or never uploaded properly. Database record has been cleaned up.`,
@@ -142,17 +85,12 @@ export async function GET(
       );
     }
 
+    console.log("here is the public url", publicUrl);
+
     const result = {
       document,
-      download_url: signedUrl.signedUrl,
+      download_url: publicUrl,
     };
-
-    // Cache the result (15 days)
-    try {
-      await redisSetJSON(cacheKey, result, 1296000);
-    } catch (e) {
-      console.warn("Failed to cache document:", e);
-    }
 
     return NextResponse.json(result);
   } catch (error) {
@@ -249,44 +187,6 @@ export async function DELETE(
       return NextResponse.json(
         { error: "Failed to delete document record" },
         { status: 500 }
-      );
-    }
-
-    // Refresh project documents cache after deletion (15 days)
-    try {
-      const { data: freshDocuments } = await supabase
-        .from("project_documents")
-        .select(
-          `
-          id,
-          filename,
-          original_filename,
-          file_size,
-          mime_type,
-          file_path,
-          uploaded_at,
-          uploaded_by
-        `
-        )
-        .eq("project_id", projectId)
-        .order("uploaded_at", { ascending: false });
-
-      const documentsCacheKey = `project:documents:${projectId}:${organizationId}`;
-      await redisSetJSON(
-        documentsCacheKey,
-        {
-          documents: freshDocuments || [],
-        },
-        1296000
-      );
-
-      // Clear individual document cache
-      const documentCacheKey = `project:document:${projectId}:${documentId}:${organizationId}`;
-      // Note: Redis cache will expire naturally, no need to manually delete
-    } catch (e) {
-      console.warn(
-        "Failed to refresh project documents cache after delete:",
-        e
       );
     }
 
