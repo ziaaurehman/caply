@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
-// import { useProjectStore } from "@/lib/stores/projectStore" // No longer needed
 import {
   CalendarIcon,
   UploadCloud,
@@ -27,6 +26,9 @@ import { projectAPI as projectAPIDirect } from "@/utils/api/project";
 import ClientModal from "@/components/pages/clients/ClientModal";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { toast } from "sonner";
+import { useCreateProject } from "@/lib/hooks/useProjects";
+import { useCreateClient, useClients } from "@/lib/hooks/useClients";
+import { useTeamMembers } from "@/lib/hooks/useTeamMembers";
 
 interface ProjectFormData {
   name: string;
@@ -101,12 +103,25 @@ export default function ProjectCreationPage() {
     "Project Management",
   ]);
   const [newCategory, setNewCategory] = useState("");
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loadingClients, setLoadingClients] = useState(false);
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
+  // const [clients, setClients] = useState<Client[]>([]);
+  // const [loadingClients, setLoadingClients] = useState(false);
+  // const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  // const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // React Query hooks
+  const { data: clientsData, isLoading: loadingClients } = useClients(
+    currentOrganization?.id || ""
+  );
+  const { data: teamMembersData, isLoading: loadingTeamMembers } =
+    useTeamMembers(currentOrganization?.id || "");
+  const createProjectMutation = useCreateProject();
+  const createClientMutation = useCreateClient();
+
+  // Extract data
+  const clients = clientsData?.clients || [];
+  const teamMembers = teamMembersData?.members || [];
 
   const {
     register,
@@ -159,43 +174,6 @@ export default function ProjectCreationPage() {
       : "Select team members";
   };
 
-  // Fetch clients from API
-  const fetchClients = async () => {
-    if (!currentOrganization?.id) return;
-
-    setLoadingClients(true);
-    try {
-      const data = await clientAPI.getClients(currentOrganization.id);
-      setClients(data.clients);
-    } catch (e) {
-      console.error("Error fetching clients:", e);
-    } finally {
-      setLoadingClients(false);
-    }
-  };
-
-  // Fetch team members from API
-  const fetchTeamMembers = async () => {
-    if (!currentOrganization?.id) return;
-
-    setLoadingTeamMembers(true);
-    try {
-      const data = await teamAPI.getTeamMembers(currentOrganization.id);
-      setTeamMembers(data.members);
-    } catch (e) {
-      console.error("Error fetching team members:", e);
-    } finally {
-      setLoadingTeamMembers(false);
-    }
-  };
-
-  useEffect(() => {
-    if (currentOrganization?.id) {
-      fetchClients();
-      fetchTeamMembers();
-    }
-  }, [currentOrganization?.id]);
-
   const handleCreateClient = async (data: CreateClientData) => {
     if (!currentOrganization?.id) {
       console.error("No current organization selected");
@@ -203,16 +181,16 @@ export default function ProjectCreationPage() {
     }
 
     try {
-      // Call API to create client
-      const result = await clientAPI.createClient({
+      const result = await createClientMutation.mutateAsync({
         ...data,
         organizationId: currentOrganization.id,
       });
       setValue("client_id", result.client.id);
       setIsClientModalOpen(false);
-      fetchClients();
+      toast.success("Client created successfully!");
     } catch (error: any) {
       console.error("Failed to create client:", error);
+      toast.error("Failed to create client");
     }
   };
 
@@ -220,7 +198,6 @@ export default function ProjectCreationPage() {
     if (!currentOrganization?.id) {
       const errorMessage =
         "No organization selected. Please refresh the page and try again.";
-      setSubmitError(errorMessage);
       toast.error("Organization Error", {
         description: errorMessage,
         duration: 5000,
@@ -231,7 +208,6 @@ export default function ProjectCreationPage() {
     // Validate client selection
     if (!data.client_id) {
       const errorMessage = "Please select a client for this project.";
-      setSubmitError(errorMessage);
       toast.error("Validation Error", {
         description: errorMessage,
         duration: 5000,
@@ -246,7 +222,6 @@ export default function ProjectCreationPage() {
     ) {
       const errorMessage =
         "Please select at least one team member for this project.";
-      setSubmitError(errorMessage);
       toast.error("Validation Error", {
         description: errorMessage,
         duration: 5000,
@@ -254,11 +229,8 @@ export default function ProjectCreationPage() {
       return;
     }
 
-    setIsSubmitting(true);
-    setSubmitError(null);
-
     try {
-      // Prepare payload for API with proper null handling for numeric fields
+      // Prepare payload for API
       const payload = {
         organization_id: currentOrganization.id,
         name: data.name,
@@ -266,7 +238,6 @@ export default function ProjectCreationPage() {
         code: data.code || undefined,
         description: data.description || undefined,
         project_type: data.project_type,
-        // Handle numeric fields based on project type
         billing_rate:
           data.project_type === "time_materials" && data.billing_rate
             ? Number(data.billing_rate)
@@ -281,7 +252,6 @@ export default function ProjectCreationPage() {
             : undefined,
         start_date: data.start_date || undefined,
         end_date: data.end_date || undefined,
-        // Additional fields from form and state
         team_member_ids: data.selected_team_members,
         task_categories: taskCategories,
         kanban_enabled: data.kanban_activation,
@@ -289,10 +259,9 @@ export default function ProjectCreationPage() {
         team_availability_enabled: data.absence_integration,
         capacity_planning_enabled: data.capacity_planning,
         state: "published",
-        // Add more fields as needed (e.g., documents)
       };
 
-      const result = await projectAPIDirect.createProject(payload);
+      const result = await createProjectMutation.mutateAsync(payload);
       console.log("Project created successfully:", result.project.id);
 
       // Upload files if any were selected
@@ -306,23 +275,12 @@ export default function ProjectCreationPage() {
 
         for (const file of uploadedFiles) {
           try {
-            console.log(
-              "Uploading file:",
-              file.name,
-              "Size:",
-              file.size,
-              "Type:",
-              file.type
-            );
-            await (
-              projectAPIDirect || projectAPIFromIndex
-            ).uploadProjectDocument({
+            await projectAPIDirect.uploadProjectDocument({
               projectId: result.project.id,
               file,
               organizationId: currentOrganization.id,
             });
             uploadResults.push({ file: file.name, success: true });
-            console.log("File uploaded successfully:", file.name);
           } catch (error) {
             console.error("Error uploading file:", file.name, error);
             failedFiles.push(file.name);
@@ -335,17 +293,14 @@ export default function ProjectCreationPage() {
         const failedUploads = failedFiles.length;
 
         if (failedUploads === 0) {
-          // All files uploaded successfully
           toast.success("Project documents uploaded successfully!", {
             description: `All ${successfulUploads} file(s) uploaded successfully.`,
           });
         } else if (successfulUploads === 0) {
-          // All files failed
           toast.error("Failed to upload project documents", {
             description: `All ${failedUploads} file(s) failed to upload.`,
           });
         } else {
-          // Mixed results
           toast.warning("Partial document upload", {
             description: `${successfulUploads} file(s) uploaded successfully, ${failedUploads} file(s) failed.`,
           });
@@ -364,13 +319,10 @@ export default function ProjectCreationPage() {
       const errorMessage =
         error.message ||
         "Failed to create project. Please check all required fields and try again.";
-      setSubmitError(errorMessage);
       toast.error("Failed to create project", {
         description: errorMessage,
         duration: 5000,
       });
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -487,10 +439,12 @@ export default function ProjectCreationPage() {
                   }
                 }
               }}
-              disabled={isSubmitting}
+              disabled={createProjectMutation.isPending}
               className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? "Creating..." : "Create Project"}
+              {createProjectMutation.isPending
+                ? "Creating..."
+                : "Create Project"}
             </button>
           </div>
         </div>

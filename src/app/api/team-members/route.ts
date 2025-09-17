@@ -1,121 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { getServerSession } from "next-auth";
-import { authConfig } from "@/auth";
 import { sendInvitationEmail } from "@/lib/email";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
-import { redisSetJSON, redisGetJSON } from "@/utils/redis";
-
-// Cache TTL - 7 days for page 1 only (most frequently accessed)
-const PAGE_ONE_CACHE_TTL = 604800; // 7 days in seconds
 
 // Helper function to refresh team members cache
-async function refreshTeamMembersCache(organizationId: string, supabase: any) {
-  const cacheKeysToInvalidate = [
-    `team_members:page1:${organizationId}::`, // Empty search, no status filter
-    `team_members:page1:${organizationId}::active`, // Active status filter
-  ];
-
-  for (const key of cacheKeysToInvalidate) {
-    try {
-      const isActiveFilter = key.includes("active");
-
-      // Get team members with proper status filtering
-      const { data: members } = await supabase
-        .from("organization_members")
-        .select(
-          `
-          id,
-          user_id,
-          role_id,
-          hourly_rate,
-          weekly_capacity,
-          department,
-          hire_date,
-          status,
-          joined_at,
-          users:user_id (
-            id,
-            email,
-            full_name,
-            avatar_url,
-            position,
-            phone,
-            is_active
-          ),
-          roles:role_id (
-            id,
-            name,
-            display_name,
-            description
-          )
-        `
-        )
-        .eq("organization_id", organizationId)
-        .eq("status", isActiveFilter ? "active" : undefined)
-        .order("joined_at", { ascending: false })
-        .range(0, 9); // First 10 items for page 1
-
-      // Get pending invitations (no caching needed - they're temporary)
-      const { data: invitations } = await supabase
-        .from("organization_invitations")
-        .select(
-          `
-          id,
-          email,
-          role_id,
-          status,
-          expires_at,
-          created_at,
-          user_id,
-          roles:role_id (
-            id,
-            name,
-            display_name,
-            description
-          )
-        `
-        )
-        .eq("organization_id", organizationId)
-        .eq("status", "pending")
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .range(0, 9); // First 10 items
-
-      // Get total count for members only (invitations are separate)
-      const { count: totalMembers } = await supabase
-        .from("organization_members")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId)
-        .eq("status", isActiveFilter ? "active" : undefined);
-
-      const totalPages = Math.ceil((totalMembers || 0) / 10);
-
-      const refreshedResult = {
-        members: members || [],
-        invitations: invitations || [], // Fresh data, not cached
-        pagination: {
-          page: 1,
-          limit: 10,
-          total: totalMembers || 0,
-          totalPages,
-          hasNext: 1 < totalPages,
-          hasPrev: false,
-        },
-      };
-
-      await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
-      console.log("🔄 Refreshed team members page 1 cache:", {
-        key,
-        membersCount: members?.length || 0,
-        invitationsCount: invitations?.length || 0,
-        totalMembers,
-      });
-    } catch (cacheError) {
-      console.warn("Failed to refresh specific cache key:", key, cacheError);
-    }
-  }
-}
+async function refreshTeamMembersCache(organizationId: string, supabase: any) {}
 
 export { refreshTeamMembersCache };
 
@@ -158,28 +47,6 @@ export async function GET(request: NextRequest) {
         },
         { status: validation.status }
       );
-    }
-
-    // Only cache page 1 with 10 items for 7 days (most frequently accessed)
-    const shouldCache = page === 1 && limit === 10;
-    const cacheKey = shouldCache
-      ? `team_members:page1:${organizationId}:${search}:${status}`
-      : null;
-
-    // Try to get cached result first (only for page 1)
-    if (shouldCache && cacheKey) {
-      try {
-        const cached = await redisGetJSON<any>(cacheKey);
-        if (cached) {
-          console.log("📋 Returning cached team members page 1 result");
-          return NextResponse.json(cached);
-        }
-      } catch (cacheError) {
-        console.log(
-          "⚠️ Cache read failed, proceeding with database query:",
-          cacheError
-        );
-      }
     }
 
     const supabase = await createClient();
@@ -388,22 +255,6 @@ export async function GET(request: NextRequest) {
       },
     };
 
-    console.log("✅ Returning successful response:", {
-      membersCount: result.members.length,
-      invitationsCount: result.invitations.length,
-      pagination: result.pagination,
-    });
-
-    // Cache the result for future requests (only page 1 for 7 days)
-    if (shouldCache && cacheKey) {
-      try {
-        await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL);
-        console.log("💾 Cached team members page 1 result for 7 days");
-      } catch (cacheError) {
-        console.log("⚠️ Failed to cache result:", cacheError);
-      }
-    }
-
     return NextResponse.json(result);
   } catch (error) {
     console.error("💥 Unexpected error in team members API:", error);
@@ -420,7 +271,6 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    console.log("📝 Request body:", body);
 
     const {
       email,
@@ -642,103 +492,6 @@ export async function POST(request: NextRequest) {
         emailError
       );
       // Don't fail the request if email fails - invitation is still created
-    }
-
-    // Refresh organizations cache for the invited user if they already exist
-    try {
-      if (existingUser?.id) {
-        const { data: orgs } = await supabase
-          .from("organization_members")
-          .select(
-            `
-            id,
-            organization_id,
-            user_id,
-            role_id,
-            status,
-            hourly_rate,
-            weekly_capacity,
-            department,
-            hire_date,
-            joined_at,
-            organizations!inner(
-              id,
-              name,
-              slug,
-              description,
-              logo_url,
-              owner_id,
-              created_at
-            ),
-            roles!inner(
-              id,
-              name,
-              display_name,
-              description,
-              role_permissions!inner(
-                permissions!inner(
-                  module,
-                  action
-                )
-              )
-            )
-          `
-          )
-          .eq("user_id", existingUser.id)
-          .eq("status", "active");
-
-        const transformed = (orgs || []).map((org: any) => ({
-          id: org.organizations.id,
-          name: org.organizations.name,
-          slug: org.organizations.slug,
-          description: org.organizations.description,
-          logo_url: org.organizations.logo_url,
-          is_owner: org.organizations.owner_id === existingUser.id,
-          created_at: org.organizations.created_at,
-          membership_status: org.status,
-          membership: {
-            id: org.id,
-            organization_id: org.organization_id,
-            user_id: org.user_id,
-            role_id: org.role_id,
-            status: org.status,
-            hourly_rate: org.hourly_rate,
-            weekly_capacity: org.weekly_capacity,
-            department: org.department,
-            hire_date: org.hire_date,
-            joined_at: org.joined_at,
-            role: {
-              id: org.roles.id,
-              name: org.roles.name,
-              display_name: org.roles.display_name,
-              description: org.roles.description,
-              permissions:
-                org.roles.role_permissions?.map((rp: any) => ({
-                  resource: rp.permissions.module,
-                  action: rp.permissions.action,
-                })) || [],
-            },
-          },
-        }));
-
-        await redisSetJSON(
-          `user:organizations:${existingUser.id}`,
-          transformed,
-          1296000
-        );
-      }
-    } catch (e) {
-      console.warn("Failed to refresh invited user organizations cache:", e);
-    }
-
-    // Invalidate page 1 cache after creating invitation
-    try {
-      await refreshTeamMembersCache(organizationId, supabase);
-    } catch (e) {
-      console.warn(
-        "Failed to refresh team members page 1 cache after invitation:",
-        e
-      );
     }
 
     return NextResponse.json({

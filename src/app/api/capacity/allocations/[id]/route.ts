@@ -1,46 +1,40 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
-import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
-import { redisGetJSON, redisSetJSON, redisDel } from '@/utils/redis';
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
-// Cache TTL: 15 days
-const CACHE_TTL = 1296000;
-
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const { id: allocationId } = await params;
-  const organizationId = req.headers.get('x-organization-id');
+  const organizationId = req.headers.get("x-organization-id");
 
   // Prefer header-based org validation for consistency
   if (!organizationId) {
-    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    return NextResponse.json(
+      { error: "Organization ID is required" },
+      { status: 400 }
+    );
   }
 
-  const validation = await validateOrganizationAccessWithId(
-    organizationId,
-    { resource: 'capacity', action: 'read' }
-  );
+  const validation = await validateOrganizationAccessWithId(organizationId, {
+    resource: "capacity",
+    action: "read",
+  });
   if (!validation.success) {
-    return NextResponse.json({ error: validation.error }, { status: validation.status });
+    return NextResponse.json(
+      { error: validation.error },
+      { status: validation.status }
+    );
   }
-
-  // Simple cache key
-  const cacheKey = `allocation:${allocationId}:${organizationId}`;
 
   try {
-    // Try to get from cache first
-    const cachedData = await redisGetJSON(cacheKey);
-    if (cachedData) {
-      console.log('📋 Returning cached allocation result');
-      return NextResponse.json(cachedData);
-    }
-
     const supabase = await createClient();
 
     const { data: allocation, error } = await supabase
-      .from('project_assignments')
-      .select(`
+      .from("project_assignments")
+      .select(
+        `
         *,
         projects (
           id,
@@ -63,33 +57,42 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
             )
           )
         )
-      `)
-      .eq('id', allocationId)
-      .eq('resource_allocations.organization_id', organizationId)
+      `
+      )
+      .eq("id", allocationId)
+      .eq("resource_allocations.organization_id", organizationId)
       .single();
 
     if (error || !allocation) {
-      return NextResponse.json({ error: 'Resource allocation not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: "Resource allocation not found" },
+        { status: 404 }
+      );
     }
 
     const response = { allocation };
 
-    // Cache the response
-    await redisSetJSON(cacheKey, response, CACHE_TTL);
-    console.log('💾 Cached allocation result for 15 days');
-
     return NextResponse.json(response);
   } catch (error) {
-    console.error('Error fetching resource allocation:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("Error fetching resource allocation:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const { id: allocationId } = await params;
-  const organizationId = req.headers.get('x-organization-id');
+  const organizationId = req.headers.get("x-organization-id");
   if (!organizationId) {
-    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    return NextResponse.json(
+      { error: "Organization ID is required" },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();
@@ -100,21 +103,31 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Verify assignment belongs to same organization via join
     const { data: currentAllocation, error: currentError } = await supabase
-      .from('project_assignments')
+      .from("project_assignments")
       .select(`id, hours_per_week, resource_allocations ( organization_id )`)
-      .eq('id', allocationId)
+      .eq("id", allocationId)
       .single();
 
     if (currentError || !currentAllocation) {
-      return NextResponse.json({ error: 'Resource allocation not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: "Resource allocation not found" },
+        { status: 404 }
+      );
     }
-    if ((currentAllocation as any)?.resource_allocations?.organization_id !== organizationId) {
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    if (
+      (currentAllocation as any)?.resource_allocations?.organization_id !==
+      organizationId
+    ) {
+      return NextResponse.json(
+        { error: "Organization not found" },
+        { status: 404 }
+      );
     }
 
     // Prepare update data
     const updateData: any = { updated_at: new Date().toISOString() };
-    if (hours_per_week !== undefined) updateData.hours_per_week = Number(hours_per_week);
+    if (hours_per_week !== undefined)
+      updateData.hours_per_week = Number(hours_per_week);
     if (start_date !== undefined) {
       updateData.start_date = start_date;
     }
@@ -130,10 +143,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Update the assignment
     const { data: allocation, error } = await supabase
-      .from('project_assignments')
+      .from("project_assignments")
       .update(updateData)
-      .eq('id', allocationId)
-      .select(`
+      .eq("id", allocationId)
+      .select(
+        `
         *,
         projects ( id, name, code, status ),
         resource_allocations (
@@ -144,37 +158,43 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             users!user_id ( id, full_name, email, avatar_url )
           )
         )
-      `)
+      `
+      )
       .single();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Clear related caches - use new simplified cache keys
-    await redisDel(`allocation:${allocationId}:${organizationId}`);
-    await redisDel(`allocations:main:${organizationId}`);
-    await redisDel(`allocations:${organizationId}:*`);
-    await redisDel(`overview:main:${organizationId}`);
-    await redisDel(`overview:${organizationId}:*`);
-    await redisDel(`resources:main:${organizationId}`);
-    console.log('💾 Cleared capacity-related caches for organization:', organizationId);
-
     return NextResponse.json({ allocation });
   } catch (error) {
-    console.error('Error updating resource allocation:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("Error updating resource allocation:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const { id: allocationId } = await params;
-  const organizationId = req.headers.get('x-organization-id');
-  
-  console.log('DELETE request for allocation:', allocationId, 'organization:', organizationId);
-  
+  const organizationId = req.headers.get("x-organization-id");
+
+  console.log(
+    "DELETE request for allocation:",
+    allocationId,
+    "organization:",
+    organizationId
+  );
+
   if (!organizationId) {
-    return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+    return NextResponse.json(
+      { error: "Organization ID is required" },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();
@@ -182,8 +202,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   try {
     // Verify assignment exists and belongs to user's organization
     const { data: allocation, error: verifyError } = await supabase
-      .from('project_assignments')
-      .select(`
+      .from("project_assignments")
+      .select(
+        `
         id, 
         hours_per_week, 
         is_active, 
@@ -193,79 +214,91 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
           organization_id,
           organization_member_id 
         )
-      `)
-      .eq('id', allocationId)
+      `
+      )
+      .eq("id", allocationId)
       .single();
 
-    console.log('Found allocation:', allocation, 'error:', verifyError);
+    console.log("Found allocation:", allocation, "error:", verifyError);
 
     if (verifyError || !allocation) {
-      console.log('Allocation not found or error:', verifyError);
-      return NextResponse.json({ error: 'Project assignment not found' }, { status: 404 });
+      console.log("Allocation not found or error:", verifyError);
+      return NextResponse.json(
+        { error: "Project assignment not found" },
+        { status: 404 }
+      );
     }
-    if ((allocation as any)?.resource_allocations?.organization_id !== organizationId) {
-      console.log('Organization mismatch:', (allocation as any)?.resource_allocations?.organization_id, 'vs', organizationId);
-      return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    if (
+      (allocation as any)?.resource_allocations?.organization_id !==
+      organizationId
+    ) {
+      console.log(
+        "Organization mismatch:",
+        (allocation as any)?.resource_allocations?.organization_id,
+        "vs",
+        organizationId
+      );
+      return NextResponse.json(
+        { error: "Organization not found" },
+        { status: 404 }
+      );
     }
 
-    console.log('Performing hard delete for allocation:', allocationId);
-    
+    console.log("Performing hard delete for allocation:", allocationId);
+
     // Check if there are any related records that might prevent deletion
-    console.log('Allocation details:', allocation);
-    
+    console.log("Allocation details:", allocation);
+
     // Hard delete the project assignment record
     const { error } = await supabase
-      .from('project_assignments')
+      .from("project_assignments")
       .delete()
-      .eq('id', allocationId);
+      .eq("id", allocationId);
 
-    console.log('Hard delete result:', { error });
+    console.log("Hard delete result:", { error });
 
     if (error) {
-      console.error('Delete failed:', error);
-      
-      // If deletion fails due to foreign key constraints, try soft delete as fallback
-      if (error.message.includes('foreign key') || error.message.includes('constraint')) {
-        console.log('Trying soft delete as fallback...');
-        
-        const { error: softDeleteError } = await supabase
-          .from('project_assignments')
-          .update({ is_active: false, updated_at: new Date().toISOString() })
-          .eq('id', allocationId);
-          
-        if (softDeleteError) {
-          return NextResponse.json({ error: `Delete failed: ${error.message}. Soft delete also failed: ${softDeleteError.message}` }, { status: 500 });
-        }
-        
-        // Clear related caches after successful soft delete
-        await redisDel(`allocation:${allocationId}:${organizationId}`);
-        await redisDel(`allocations:main:${organizationId}`);
-        await redisDel(`allocations:${organizationId}:*`);
-        await redisDel(`overview:main:${organizationId}`);
-        await redisDel(`overview:${organizationId}:*`);
-        await redisDel(`resources:main:${organizationId}`);
-        console.log('💾 Cleared capacity-related caches after soft delete for organization:', organizationId);
+      console.error("Delete failed:", error);
 
-        console.log('Soft delete successful as fallback');
-        return NextResponse.json({ message: 'Resource allocation deactivated successfully (soft delete)' });
+      // If deletion fails due to foreign key constraints, try soft delete as fallback
+      if (
+        error.message.includes("foreign key") ||
+        error.message.includes("constraint")
+      ) {
+        console.log("Trying soft delete as fallback...");
+
+        const { error: softDeleteError } = await supabase
+          .from("project_assignments")
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq("id", allocationId);
+
+        if (softDeleteError) {
+          return NextResponse.json(
+            {
+              error: `Delete failed: ${error.message}. Soft delete also failed: ${softDeleteError.message}`,
+            },
+            { status: 500 }
+          );
+        }
+
+        console.log("Soft delete successful as fallback");
+        return NextResponse.json({
+          message: "Resource allocation deactivated successfully (soft delete)",
+        });
       }
-      
+
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Clear related caches after successful delete
-    await redisDel(`allocation:${allocationId}:${organizationId}`);
-    await redisDel(`allocations:main:${organizationId}`);
-    await redisDel(`allocations:${organizationId}:*`);
-    await redisDel(`overview:main:${organizationId}`);
-    await redisDel(`overview:${organizationId}:*`);
-    await redisDel(`resources:main:${organizationId}`);
-    console.log('💾 Cleared capacity-related caches after delete for organization:', organizationId);
-
-    console.log('Hard delete successful for allocation:', allocationId);
-    return NextResponse.json({ message: 'Resource allocation deleted successfully' });
+    console.log("Hard delete successful for allocation:", allocationId);
+    return NextResponse.json({
+      message: "Resource allocation deleted successfully",
+    });
   } catch (error) {
-    console.error('Error deleting resource allocation:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("Error deleting resource allocation:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }

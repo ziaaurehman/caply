@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
-import { redisSetJSON } from "@/utils/redis";
-import { refreshTeamMembersCache } from "@/app/api/team-members/route";
 
 // POST /api/invitations/accept - Accept an invitation
 export async function POST(request: NextRequest) {
@@ -126,7 +124,6 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (memberError) {
-      console.error("Error adding member:", memberError);
       return NextResponse.json(
         { error: "Failed to join organization" },
         { status: 500 }
@@ -145,104 +142,6 @@ export async function POST(request: NextRequest) {
     if (updateError) {
       console.error("Error updating invitation:", updateError);
       // Don't fail the request if invitation update fails
-    }
-
-    // Refresh team members cache to remove the accepted invitation
-    try {
-      await refreshTeamMembersCache(invitation.organization_id, supabase);
-      console.log(
-        "✅ Team members cache refreshed after invitation acceptance"
-      );
-    } catch (cacheError) {
-      console.warn("Failed to refresh team members cache:", cacheError);
-    }
-
-    // Refresh organizations cache for the current user (15 days)
-    try {
-      const { data: orgs } = await supabase
-        .from("organization_members")
-        .select(
-          `
-          id,
-          organization_id,
-          user_id,
-          role_id,
-          status,
-          hourly_rate,
-          weekly_capacity,
-          department,
-          hire_date,
-          joined_at,
-          organizations!inner(
-            id,
-            name,
-            slug,
-            description,
-            logo_url,
-            owner_id,
-            created_at
-          ),
-          roles!inner(
-            id,
-            name,
-            display_name,
-            description,
-            role_permissions!inner(
-              permissions!inner(
-                module,
-                action
-              )
-            )
-          )
-        `
-        )
-        .eq("user_id", session.user.id)
-        .eq("status", "active");
-
-      const transformed = (orgs || []).map((org: any) => ({
-        id: org.organizations.id,
-        name: org.organizations.name,
-        slug: org.organizations.slug,
-        description: org.organizations.description,
-        logo_url: org.organizations.logo_url,
-        is_owner: org.organizations.owner_id === session.user.id,
-        created_at: org.organizations.created_at,
-        membership_status: org.status,
-        membership: {
-          id: org.id,
-          organization_id: org.organization_id,
-          user_id: org.user_id,
-          role_id: org.role_id,
-          status: org.status,
-          hourly_rate: org.hourly_rate,
-          weekly_capacity: org.weekly_capacity,
-          department: org.department,
-          hire_date: org.hire_date,
-          joined_at: org.joined_at,
-          role: {
-            id: org.roles.id,
-            name: org.roles.name,
-            display_name: org.roles.display_name,
-            description: org.roles.description,
-            permissions:
-              org.roles.role_permissions?.map((rp: any) => ({
-                resource: rp.permissions.module,
-                action: rp.permissions.action,
-              })) || [],
-          },
-        },
-      }));
-
-      await redisSetJSON(
-        `user:organizations:${session.user.id}`,
-        transformed,
-        1296000
-      );
-    } catch (e) {
-      console.warn(
-        "Failed to refresh user organizations cache after accept:",
-        e
-      );
     }
 
     return NextResponse.json({

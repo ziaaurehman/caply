@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
-import { redisGetJSON, redisSetJSON } from "@/utils/redis";
 
 export async function GET(
   req: NextRequest,
@@ -51,13 +50,6 @@ export async function GET(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    // Try cache first (15 days TTL)
-    const cacheKey = `project:documents:${projectId}:${organizationId}`;
-    const cached = await redisGetJSON<any>(cacheKey);
-    if (cached) {
-      return NextResponse.json(cached);
-    }
-
     // Fetch project documents
     const { data: documents, error } = await supabase
       .from("project_documents")
@@ -84,13 +76,6 @@ export async function GET(
     const result = {
       documents: documents || [],
     };
-
-    // Cache the result (15 days)
-    try {
-      await redisSetJSON(cacheKey, result, 1296000);
-    } catch (e) {
-      console.warn("Failed to cache project documents:", e);
-    }
 
     return NextResponse.json(result);
   } catch (error) {
@@ -262,14 +247,6 @@ export async function POST(
         },
         { status: 500 }
       );
-    }
-
-    // Clear cache after successful upload
-    try {
-      const documentsCacheKey = `project:documents:${projectId}:${organizationId}`;
-      // Note: Cache will be refreshed on next GET request
-    } catch (e) {
-      console.warn("Failed to clear documents cache after upload:", e);
     }
 
     return NextResponse.json({

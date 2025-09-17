@@ -4,13 +4,13 @@ import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { X, ChevronDown } from "lucide-react";
 import {
-  projectAPI,
   type Project,
   type CreateProjectData,
   type UpdateProjectData,
-} from "@/utils/api";
+} from "@/utils/api/project";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { toast } from "sonner";
+import { useCreateProject, useUpdateProject } from "@/lib/hooks/useProjects";
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -38,12 +38,15 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   onProjectUpdated,
 }) => {
   const { currentOrganization } = useOrganizationStore();
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Reset loading state when modal closes
+  // React Query mutations
+  const createProjectMutation = useCreateProject();
+  const updateProjectMutation = useUpdateProject();
+
+  // Reset form when modal closes
   React.useEffect(() => {
     if (!isOpen) {
-      setIsSubmitting(false);
+      reset();
     }
   }, [isOpen]);
 
@@ -86,7 +89,7 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
         },
   });
 
-  const watchedProjectType = watch('project_type');
+  const watchedProjectType = watch("project_type");
 
   const onSubmit = async (data: FormData) => {
     if (!currentOrganization?.id) {
@@ -98,30 +101,31 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
       return;
     }
 
-    setIsSubmitting(true);
-
     try {
       if (project) {
-        await projectAPI.updateProject(project.id, {
-          ...data,
-          organizationId: currentOrganization.id,
+        // Update existing project
+        await updateProjectMutation.mutateAsync({
+          id: project.id,
+          data: {
+            ...data,
+            organizationId: currentOrganization.id,
+          },
         });
         toast.success("Project updated successfully!");
-        // Call the callback to refresh projects list
-        if (onProjectUpdated) {
-          onProjectUpdated();
-        }
       } else {
-        await projectAPI.createProject({
+        // Create new project
+        await createProjectMutation.mutateAsync({
           ...data,
           organization_id: currentOrganization.id,
         });
         toast.success("Project created successfully!");
-        // Call the callback to refresh projects list
-        if (onProjectUpdated) {
-          onProjectUpdated();
-        }
       }
+
+      // Call the callback to refresh projects list
+      if (onProjectUpdated) {
+        onProjectUpdated();
+      }
+
       onClose();
       reset();
     } catch (error: any) {
@@ -131,10 +135,12 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
           error.message || "An error occurred while saving the project.",
         duration: 5000,
       });
-    } finally {
-      setIsSubmitting(false);
     }
   };
+
+  // Determine loading state
+  const isSubmitting =
+    createProjectMutation.isPending || updateProjectMutation.isPending;
 
   if (!isOpen) return null;
 
@@ -337,7 +343,8 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
             )}
 
             {/* Budget Section - Only show for billable project types */}
-            {(watchedProjectType === "time_materials" || watchedProjectType === "fixed_fee") && (
+            {(watchedProjectType === "time_materials" ||
+              watchedProjectType === "fixed_fee") && (
               <div className="space-y-4">
                 <h3 className="text-lg font-medium text-gray-900 border-b border-gray-200 pb-2">
                   Budget & Billing
@@ -352,13 +359,17 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
                           htmlFor="billingRate"
                           className="block text-sm font-medium text-gray-700 mb-2"
                         >
-                          Billing Rate ($/hour) <span className="text-red-500">*</span>
+                          Billing Rate ($/hour){" "}
+                          <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="number"
                           step="0.01"
                           {...register("billing_rate", {
-                            required: watchedProjectType === 'time_materials' ? 'Billing rate is required for Time & Materials projects' : false,
+                            required:
+                              watchedProjectType === "time_materials"
+                                ? "Billing rate is required for Time & Materials projects"
+                                : false,
                             min: { value: 0, message: "Rate must be positive" },
                           })}
                           className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
@@ -385,7 +396,10 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
                         <input
                           type="number"
                           {...register("budget_hours", {
-                            min: { value: 0, message: "Hours must be positive" },
+                            min: {
+                              value: 0,
+                              message: "Hours must be positive",
+                            },
                           })}
                           className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${
                             errors.budget_hours
@@ -411,13 +425,17 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
                       htmlFor="budgetAmount"
                       className="block text-sm font-medium text-gray-700 mb-2"
                     >
-                      Fixed Fee Amount ($) <span className="text-red-500">*</span>
+                      Fixed Fee Amount ($){" "}
+                      <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="number"
                       step="0.01"
                       {...register("budget_amount", {
-                        required: watchedProjectType === 'fixed_fee' ? 'Fixed fee amount is required for Fixed Fee projects' : false,
+                        required:
+                          watchedProjectType === "fixed_fee"
+                            ? "Fixed fee amount is required for Fixed Fee projects"
+                            : false,
                         min: { value: 0, message: "Amount must be positive" },
                       })}
                       className={`block w-full px-3 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 sm:text-sm transition-colors ${

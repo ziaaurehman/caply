@@ -9,7 +9,7 @@ interface InvitationEmailData {
   roleName: string;
   inviterName: string;
   message?: string;
-  expiresAt: string;
+  expiresAt?: string;
 }
 
 interface WelcomeEmailData {
@@ -59,7 +59,7 @@ export async function sendInvitationEmail(
       inviterName: data.inviterName,
     });
     const inviteUrl = `${process.env.NEXTAUTH_URL}/invite?token=${data.token}`;
-    const expirationDate = new Date(data.expiresAt).toLocaleDateString();
+    const expirationDate = new Date(data.expiresAt || "").toLocaleDateString();
     const emailHtml = generateInvitationEmailHTML(
       data,
       inviteUrl,
@@ -128,7 +128,7 @@ async function sendViaResend(data: InvitationEmailData): Promise<EmailResult> {
     const resend = new Resend(process.env.RESEND_API_KEY);
 
     const inviteUrl = `${process.env.NEXTAUTH_URL}/invite?token=${data.token}`;
-    const expirationDate = new Date(data.expiresAt).toLocaleDateString();
+    const expirationDate = new Date(data.expiresAt || "").toLocaleDateString();
 
     const emailHtml = generateInvitationEmailHTML(
       data,
@@ -166,7 +166,9 @@ function logEmailToConsole(data: InvitationEmailData): EmailResult {
   console.log(`Role: ${data.roleName}`);
   console.log(`Invited by: ${data.inviterName}`);
   if (data.message) console.log(`Message: ${data.message}`);
-  console.log(`Expires: ${new Date(data.expiresAt).toLocaleDateString()}`);
+  console.log(
+    `Expires: ${new Date(data.expiresAt || "").toLocaleDateString()}`
+  );
   console.log("═".repeat(50));
 
   return {

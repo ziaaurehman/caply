@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
-// Removing caching for now
-// import { redisGetJSON, redisSetJSON } from "@/utils/redis";
-
-// Cache TTL: 7 days for capacity projects (longer since they don't change often)
-// const CACHE_TTL = 604800; // 7 days
 
 // Get ALL projects with capacity planning enabled (no pagination limits)
 export async function GET(req: NextRequest) {
@@ -51,23 +46,6 @@ export async function GET(req: NextRequest) {
       userContext.membership.role.permissions.some(
         (p) => p.resource === "capacity" && p.action === "manage"
       );
-
-    // Cache key for all projects
-    const cacheKey = `projects:capacity:all:${organizationId}:${hasFullAccess ? "all" : "member:" + userContext.userId}`;
-
-    // Try to get from cache first
-    // try {
-    //   const cachedData = await redisGetJSON(cacheKey);
-    //   if (cachedData) {
-    //     console.log("📋 Returning cached all capacity projects result");
-    //     return NextResponse.json(cachedData);
-    //   }
-    // } catch (cacheError) {
-    //   console.log(
-    //     "⚠️ Cache read failed, proceeding with database query:",
-    //     cacheError
-    //   );
-    // }
 
     let projectIds: string[] = [];
 
@@ -126,13 +104,6 @@ export async function GET(req: NextRequest) {
           ? "all_organization_projects"
           : "member_projects_only",
       };
-
-      // try {
-      //   await redisSetJSON(cacheKey, emptyResponse, CACHE_TTL);
-      //   console.log("💾 Cached empty all projects result");
-      // } catch (cacheError) {
-      //   console.log("⚠️ Failed to cache result:", cacheError);
-      // }
 
       return NextResponse.json(emptyResponse);
     }
@@ -194,20 +165,6 @@ export async function GET(req: NextRequest) {
         ? "all_organization_projects"
         : "member_projects_only",
     };
-
-    // Cache the response
-    // try {
-    //   await redisSetJSON(cacheKey, response, CACHE_TTL);
-    //   console.log("💾 Cached all capacity projects result for 7 days");
-    // } catch (cacheError) {
-    //   console.log("⚠️ Failed to cache result:", cacheError);
-    // }
-
-    console.log("✅ Returning successful response:", {
-      projectsCount: response.projects.length,
-      hasFullAccess,
-      userId: userContext.userId,
-    });
 
     return NextResponse.json(response);
   } catch (error) {
