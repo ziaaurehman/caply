@@ -1,14 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { getServerSession } from "next-auth";
-import { authConfig } from "@/auth";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
-// COMMENTED OUT REDIS CACHING FOR NOW
-// import { redisGetJSON, redisSetJSON, redisDel } from "@/utils/redis";
-
-// Cache TTL - 7 days for page 1 only (most frequently accessed)
-// COMMENTED OUT CACHE TTL FOR NOW
-// const PAGE_ONE_CACHE_TTL = 604800; // 7 days in seconds
 
 export async function GET(req: NextRequest) {
   console.log("🔍 GET /api/projects - Starting request");
@@ -58,30 +50,6 @@ export async function GET(req: NextRequest) {
       userContext.membership.role.permissions.some(
         (p) => p.resource === "projects" && p.action === "manage"
       );
-
-    // COMMENTED OUT REDIS CACHING FOR NOW
-    // Only cache page 1 with 10 items for 7 days (most frequently accessed)
-    // const shouldCache = page === 1 && limit === 10;
-    // const cacheKey = shouldCache
-    //   ? `projects:page1:${organizationId}:${search}:${status}:${hasFullAccess ? "all" : userContext.userId}`
-    //   : null;
-
-    // COMMENTED OUT REDIS CACHING FOR NOW
-    // Try to get cached result first (only for page 1)
-    // if (shouldCache && cacheKey) {
-    //   try {
-    //     const cached = await redisGetJSON<any>(cacheKey);
-    //     if (cached) {
-    //       console.log("📋 Returning cached projects page 1 result");
-    //       return NextResponse.json(cached);
-    //     }
-    //   } catch (cacheError) {
-    //     console.log(
-    //       "⚠️ Cache read failed, proceeding with database query:",
-    //       cacheError
-    //     );
-    //   }
-    // }
 
     const supabase = await createClient();
     console.log("✅ Organization access validated for:", organizationId);
@@ -313,22 +281,6 @@ export async function GET(req: NextRequest) {
       },
     };
 
-    console.log("✅ Returning successful response:", {
-      projectsCount: result.projects.length,
-      pagination: result.pagination,
-    });
-
-    // COMMENTED OUT REDIS CACHING FOR NOW
-    // Cache the result for future requests (only page 1 for 7 days)
-    // if (shouldCache && cacheKey) {
-    //   try {
-    //     await redisSetJSON(cacheKey, result, PAGE_ONE_CACHE_TTL);
-    //     console.log("💾 Cached projects page 1 result for 7 days");
-    //   } catch (cacheError) {
-    //     console.log("⚠️ Failed to cache result:", cacheError);
-    //   }
-    // }
-
     return NextResponse.json(result);
   } catch (error) {
     console.error("💥 Unexpected error in projects API:", error);
@@ -527,134 +479,6 @@ export async function POST(req: NextRequest) {
           console.log("Successfully created default lists for board");
         }
       }
-    }
-
-    // Capacity planning: do not auto-create resource allocations here.
-    // Member-level default capacity is initialized via DB trigger on project_members (see supabase migration).
-
-    // Invalidate page 1 cache after creating new project
-    try {
-      const cacheKeysToInvalidate = [
-        `projects:page1:${organizationId}:::all`, // Admin/Manager empty search, no status
-        `projects:page1:${organizationId}:::${userContext.userId}`, // Regular user empty search, no status
-        // Note: We could implement more sophisticated cache invalidation
-        // but for now, we'll clear the main page 1 caches
-      ];
-
-      for (const key of cacheKeysToInvalidate) {
-        try {
-          // Determine if this cache key is for full access or regular user
-          const hasFullAccess = key.includes(":all");
-
-          // Refresh cache with new data
-          let projectsQuery = supabase
-            .from("projects")
-            .select(
-              `
-              id,
-              name,
-              code,
-              description,
-              project_type,
-              billing_rate,
-              budget_hours,
-              budget_amount,
-              start_date,
-              end_date,
-              status,
-              created_at,
-              updated_at,
-              kanban_enabled,
-              timesheet_enabled,
-              team_availability_enabled,
-              capacity_planning_enabled,
-              state,
-              organization_id,
-              client_id,
-              created_by
-            `
-            )
-            .eq("organization_id", organizationId);
-
-          if (!hasFullAccess) {
-            // For regular users, only show projects they are members of
-            const { data: memberProjectIds } = await supabase
-              .from("project_members")
-              .select("project_id")
-              .eq("organization_member_id", userContext.membership.id);
-
-            if (memberProjectIds && memberProjectIds.length > 0) {
-              const projectIds = memberProjectIds.map((p) => p.project_id);
-              projectsQuery = projectsQuery.in("id", projectIds);
-            } else {
-              // No projects for this user
-              continue;
-            }
-          }
-
-          const { data: projects } = await projectsQuery
-            .order("created_at", { ascending: false })
-            .range(0, 9); // First 10 items for page 1
-
-          // Get total count
-          let countQuery = supabase
-            .from("projects")
-            .select("id", { count: "exact", head: true })
-            .eq("organization_id", organizationId);
-
-          if (!hasFullAccess) {
-            // For regular users, only count projects they are members of
-            const { data: userMemberProjectIds } = await supabase
-              .from("project_members")
-              .select("project_id")
-              .eq("organization_member_id", userContext.membership.id);
-
-            if (userMemberProjectIds && userMemberProjectIds.length > 0) {
-              const projectIds = userMemberProjectIds.map(
-                (p: any) => p.project_id
-              );
-              countQuery = countQuery.in("id", projectIds);
-            } else {
-              // No projects for this user, skip this cache refresh
-              continue;
-            }
-          }
-
-          const { count: totalCount } = await countQuery;
-          const totalPages = Math.ceil((totalCount || 0) / 10);
-
-          const refreshedResult = {
-            projects: projects || [],
-            user_role: hasFullAccess ? "admin" : "member",
-            total_projects: totalCount || 0,
-            access_level: hasFullAccess
-              ? "all_organization_projects"
-              : "member_projects_only",
-            pagination: {
-              page: 1,
-              limit: 10,
-              total: totalCount || 0,
-              totalPages,
-              hasNext: 1 < totalPages,
-              hasPrev: false,
-            },
-          };
-
-          // COMMENTED OUT REDIS CACHING FOR NOW
-          // await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
-          console.log(
-            "🔄 Refreshed projects page 1 cache after project creation"
-          );
-        } catch (cacheError) {
-          console.warn(
-            "Failed to refresh specific cache key:",
-            key,
-            cacheError
-          );
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to refresh projects page 1 cache after create:", e);
     }
 
     return NextResponse.json({
@@ -860,113 +684,6 @@ export async function PUT(req: NextRequest) {
         console.log("Kanban disabled for project:", projectId);
         // Note: We might want to soft-delete or archive boards instead of hard delete
       }
-    }
-
-    // Clear individual project cache and refresh projects list cache
-    try {
-      // Clear individual project cache for all access levels
-      const projectCacheKeys = [
-        `project:${projectId}:${organizationId}:all`, // Admin/Manager access
-        `project:${projectId}:${organizationId}:${userContext.userId}`, // User-specific access
-      ];
-
-      for (const key of projectCacheKeys) {
-        try {
-          // COMMENTED OUT REDIS CACHING FOR NOW
-          // await redisDel(key);
-          console.log("🗑️ Cleared project cache:", key);
-        } catch (cacheError) {
-          console.warn("Failed to clear project cache:", key, cacheError);
-        }
-      }
-
-      // Refresh projects list cache for all possible combinations
-      const cacheKeysToInvalidate = [
-        `projects:page1:${organizationId}:::all`, // Admin/Manager empty search, no status
-        `projects:page1:${organizationId}::active:all`, // Admin/Manager empty search, active status
-        `projects:page1:${organizationId}::on_hold:all`, // Admin/Manager empty search, on_hold status
-        `projects:page1:${organizationId}::completed:all`, // Admin/Manager empty search, completed status
-        `projects:page1:${organizationId}::cancelled:all`, // Admin/Manager empty search, cancelled status
-        // Add user-specific caches if needed
-        `projects:page1:${organizationId}:::${userContext.userId}`, // User empty search, no status
-        `projects:page1:${organizationId}::active:${userContext.userId}`, // User empty search, active status
-        `projects:page1:${organizationId}::on_hold:${userContext.userId}`, // User empty search, on_hold status
-        `projects:page1:${organizationId}::completed:${userContext.userId}`, // User empty search, completed status
-        `projects:page1:${organizationId}::cancelled:${userContext.userId}`, // User empty search, cancelled status
-      ];
-
-      for (const key of cacheKeysToInvalidate) {
-        try {
-          // Refresh cache with new data for admins/managers only
-          const { data: projects } = await supabase
-            .from("projects")
-            .select(
-              `
-              id,
-              name,
-              code,
-              description,
-              project_type,
-              billing_rate,
-              budget_hours,
-              budget_amount,
-              start_date,
-              end_date,
-              status,
-              created_at,
-              updated_at,
-              kanban_enabled,
-              timesheet_enabled,
-              team_availability_enabled,
-              capacity_planning_enabled,
-              state,
-              organization_id,
-              client_id,
-              created_by
-            `
-            )
-            .eq("organization_id", organizationId)
-            .order("created_at", { ascending: false })
-            .range(0, 9); // First 10 items for page 1
-
-          // Get total count
-          const { count: totalCount } = await supabase
-            .from("projects")
-            .select("id", { count: "exact", head: true })
-            .eq("organization_id", organizationId);
-
-          const totalPages = Math.ceil((totalCount || 0) / 10);
-
-          const refreshedResult = {
-            projects: projects || [],
-            user_role: "admin",
-            total_projects: totalCount || 0,
-            access_level: "all_organization_projects",
-            pagination: {
-              page: 1,
-              limit: 10,
-              total: totalCount || 0,
-              totalPages,
-              hasNext: 1 < totalPages,
-              hasPrev: false,
-            },
-          };
-
-          // COMMENTED OUT REDIS CACHING FOR NOW
-          // await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL);
-          console.log(
-            "🔄 Refreshed projects page 1 cache after project update"
-          );
-        } catch (cacheError) {
-          console.warn(
-            "Failed to refresh specific cache key:",
-            key,
-            cacheError
-          );
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to refresh projects page 1 cache after update:", e);
     }
 
     return NextResponse.json({

@@ -1,31 +1,35 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authConfig } from '@/auth'
-import { createClient } from '@/utils/supabase/server'
-import { validateOrganizationAccessWithId, invalidateOrganizationCaches } from '@/utils/organizationUtils'
-import { sendInvitationEmail } from '@/lib/email'
-import crypto from 'crypto'
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
+import { createClient } from "@/utils/supabase/server";
+import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { sendInvitationEmail } from "@/lib/email";
+import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authConfig)
+    const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json()
-    const { invitationId } = body
+    const body = await request.json();
+    const { invitationId } = body;
 
     if (!invitationId) {
-      return NextResponse.json({ error: 'Invitation ID is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Invitation ID is required" },
+        { status: 400 }
+      );
     }
 
-    const supabase = await createClient()
+    const supabase = await createClient();
 
     // Get the invitation details
     const { data: invitation, error: inviteError } = await supabase
-      .from('organization_invitations')
-      .select(`
+      .from("organization_invitations")
+      .select(
+        `
         id,
         organization_id,
         email,
@@ -52,54 +56,72 @@ export async function POST(request: NextRequest) {
           full_name,
           email
         )
-      `)
-      .eq('id', invitationId)
-      .single()
+      `
+      )
+      .eq("id", invitationId)
+      .single();
 
     if (inviteError || !invitation) {
-      console.error('Error fetching invitation:', inviteError)
-      return NextResponse.json({ error: 'Invitation not found' }, { status: 404 })
+      console.error("Error fetching invitation:", inviteError);
+      return NextResponse.json(
+        { error: "Invitation not found" },
+        { status: 404 }
+      );
     }
 
     // Validate organization access
     const validation = await validateOrganizationAccessWithId(
       invitation.organization_id,
-      { resource: 'users', action: 'create' }
-    )
+      { resource: "users", action: "create" }
+    );
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status })
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
     // Check if invitation is still pending
-    if (invitation.status !== 'pending') {
-      return NextResponse.json({ error: 'Invitation is not pending' }, { status: 400 })
+    if (invitation.status !== "pending") {
+      return NextResponse.json(
+        { error: "Invitation is not pending" },
+        { status: 400 }
+      );
     }
 
     // Check if invitation has expired
     if (new Date(invitation.expires_at) < new Date()) {
-      return NextResponse.json({ error: 'Invitation has expired' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Invitation has expired" },
+        { status: 400 }
+      );
     }
 
     // Generate new token and expiry
-    const newToken = crypto.randomUUID()
-    const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    const newToken = crypto.randomUUID();
+    const newExpiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000
+    ).toISOString();
 
     // Update the invitation with new token and expiry
     const { error: updateError } = await supabase
-      .from('organization_invitations')
+      .from("organization_invitations")
       .update({
         token: newToken,
         expires_at: newExpiresAt,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', invitationId)
+      .eq("id", invitationId);
 
     if (updateError) {
-      console.error('Error updating invitation:', updateError)
-      return NextResponse.json({ error: 'Failed to update invitation' }, { status: 500 })
+      console.error("Error updating invitation:", updateError);
+      return NextResponse.json(
+        { error: "Failed to update invitation" },
+        { status: 500 }
+      );
     }
 
     // Send the new invitation email
@@ -111,31 +133,26 @@ export async function POST(request: NextRequest) {
         inviterName: invitation.invited_by_user.full_name,
         token: newToken,
         message: invitation.message,
-        organizationLogo: invitation.organizations.logo_url
-      })
+        organizationLogo: invitation.organizations.logo_url,
+      });
     } catch (emailError) {
-      console.error('Error sending invitation email:', emailError)
-      return NextResponse.json({ error: 'Failed to send invitation email' }, { status: 500 })
-    }
-
-    // Invalidate team members cache to update invitation expiry date
-    console.log('🔄 Invalidating team members cache after invitation resend')
-    try {
-      await invalidateOrganizationCaches(invitation.organization_id, undefined, true)
-      console.log('✅ Team members cache invalidated successfully')
-    } catch (cacheError) {
-      console.warn('⚠️ Failed to invalidate team members cache:', cacheError)
-      // Don't fail the request if cache invalidation fails
+      console.error("Error sending invitation email:", emailError);
+      return NextResponse.json(
+        { error: "Failed to send invitation email" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Invitation resent successfully',
-      expiresAt: newExpiresAt
-    })
-
+      message: "Invitation resent successfully",
+      expiresAt: newExpiresAt,
+    });
   } catch (error) {
-    console.error('Error resending invitation:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error resending invitation:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
-} 
+}

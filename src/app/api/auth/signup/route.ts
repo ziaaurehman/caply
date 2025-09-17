@@ -5,7 +5,6 @@ import {
   addUserAsAdmin,
   generateOrgSlug,
 } from "@/utils/rbac/organizationSetup";
-import { redisSetJSON } from "@/utils/redis";
 
 export interface SignupRequest {
   email: string;
@@ -154,26 +153,6 @@ export async function POST(
       );
     }
 
-    // Cache: organization and roles
-    try {
-      if (organizationResult.organization) {
-        await redisSetJSON(
-          `organization:${organizationResult.organization.id}`,
-          organizationResult.organization,
-          1296000
-        );
-      }
-      if (organizationResult.roles && organizationResult.organization) {
-        await redisSetJSON(
-          `organization:roles:${organizationResult.organization.id}`,
-          organizationResult.roles,
-          1296000
-        );
-      }
-    } catch (e) {
-      console.warn("Redis cache set failed (organization/roles):", e);
-    }
-
     // 4. Add user as admin to the organization
     const adminResult = await addUserAsAdmin(
       userId,
@@ -185,51 +164,6 @@ export async function POST(
         { success: false, error: adminResult.error },
         { status: 500 }
       );
-    }
-
-    // Cache: organization membership for the created user
-    try {
-      const { data: memberData } = await supabase
-        .from("organization_members")
-        .select(
-          `
-          *,
-          users(*),
-          roles(*)
-        `
-        )
-        .eq("organization_id", organizationResult.organization.id)
-        .eq("user_id", userId)
-        .single();
-
-      if (memberData) {
-        await redisSetJSON(
-          `organization:member:${organizationResult.organization.id}:${userId}`,
-          memberData,
-          1296000
-        );
-      }
-
-      // Also cache all organization members (list) for quick org-level lookups
-      const { data: allMembers } = await supabase
-        .from("organization_members")
-        .select(
-          `
-          *,
-          users(*),
-          roles(*)
-        `
-        )
-        .eq("organization_id", organizationResult.organization.id);
-      if (allMembers) {
-        await redisSetJSON(
-          `organization:members:${organizationResult.organization.id}`,
-          allMembers,
-          1296000
-        );
-      }
-    } catch (e) {
-      console.warn("Redis cache set failed (organization member):", e);
     }
 
     // 5. Fetch complete user data with organization info

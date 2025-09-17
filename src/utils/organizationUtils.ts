@@ -1,10 +1,6 @@
 import { createClient } from "@/utils/supabase/server";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
-import { redisGetJSON, redisSetJSON, redisDel } from "@/utils/redis";
-
-// Cache TTL in seconds (1 week)
-const CACHE_TTL = 604800;
 
 interface Permission {
   resource: string;
@@ -44,42 +40,12 @@ interface CachedUserContext {
   cached_at: number;
 }
 
-/**
- * Get user's organization context - membership and role data with Redis caching
- */
 export async function getUserOrganizationContext(
   userId: string,
   organizationId: string,
   useCache: boolean = true
 ): Promise<UserOrganizationContext | null> {
-  const cacheKey = `user_org_context:${userId}:${organizationId}`;
-
   try {
-    // Try cache first if enabled
-    if (useCache) {
-      const cached = await redisGetJSON<CachedUserContext>(cacheKey);
-      if (cached && Date.now() - cached.cached_at < CACHE_TTL * 1000) {
-        return {
-          userId: cached.userId,
-          organizationId: cached.organizationId,
-          membership: {
-            id: "", // Not needed for most operations
-            organization_id: cached.organizationId,
-            user_id: cached.userId,
-            role_id: cached.roleId,
-            status: cached.status,
-            role: {
-              id: cached.roleId,
-              name: cached.roleName,
-              display_name: cached.roleName,
-              description: "",
-              permissions: cached.permissions,
-            },
-          },
-        };
-      }
-    }
-
     const supabase = await createClient();
 
     // Optimized query with selective fields
@@ -111,15 +77,6 @@ export async function getUserOrganizationContext(
     // Get permissions separately for better caching
     const permissions = await getRolePermissions(membership.role_id, useCache);
 
-    console.log("🔍 getUserOrganizationContext - Building context:", {
-      userId,
-      organizationId,
-      roleId: membership.role_id,
-      roleName: (membership as any).roles.name,
-      permissionsCount: permissions.length,
-      permissions: permissions,
-    });
-
     const context: UserOrganizationContext = {
       userId,
       organizationId,
@@ -139,20 +96,6 @@ export async function getUserOrganizationContext(
       },
     };
 
-    // Cache the result
-    if (useCache) {
-      const cacheData: CachedUserContext = {
-        userId,
-        organizationId,
-        roleId: membership.role_id,
-        roleName: (membership as any).roles.name,
-        permissions,
-        status: membership.status,
-        cached_at: Date.now(),
-      };
-      await redisSetJSON(cacheKey, cacheData, CACHE_TTL);
-    }
-
     return context;
   } catch (error) {
     console.error("Error getting user organization context:", error);
@@ -170,13 +113,6 @@ async function getRolePermissions(
   const cacheKey = `role_permissions:${roleId}`;
 
   try {
-    if (useCache) {
-      const cached = await redisGetJSON<Permission[]>(cacheKey);
-      if (cached) {
-        return cached;
-      }
-    }
-
     const supabase = await createClient();
 
     const { data: permissions, error } = await supabase
@@ -191,12 +127,6 @@ async function getRolePermissions(
       )
       .eq("role_id", roleId);
 
-    console.log("🔍 getRolePermissions - Database query:", {
-      roleId,
-      permissionsRaw: permissions,
-      error,
-    });
-
     if (error) {
       console.error("Error fetching role permissions:", error);
       return [];
@@ -207,16 +137,6 @@ async function getRolePermissions(
         resource: rp.permissions.module,
         action: rp.permissions.action,
       })) || [];
-
-    console.log("🔍 getRolePermissions - Processed permissions:", {
-      roleId,
-      permissionList,
-    });
-
-    // Cache permissions for 30 minutes (they change less frequently)
-    if (useCache) {
-      await redisSetJSON(cacheKey, permissionList, 1800);
-    }
 
     return permissionList;
   } catch (error) {
@@ -241,13 +161,6 @@ export function hasPermission(
   const hasPermission = context.membership.role.permissions.some(
     (p) => p.resource === resource && p.action === action
   );
-
-  console.log("🔍 Permission check result:", {
-    hasPermission,
-    matchingPermissions: context.membership.role.permissions.filter(
-      (p) => p.resource === resource && p.action === action
-    ),
-  });
 
   return hasPermission;
 }
@@ -472,15 +385,7 @@ export async function getUserOrganizationsLite(userId: string): Promise<
     is_owner: boolean;
   }>
 > {
-  const cacheKey = `user_orgs_lite:${userId}`;
-
   try {
-    // Check cache first
-    const cached = await redisGetJSON<any[]>(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
     const supabase = await createClient();
 
     const { data: memberships, error } = await supabase
@@ -515,9 +420,6 @@ export async function getUserOrganizationsLite(userId: string): Promise<
       role: m.roles.display_name,
       is_owner: m.organizations.owner_id === userId,
     }));
-
-    // Cache for 24 hours (organizations rarely change)
-    await redisSetJSON(cacheKey, orgs, 86400);
 
     return orgs;
   } catch (error) {
@@ -563,82 +465,5 @@ export async function warmOrganizationCaches(userId: string): Promise<void> {
     );
   } catch (error) {
     console.debug("Cache warming failed:", error);
-  }
-}
-
-/**
- * Invalidate organization-related caches
- * Use this when organization membership changes
- */
-export async function invalidateOrganizationCaches(
-  organizationId: string,
-  userId?: string,
-  includeTeamMembers: boolean = true
-): Promise<void> {
-  try {
-    const keysToInvalidate: string[] = [];
-
-    // Invalidate user organization data if userId provided
-    if (userId) {
-      keysToInvalidate.push(
-        `user_orgs_lite:${userId}`,
-        `user_org_context:${userId}:${organizationId}`
-      );
-    }
-
-    // Invalidate team members cache if requested
-    if (includeTeamMembers) {
-      keysToInvalidate.push(
-        `team_members:page1:${organizationId}::`,
-        `team_members:page1:${organizationId}::active`
-      );
-    }
-
-    // Invalidate all keys in parallel
-    const invalidationPromises = keysToInvalidate.map((key) =>
-      redisDel(key).catch((error) =>
-        console.warn(`Failed to invalidate cache key ${key}:`, error)
-      )
-    );
-
-    await Promise.all(invalidationPromises);
-
-    console.log("🔄 Invalidated organization caches:", {
-      organizationId,
-      userId,
-      includeTeamMembers,
-      keysInvalidated: keysToInvalidate.length,
-    });
-  } catch (error) {
-    console.error("Error invalidating organization caches:", error);
-  }
-}
-
-/**
- * Invalidate all user-related caches
- * Use this when user's organization membership changes significantly
- */
-export async function invalidateUserCaches(userId: string): Promise<void> {
-  try {
-    const keysToInvalidate = [
-      `user_orgs_lite:${userId}`,
-      `user:organizations:${userId}`,
-    ];
-
-    // Invalidate all keys in parallel
-    const invalidationPromises = keysToInvalidate.map((key) =>
-      redisDel(key).catch((error) =>
-        console.warn(`Failed to invalidate cache key ${key}:`, error)
-      )
-    );
-
-    await Promise.all(invalidationPromises);
-
-    console.log("🔄 Invalidated user caches:", {
-      userId,
-      keysInvalidated: keysToInvalidate.length,
-    });
-  } catch (error) {
-    console.error("Error invalidating user caches:", error);
   }
 }

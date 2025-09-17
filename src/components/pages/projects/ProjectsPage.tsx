@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Plus,
   Pencil,
@@ -12,27 +12,32 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { projectAPI, type Project } from "@/utils/api";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { useConfirmation } from "@/lib/hooks/useConfirmation";
 import { createDeleteConfirmation } from "@/utils/confirmations";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import ProjectModal from "./ProjectModal";
 import ProjectDetailsDialog from "./ProjectDetailsDialog";
 import ProjectsSkeleton from "./ProjectsSkeleton";
-import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { Input } from "@/components/ui/Input";
 import Pagination from "@/components/ui/Pagination";
+import {
+  useProjects,
+  useProjectsProgress,
+  useDeleteProject,
+  usePrefetchProject,
+  projectKeys,
+  type ProjectFilters,
+} from "@/lib/hooks/useProjects";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Project } from "@/utils/api/project";
 
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
-  const [progressLoading, setProgressLoading] = useState(false);
 
   // Project details dialog state
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
@@ -42,8 +47,6 @@ export default function ProjectsPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalItems, setTotalItems] = useState(0);
   const [itemsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -76,76 +79,64 @@ export default function ProjectsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch projects function
-  const fetchProjects = useCallback(
-    async (isInitialLoad = false) => {
-      if (!currentOrganization?.id) return;
-
-      // Use different loading states based on operation type
-      if (isInitialLoad) {
-        setLoading(true);
-      } else {
-        setIsSearching(true);
-      }
-
-      setError(null);
-      try {
-        console.log("Fetching projects with params:", {
-          page: currentPage,
-          limit: itemsPerPage,
-          search: searchTerm,
-          status: statusFilter !== "all" ? statusFilter : undefined,
-        });
-
-        const data = await projectAPI.getProjects(currentOrganization.id, {
-          page: currentPage,
-          limit: itemsPerPage,
-          search: searchTerm,
-          status: statusFilter !== "all" ? statusFilter : undefined,
-        });
-
-        console.log("Projects API response:", data);
-
-        setProjects(data.projects || []);
-
-        // Update pagination metadata
-        if (data.pagination) {
-          setTotalPages(data.pagination.totalPages);
-          setTotalItems(data.pagination.total);
-        }
-
-        // Fetch progress data after projects are loaded
-        if (data.projects && data.projects.length > 0) {
-          fetchProjectsProgress(data.projects.map((p) => p.id));
-        }
-      } catch (err: any) {
-        console.error("Error fetching projects:", err);
-        const errorMessage = err.message || "Failed to load projects";
-        setError(errorMessage);
-        toast.error(errorMessage);
-      } finally {
-        if (isInitialLoad) {
-          setLoading(false);
-        } else {
-          setIsSearching(false);
-        }
-      }
-    },
-    [
-      currentOrganization?.id,
-      currentPage,
-      itemsPerPage,
-      searchTerm,
-      statusFilter,
-    ]
+  // Memoize filters to prevent unnecessary re-renders
+  const filters: ProjectFilters = useMemo(
+    () => ({
+      page: currentPage,
+      limit: itemsPerPage,
+      search: searchTerm || undefined,
+      status: statusFilter !== "all" ? statusFilter : undefined,
+    }),
+    [currentPage, itemsPerPage, searchTerm, statusFilter]
   );
 
-  // Fetch projects when organization, page, or filters change
-  useEffect(() => {
-    if (currentOrganization?.id) {
-      fetchProjects(true);
-    }
-  }, [currentOrganization?.id, currentPage, statusFilter]);
+  // Fetch projects using React Query
+  const {
+    data: projectsData,
+    isLoading: projectsLoading,
+    isFetching: projectsFetching,
+    error: projectsError,
+    refetch: refetchProjects,
+  } = useProjects(currentOrganization?.id || "", filters);
+
+  // Extract projects and pagination data
+  const projects = projectsData?.projects || [];
+  const pagination = projectsData?.pagination;
+  const totalPages = pagination?.totalPages || 1;
+  const totalItems = pagination?.total || 0;
+
+  // Fetch progress data for projects
+  const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
+  const { data: progressData, isLoading: progressLoading } =
+    useProjectsProgress(projectIds);
+
+  // Merge progress data with projects
+  const projectsWithProgress = useMemo(() => {
+    if (!progressData?.progress) return projects;
+
+    return projects.map((project) => {
+      const progressInfo = progressData.progress.find(
+        (p) => p.projectId === project.id
+      );
+      if (progressInfo) {
+        return {
+          ...project,
+          progress: progressInfo.progress,
+          progress_details: {
+            totalCards: progressInfo.totalCards,
+            completedCards: progressInfo.completedCards,
+            inProgressCards: progressInfo.inProgressCards,
+            todoCards: progressInfo.todoCards,
+          },
+        };
+      }
+      return project;
+    });
+  }, [projects, progressData]);
+
+  // Mutations
+  const deleteProjectMutation = useDeleteProject();
+  const prefetchProject = usePrefetchProject();
 
   // Handle search with debounce
   useEffect(() => {
@@ -154,52 +145,9 @@ export default function ProjectsPage() {
     // Reset to first page when search term changes
     if (currentPage !== 1) {
       setCurrentPage(1);
-      return; // This will trigger the above useEffect
+      return; // This will trigger the query refetch
     }
-
-    // Debounce search
-    const timeoutId = setTimeout(() => {
-      fetchProjects(false);
-    }, 300);
-
-    return () => clearTimeout(timeoutId);
-  }, [searchTerm]);
-
-  const fetchProjectsProgress = async (projectIds: string[]) => {
-    if (projectIds.length === 0) return;
-
-    setProgressLoading(true);
-    try {
-      const progressData = await projectAPI.getProjectsProgress(projectIds);
-
-      // Update projects with progress data
-      setProjects((prevProjects) =>
-        prevProjects.map((project) => {
-          const progressInfo = progressData.progress.find(
-            (p) => p.projectId === project.id
-          );
-          if (progressInfo) {
-            return {
-              ...project,
-              progress: progressInfo.progress,
-              progress_details: {
-                totalCards: progressInfo.totalCards,
-                completedCards: progressInfo.completedCards,
-                inProgressCards: progressInfo.inProgressCards,
-                todoCards: progressInfo.todoCards,
-              },
-            };
-          }
-          return project;
-        })
-      );
-    } catch (err: any) {
-      console.error("Error fetching project progress:", err);
-      // Don't show error toast for progress loading failures
-    } finally {
-      setProgressLoading(false);
-    }
-  };
+  }, [searchTerm, currentOrganization?.id, currentPage]);
 
   const handleEdit = (project: Project) => {
     setSelectedProject(project);
@@ -207,13 +155,16 @@ export default function ProjectsPage() {
   };
 
   const handleProjectUpdated = useCallback(() => {
-    fetchProjects(false);
-  }, [fetchProjects]);
+    // Invalidate and refetch projects
+    queryClient.invalidateQueries({
+      queryKey: projectKeys.lists(),
+    });
+  }, [queryClient]);
 
   const handleDelete = async (id: string) => {
     if (!currentOrganization?.id) return;
 
-    const project = projects.find((p) => p.id === id);
+    const project = projectsWithProgress.find((p) => p.id === id);
     const projectName = project?.name || "this project";
 
     const confirmation = createDeleteConfirmation({
@@ -223,8 +174,11 @@ export default function ProjectsPage() {
         "will remove all associated tasks, time entries, and other data",
       onDelete: async () => {
         try {
-          await projectAPI.deleteProject(id, currentOrganization.id);
-          await fetchProjects(false);
+          await deleteProjectMutation.mutateAsync({
+            id,
+            organizationId: currentOrganization.id,
+          });
+          toast.success("Project deleted successfully!");
         } catch (err: any) {
           console.error("Error deleting project:", err);
           toast.error(err.message || "Failed to delete project");
@@ -243,6 +197,11 @@ export default function ProjectsPage() {
   const handleProjectDetails = (projectId: string) => {
     setSelectedProjectId(projectId);
     setIsDetailsDialogOpen(true);
+
+    // Prefetch project details for better UX
+    if (currentOrganization?.id) {
+      prefetchProject(projectId, currentOrganization.id);
+    }
   };
 
   const handleCloseDetailsDialog = () => {
@@ -409,7 +368,12 @@ export default function ProjectsPage() {
     }
   };
 
-  if (error) {
+  // Loading states
+  const isLoading = projectsLoading || organizationLoading;
+  const isSearching = projectsFetching && !projectsLoading;
+
+  // Error handling
+  if (projectsError) {
     return (
       <div className="p-8">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
@@ -421,11 +385,15 @@ export default function ProjectsPage() {
               <h3 className="text-lg font-semibold text-red-900">
                 Error Loading Projects
               </h3>
-              <p className="text-red-700">{error}</p>
+              <p className="text-red-700">
+                {projectsError instanceof Error
+                  ? projectsError.message
+                  : "Failed to load projects"}
+              </p>
             </div>
           </div>
           <button
-            onClick={() => fetchProjects(false)}
+            onClick={() => refetchProjects()}
             className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
           >
             Try Again
@@ -435,7 +403,7 @@ export default function ProjectsPage() {
     );
   }
 
-  if (organizationLoading || !currentOrganization?.id || loading) {
+  if (isLoading || !currentOrganization?.id) {
     return <ProjectsSkeleton />;
   }
 
@@ -545,7 +513,7 @@ export default function ProjectsPage() {
               {searchTerm ? "Searching projects..." : "Loading projects..."}
             </span>
           </div>
-        ) : projects.length === 0 ? (
+        ) : projectsWithProgress.length === 0 ? (
           <div className="text-center py-8">
             <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
               {searchTerm ? (
@@ -635,7 +603,7 @@ export default function ProjectsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {projects.map((project) => {
+                {projectsWithProgress.map((project) => {
                   const timeProgress = calculateTimeProgress(project);
                   const budgetUtilization = getBudgetUtilization(project);
                   const remainingDays = getRemainingDays(project.end_date);
@@ -744,6 +712,7 @@ export default function ProjectsPage() {
                             handleDelete(project.id);
                           }}
                           className="text-red-600 hover:text-red-900"
+                          disabled={deleteProjectMutation.isPending}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -757,7 +726,7 @@ export default function ProjectsPage() {
         )}
 
         {/* Pagination */}
-        {!isSearching && projects.length > 0 && totalPages > 1 && (
+        {!isSearching && projectsWithProgress.length > 0 && totalPages > 1 && (
           <div className="mt-6">
             <Pagination
               currentPage={currentPage}

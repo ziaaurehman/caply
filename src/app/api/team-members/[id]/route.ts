@@ -1,12 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/utils/supabase/server'
-import { getServerSession } from 'next-auth'
-import { authConfig } from '@/auth'
-import { validateOrganizationAccessWithId } from '@/utils/organizationUtils'
-import { redisDel, redisSetJSON } from '@/utils/redis'
-
-// Cache TTL - 7 days for page 1 only (most frequently accessed)
-const PAGE_ONE_CACHE_TTL = 604800 // 7 days in seconds
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
+import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 // PUT /api/team-members/[id] - Update team member
 export async function PUT(
@@ -14,61 +10,69 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await getServerSession(authConfig)
+    const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const memberId = params.id
-    const body = await request.json()
-    const { roleId, department, hourlyRate, weeklyCapacity } = body
-    
+    const memberId = params.id;
+    const body = await request.json();
+    const { roleId, department, hourlyRate, weeklyCapacity } = body;
+
     // Get organization ID from headers
-    const headerOrgId = request.headers.get('x-organization-id')
-    
+    const headerOrgId = request.headers.get("x-organization-id");
+
     if (!headerOrgId) {
-      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
     }
 
     // Validate organization access and permissions
-    const validation = await validateOrganizationAccessWithId(
-      headerOrgId,
-      { resource: 'users', action: 'update' }
-    )
+    const validation = await validateOrganizationAccessWithId(headerOrgId, {
+      resource: "users",
+      action: "update",
+    });
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status })
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
-    const supabase = await createClient()
-    const userContext = validation.context!
+    const supabase = await createClient();
+    const userContext = validation.context!;
 
     // Get the member to update
     const { data: member, error: memberError } = await supabase
-      .from('organization_members')
-      .select('id, organization_id, user_id')
-      .eq('id', memberId)
-      .eq('organization_id', headerOrgId)
-      .single()
+      .from("organization_members")
+      .select("id, organization_id, user_id")
+      .eq("id", memberId)
+      .eq("organization_id", headerOrgId)
+      .single();
 
     if (memberError || !member) {
-      return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+      return NextResponse.json({ error: "Member not found" }, { status: 404 });
     }
 
     // Update the member
-    const updateData: any = {}
-    if (roleId) updateData.role_id = roleId
-    if (department !== undefined) updateData.department = department
-    if (hourlyRate !== undefined) updateData.hourly_rate = hourlyRate
-    if (weeklyCapacity !== undefined) updateData.weekly_capacity = weeklyCapacity
+    const updateData: any = {};
+    if (roleId) updateData.role_id = roleId;
+    if (department !== undefined) updateData.department = department;
+    if (hourlyRate !== undefined) updateData.hourly_rate = hourlyRate;
+    if (weeklyCapacity !== undefined)
+      updateData.weekly_capacity = weeklyCapacity;
 
     const { data: updatedMember, error: updateError } = await supabase
-      .from('organization_members')
+      .from("organization_members")
       .update(updateData)
-      .eq('id', memberId)
-      .select(`
+      .eq("id", memberId)
+      .select(
+        `
         id,
         user_id,
         role_id,
@@ -93,128 +97,28 @@ export async function PUT(
           display_name,
           description
         )
-      `)
-      .single()
+      `
+      )
+      .single();
 
     if (updateError) {
-      console.error('Error updating member:', updateError)
-      return NextResponse.json({ error: 'Failed to update member' }, { status: 500 })
+      console.error("Error updating member:", updateError);
+      return NextResponse.json(
+        { error: "Failed to update member" },
+        { status: 500 }
+      );
     }
 
-    // Refresh page 1 cache after updating team member
-    try {
-      const cacheKeysToInvalidate = [
-        `team_members:page1:${headerOrgId}::`, // Empty search, no status filter
-        `team_members:page1:${headerOrgId}::active`, // Active status filter
-      ]
-      
-      for (const key of cacheKeysToInvalidate) {
-        try {
-          const isActiveFilter = key.includes('active')
-          
-          // Get team members with proper status filtering
-          const { data: members } = await supabase
-            .from('organization_members')
-            .select(`
-              id,
-              user_id,
-              role_id,
-              hourly_rate,
-              weekly_capacity,
-              department,
-              hire_date,
-              status,
-              joined_at,
-              users:user_id (
-                id,
-                email,
-                full_name,
-                avatar_url,
-                position,
-                phone,
-                is_active
-              ),
-              roles:role_id (
-                id,
-                name,
-                display_name,
-                description
-              )
-            `)
-            .eq('organization_id', headerOrgId)
-            .eq('status', isActiveFilter ? 'active' : undefined)
-            .order('joined_at', { ascending: false })
-            .range(0, 9) // First 10 items for page 1
-
-          // Get pending invitations
-          const { data: invitations } = await supabase
-            .from('organization_invitations')
-            .select(`
-              id,
-              email,
-              role_id,
-              status,
-              expires_at,
-              created_at,
-              user_id,
-              roles:role_id (
-                id,
-                name,
-                display_name,
-                description
-              )
-            `)
-            .eq('organization_id', headerOrgId)
-            .eq('status', 'pending')
-            .gt('expires_at', new Date().toISOString())
-            .order('created_at', { ascending: false })
-            .range(0, 9) // First 10 items
-
-          // Get total count for members only (invitations are separate)
-          const { count: totalMembers } = await supabase
-            .from('organization_members')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', headerOrgId)
-            .eq('status', isActiveFilter ? 'active' : undefined)
-
-          const totalPages = Math.ceil((totalMembers || 0) / 10)
-
-          const refreshedResult = {
-            members: members || [],
-            invitations: invitations || [],
-            pagination: {
-              page: 1,
-              limit: 10,
-              total: totalMembers || 0,
-              totalPages,
-              hasNext: 1 < totalPages,
-              hasPrev: false
-            }
-          }
-
-          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
-          console.log('🔄 Refreshed team members page 1 cache after member update:', {
-            key,
-            membersCount: members?.length || 0,
-            invitationsCount: invitations?.length || 0,
-            totalMembers
-          })
-        } catch (cacheError) {
-          console.warn('Failed to refresh specific cache key:', key, cacheError)
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to refresh team members page 1 cache after update:', e)
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      member: updatedMember 
-    })
-
+    return NextResponse.json({
+      success: true,
+      member: updatedMember,
+    });
   } catch (error) {
-    console.error('Error in team member PUT:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error in team member PUT:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
@@ -224,195 +128,110 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const session = await getServerSession(authConfig)
+    const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const memberId = params.id
-    
+    const memberId = params.id;
+
     // Get organization ID from headers
-    const headerOrgId = request.headers.get('x-organization-id')
-    
+    const headerOrgId = request.headers.get("x-organization-id");
+
     if (!headerOrgId) {
-      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
     }
 
     // Validate organization access and permissions
-    const validation = await validateOrganizationAccessWithId(
-      headerOrgId,
-      { resource: 'users', action: 'delete' }
-    )
+    const validation = await validateOrganizationAccessWithId(headerOrgId, {
+      resource: "users",
+      action: "delete",
+    });
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status })
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
-    const supabase = await createClient()
-    const userContext = validation.context!
+    const supabase = await createClient();
+    const userContext = validation.context!;
 
     // Get the member to delete
     const { data: member, error: memberError } = await supabase
-      .from('organization_members')
-      .select('id, organization_id, user_id')
-      .eq('id', memberId)
-      .eq('organization_id', headerOrgId)
-      .single()
+      .from("organization_members")
+      .select("id, organization_id, user_id")
+      .eq("id", memberId)
+      .eq("organization_id", headerOrgId)
+      .single();
 
     if (memberError || !member) {
-      return NextResponse.json({ error: 'Member not found' }, { status: 404 })
+      return NextResponse.json({ error: "Member not found" }, { status: 404 });
     }
 
     // Prevent deleting yourself
     if (member.user_id === session.user.id) {
-      return NextResponse.json({ error: 'Cannot remove yourself from the organization' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Cannot remove yourself from the organization" },
+        { status: 400 }
+      );
     }
 
     // Check if the user is an organization owner
     const { data: organization, error: ownerError } = await supabase
-      .from('organizations')
-      .select('owner_id')
-      .eq('id', headerOrgId)
-      .single()
+      .from("organizations")
+      .select("owner_id")
+      .eq("id", headerOrgId)
+      .single();
 
     if (ownerError) {
-      console.error('Error checking organization owner:', ownerError)
-      return NextResponse.json({ error: 'Failed to verify organization ownership' }, { status: 500 })
+      console.error("Error checking organization owner:", ownerError);
+      return NextResponse.json(
+        { error: "Failed to verify organization ownership" },
+        { status: 500 }
+      );
     }
 
     // Prevent deleting organization owner
     if (organization.owner_id === member.user_id) {
-      return NextResponse.json({ 
-        error: 'Cannot remove organization owner. Transfer ownership first before removing this member.' 
-      }, { status: 400 })
+      return NextResponse.json(
+        {
+          error:
+            "Cannot remove organization owner. Transfer ownership first before removing this member.",
+        },
+        { status: 400 }
+      );
     }
 
     // Delete the member
     const { error: deleteError } = await supabase
-      .from('organization_members')
+      .from("organization_members")
       .delete()
-      .eq('id', memberId)
+      .eq("id", memberId);
 
     if (deleteError) {
-      console.error('Error deleting member:', deleteError)
-      return NextResponse.json({ error: 'Failed to remove member' }, { status: 500 })
+      console.error("Error deleting member:", deleteError);
+      return NextResponse.json(
+        { error: "Failed to remove member" },
+        { status: 500 }
+      );
     }
 
-    // Refresh page 1 cache after deleting team member
-    try {
-      const cacheKeysToInvalidate = [
-        `team_members:page1:${headerOrgId}::`, // Empty search, no status filter
-        `team_members:page1:${headerOrgId}::active`, // Active status filter
-      ]
-      
-      for (const key of cacheKeysToInvalidate) {
-        try {
-          const isActiveFilter = key.includes('active')
-          
-          // Get team members with proper status filtering
-          const { data: members } = await supabase
-            .from('organization_members')
-            .select(`
-              id,
-              user_id,
-              role_id,
-              hourly_rate,
-              weekly_capacity,
-              department,
-              hire_date,
-              status,
-              joined_at,
-              users:user_id (
-                id,
-                email,
-                full_name,
-                avatar_url,
-                position,
-                phone,
-                is_active
-              ),
-              roles:role_id (
-                id,
-                name,
-                display_name,
-                description
-              )
-            `)
-            .eq('organization_id', headerOrgId)
-            .eq('status', isActiveFilter ? 'active' : undefined)
-            .order('joined_at', { ascending: false })
-            .range(0, 9) // First 10 items for page 1
-
-          // Get pending invitations
-          const { data: invitations } = await supabase
-            .from('organization_invitations')
-            .select(`
-              id,
-              email,
-              role_id,
-              status,
-              expires_at,
-              created_at,
-              user_id,
-              roles:role_id (
-                id,
-                name,
-                display_name,
-                description
-              )
-            `)
-            .eq('organization_id', headerOrgId)
-            .eq('status', 'pending')
-            .gt('expires_at', new Date().toISOString())
-            .order('created_at', { ascending: false })
-            .range(0, 9) // First 10 items
-
-          // Get total count for members only (invitations are separate)
-          const { count: totalMembers } = await supabase
-            .from('organization_members')
-            .select('id', { count: 'exact', head: true })
-            .eq('organization_id', headerOrgId)
-            .eq('status', isActiveFilter ? 'active' : undefined)
-
-          const totalPages = Math.ceil((totalMembers || 0) / 10)
-
-          const refreshedResult = {
-            members: members || [],
-            invitations: invitations || [],
-            pagination: {
-              page: 1,
-              limit: 10,
-              total: totalMembers || 0,
-              totalPages,
-              hasNext: 1 < totalPages,
-              hasPrev: false
-            }
-          }
-
-          await redisSetJSON(key, refreshedResult, PAGE_ONE_CACHE_TTL)
-          console.log('🔄 Refreshed team members page 1 cache after member deletion:', {
-            key,
-            membersCount: members?.length || 0,
-            invitationsCount: invitations?.length || 0,
-            totalMembers
-          })
-        } catch (cacheError) {
-          console.warn('Failed to refresh specific cache key:', key, cacheError)
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to refresh team members page 1 cache after delete:', e)
-    }
-
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true,
-      message: 'Member removed successfully'
-    })
-
+      message: "Member removed successfully",
+    });
   } catch (error) {
-    console.error('Error in team member DELETE:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Error in team member DELETE:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
-} 
+}
