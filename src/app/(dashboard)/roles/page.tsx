@@ -1,214 +1,208 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Shield, Users, Settings, Eye, Search } from 'lucide-react'
-import { toast } from 'sonner'
-import { rolesApi, permissionsApi } from '@/utils/api/roles'
-import { Role, Permission } from '@/lib/types'
-import CreateRoleModal from '@/components/modals/CreateRoleModal'
-import EditRoleModal from '@/components/modals/EditRoleModal'
-import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal'
-import { useOrganizationStore } from '@/lib/stores/organizationStore'
-import Pagination from '@/components/ui/Pagination'
-import { Input } from '@/components/ui/Input'
+import { useState } from "react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  Shield,
+  Users,
+  Settings,
+  Search,
+} from "lucide-react";
+import {
+  useRoles,
+  usePermissions,
+  useCreateRole,
+  useUpdateRole,
+  useDeleteRole,
+} from "@/lib/hooks/useRoles";
+import { Role, Permission } from "@/lib/types";
+import CreateRoleModal from "@/components/modals/CreateRoleModal";
+import EditRoleModal from "@/components/modals/EditRoleModal";
+import DeleteConfirmModal from "@/components/modals/DeleteConfirmModal";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import Pagination from "@/components/ui/Pagination";
+import { Input } from "@/components/ui/Input";
 
 export default function RolesPage() {
-  const [roles, setRoles] = useState<Role[]>([])
-  const [permissions, setPermissions] = useState<Record<string, Permission[]>>({})
-  const [loading, setLoading] = useState(true)
-  const [deleteLoading, setDeleteLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  
   // Pagination state
-  const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
-  const [totalItems, setTotalItems] = useState(0)
-  const [itemsPerPage] = useState(10)
-  const [searchTerm, setSearchTerm] = useState('')
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState("");
+  const itemsPerPage = 10;
 
   // Modal states
-  const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
-  const [selectedRole, setSelectedRole] = useState<Role | null>(null)
-  const [roleToDelete, setRoleToDelete] = useState<Role | null>(null)
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
 
-  const { currentOrganization, hasPermission, hasRole } = useOrganizationStore()
+  const { currentOrganization, hasPermission, hasRole } =
+    useOrganizationStore();
 
   // Check if user has admin access for role management
-  const hasAdminAccess = hasRole('admin') || hasPermission('roles', 'manage') || hasPermission('roles', 'read')
-  const canCreateRoles = hasRole('admin') || hasPermission('roles', 'create') || hasPermission('roles', 'manage')
-  const canUpdateRoles = hasRole('admin') || hasPermission('roles', 'update') || hasPermission('roles', 'manage')
-  const canDeleteRoles = hasRole('admin') || hasPermission('roles', 'delete') || hasPermission('roles', 'manage')
+  const hasAdminAccess =
+    hasRole("admin") ||
+    hasPermission("roles", "manage") ||
+    hasPermission("roles", "read");
+  const canCreateRoles =
+    hasRole("admin") ||
+    hasPermission("roles", "create") ||
+    hasPermission("roles", "manage");
+  const canUpdateRoles =
+    hasRole("admin") ||
+    hasPermission("roles", "update") ||
+    hasPermission("roles", "manage");
+  const canDeleteRoles =
+    hasRole("admin") ||
+    hasPermission("roles", "delete") ||
+    hasPermission("roles", "manage");
 
-  // Load data when organization or pagination changes
-  useEffect(() => {
-    if (currentOrganization?.id && hasAdminAccess) {
-      loadData()
+  // React Query hooks
+  const {
+    data: rolesData,
+    isLoading: rolesLoading,
+    error: rolesError,
+  } = useRoles(
+    currentOrganization?.id || "",
+    {
+      page: currentPage,
+      limit: itemsPerPage,
+      search: searchTerm || undefined,
+    },
+    hasAdminAccess && !!currentOrganization?.id
+  );
+
+  const {
+    data: permissionsData,
+    isLoading: permissionsLoading,
+    error: permissionsError,
+  } = usePermissions(
+    currentOrganization?.id || "",
+    hasAdminAccess && !!currentOrganization?.id
+  );
+
+  const createRoleMutation = useCreateRole();
+  const updateRoleMutation = useUpdateRole();
+  const deleteRoleMutation = useDeleteRole();
+
+  // Extract data from queries
+  const roles = rolesData?.roles || [];
+  const permissions =
+    permissionsData?.data || permissionsData?.permissions || {};
+  const pagination = rolesData?.pagination;
+  const totalPages = pagination?.totalPages || 1;
+  const totalItems = pagination?.total || 0;
+
+  const loading = rolesLoading || permissionsLoading;
+  const error = rolesError || permissionsError;
+
+  // Handle search with debouncing
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    if (currentPage !== 1) {
+      setCurrentPage(1);
     }
-  }, [currentOrganization?.id, hasAdminAccess, currentPage])
-
-  // Optimized search with minimal delay
-  useEffect(() => {
-    // For empty search, load immediately
-    if (searchTerm === '') {
-      if (currentPage !== 1) {
-        setCurrentPage(1)
-      } else if (currentOrganization?.id && hasAdminAccess) {
-        loadData()
-      }
-      return
-    }
-
-    // For search terms, use minimal debounce
-    const timeoutId = setTimeout(() => {
-      if (currentPage !== 1) {
-        setCurrentPage(1) // Reset to first page on search
-      } else if (currentOrganization?.id && hasAdminAccess) {
-        loadData()
-      }
-    }, 100) // Reduced to 100ms for even faster response
-
-    return () => clearTimeout(timeoutId)
-  }, [searchTerm])
-
-  const loadData = async () => {
-    if (!currentOrganization?.id) return
-
-    try {
-      setLoading(true)
-      setError(null)
-
-      // Load roles with pagination and permissions in parallel
-      const [rolesResponse, permissionsResponse] = await Promise.all([
-        rolesApi.getAll(currentOrganization.id, {
-          page: currentPage,
-          limit: itemsPerPage,
-          search: searchTerm
-        }),
-        permissionsApi.getAll(currentOrganization.id)
-      ])
-
-      setRoles(rolesResponse.roles || [])
-      setPermissions(permissionsResponse.data || permissionsResponse.permissions || {})
-      
-      // Update pagination metadata
-      if (rolesResponse.pagination) {
-        setTotalPages(rolesResponse.pagination.totalPages)
-        setTotalItems(rolesResponse.pagination.total)
-      }
-    } catch (err) {
-      console.error('Error loading data:', err)
-      setError('Failed to load roles and permissions')
-    } finally {
-      setLoading(false)
-    }
-  }
+  };
 
   const handleCreateRole = async (roleData: any) => {
-    if (!currentOrganization?.id) return
+    if (!currentOrganization?.id) return;
 
-    try {
-      await rolesApi.create({ ...roleData, organizationId: currentOrganization.id })
-      setCreateModalOpen(false)
-      await loadData() // Refresh data
-    } catch (err) {
-      console.error('Error creating role:', err)
-    }
-  }
+    createRoleMutation.mutate(
+      { ...roleData, organizationId: currentOrganization.id },
+      {
+        onSuccess: () => {
+          setCreateModalOpen(false);
+        },
+      }
+    );
+  };
 
   const handleEditRole = async (roleData: any) => {
-    if (!selectedRole || !currentOrganization?.id) return
-    
-    try {
-      await rolesApi.update(selectedRole.id, { ...roleData, organizationId: currentOrganization.id })
-      setEditModalOpen(false)
-      setSelectedRole(null)
-      await loadData() // Refresh data
-    } catch (err) {
-      console.error('Error updating role:', err)
-    }
-  }
+    if (!selectedRole || !currentOrganization?.id) return;
+
+    updateRoleMutation.mutate(
+      {
+        id: selectedRole.id,
+        data: { ...roleData, organizationId: currentOrganization.id },
+      },
+      {
+        onSuccess: () => {
+          setEditModalOpen(false);
+          setSelectedRole(null);
+        },
+      }
+    );
+  };
 
   const handleDeleteRole = async () => {
-    if (!roleToDelete || !currentOrganization?.id) return
+    if (!roleToDelete || !currentOrganization?.id) return;
 
-    try {
-      setDeleteLoading(true)
-      await rolesApi.delete(roleToDelete.id, currentOrganization.id)
-      setDeleteModalOpen(false)
-      setRoleToDelete(null)
-      await loadData() // Refresh data
-      toast.success(`Successfully deleted role "${roleToDelete.display_name || roleToDelete.name}"`)
-    } catch (err: any) {
-      console.error('Error deleting role:', err)
-      toast.error(err.message || 'Failed to delete role')
-    } finally {
-      setDeleteLoading(false)
-    }
-  }
+    deleteRoleMutation.mutate(
+      {
+        id: roleToDelete.id,
+        organizationId: currentOrganization.id,
+      },
+      {
+        onSuccess: () => {
+          setDeleteModalOpen(false);
+          setRoleToDelete(null);
+        },
+      }
+    );
+  };
 
   const openEditModal = (role: Role) => {
-    setSelectedRole(role)
-    setEditModalOpen(true)
-  }
+    setSelectedRole(role);
+    setEditModalOpen(true);
+  };
 
   const openDeleteModal = (role: Role) => {
-    setRoleToDelete(role)
-    setDeleteModalOpen(true)
-  }
+    setRoleToDelete(role);
+    setDeleteModalOpen(true);
+  };
 
   const getRoleIcon = (roleName: string) => {
     switch (roleName.toLowerCase()) {
-      case 'admin':
-        return <Shield className="w-5 h-5 text-red-600" />
-      case 'manager':
-        return <Users className="w-5 h-5 text-blue-600" />
-      case 'member':
-        return <Settings className="w-5 h-5 text-gray-600" />
+      case "admin":
+        return <Shield className="w-5 h-5 text-red-600" />;
+      case "manager":
+        return <Users className="w-5 h-5 text-blue-600" />;
+      case "member":
+        return <Settings className="w-5 h-5 text-gray-600" />;
       default:
-        return <Shield className="w-5 h-5 text-purple-600" />
+        return <Shield className="w-5 h-5 text-purple-600" />;
     }
-  }
+  };
 
   const getRoleBadge = (role: Role) => {
-    const badgeColor = getRoleBadgeColor(role.name)
+    const badgeColor = getRoleBadgeColor(role.name);
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${badgeColor}`}>
+      <span
+        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${badgeColor}`}
+      >
         {role.display_name || role.name}
       </span>
-    )
-  }
+    );
+  };
 
   const getRoleBadgeColor = (roleName: string) => {
     switch (roleName.toLowerCase()) {
-      case 'admin':
-        return 'bg-red-100 text-red-800 border-red-200'
-      case 'manager':
-        return 'bg-blue-100 text-blue-800 border-blue-200'
-      case 'member':
-        return 'bg-gray-100 text-gray-800 border-gray-200'
+      case "admin":
+        return "bg-red-100 text-red-800 border-red-200";
+      case "manager":
+        return "bg-blue-100 text-blue-800 border-blue-200";
+      case "member":
+        return "bg-gray-100 text-gray-800 border-gray-200";
       default:
-        return 'bg-orange-100 text-orange-800 border-orange-200'
+        return "bg-orange-100 text-orange-800 border-orange-200";
     }
-  }
+  };
 
   const getPermissionCount = (rolePermissions: Permission[]) => {
-    return rolePermissions?.length || 0
-  }
-
-  const handleCreateSuccess = async () => {
-    setCreateModalOpen(false)
-    await loadData() // Refresh data
-    toast.success('Role created successfully')
-  }
-
-  const handleEditSuccess = async () => {
-    setEditModalOpen(false)
-    setSelectedRole(null)
-    await loadData() // Refresh data
-    toast.success('Role updated successfully')
-  }
+    return rolePermissions?.length || 0;
+  };
 
   // Check if user has admin access
   if (!hasAdminAccess) {
@@ -220,13 +214,18 @@ export default function RolesPage() {
               <Shield className="w-4 h-4 text-yellow-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-yellow-900">Access Restricted</h3>
-              <p className="text-yellow-700">You need administrator privileges to manage roles and permissions.</p>
+              <h3 className="text-lg font-semibold text-yellow-900">
+                Access Restricted
+              </h3>
+              <p className="text-yellow-700">
+                You need administrator privileges to manage roles and
+                permissions.
+              </p>
             </div>
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   if (error) {
@@ -238,19 +237,17 @@ export default function RolesPage() {
               <Shield className="w-4 h-4 text-red-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-red-900">Error Loading Roles</h3>
-              <p className="text-red-700">{error}</p>
+              <h3 className="text-lg font-semibold text-red-900">
+                Error Loading Roles
+              </h3>
+              <p className="text-red-700">
+                {error.message || "Failed to load roles and permissions"}
+              </p>
             </div>
           </div>
-          <button
-            onClick={loadData}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-          >
-            Try Again
-          </button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -259,10 +256,15 @@ export default function RolesPage() {
       <div className="mb-8">
         {/* Title */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">Roles & Permissions</h1>
-          <p className="text-gray-600 mt-2">Manage user roles and their permissions for {currentOrganization?.name}</p>
+          <h1 className="text-3xl font-bold text-gray-900">
+            Roles & Permissions
+          </h1>
+          <p className="text-gray-600 mt-2">
+            Manage user roles and their permissions for{" "}
+            {currentOrganization?.name}
+          </p>
         </div>
-        
+
         {/* Search and Create Button Row */}
         <div className="flex items-center justify-between gap-4">
           <div className="relative flex-1 max-w-md">
@@ -271,15 +273,15 @@ export default function RolesPage() {
               type="text"
               placeholder="Search roles..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-10"
             />
           </div>
-          
+
           <div className="flex items-center gap-3">
             {searchTerm && (
               <button
-                onClick={() => setSearchTerm('')}
+                onClick={() => handleSearchChange("")}
                 className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
                 Clear
@@ -310,8 +312,12 @@ export default function RolesPage() {
             <div className="w-12 h-12 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
               <Shield className="h-6 w-6 text-gray-400" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No roles yet</h3>
-            <p className="text-gray-500 mb-4">Create your first role to get started managing permissions.</p>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              No roles yet
+            </h3>
+            <p className="text-gray-500 mb-4">
+              Create your first role to get started managing permissions.
+            </p>
             {canCreateRoles && (
               <button
                 onClick={() => setCreateModalOpen(true)}
@@ -359,7 +365,7 @@ export default function RolesPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {roles.map((role) => (
+                {roles.map((role: Role) => (
                   <tr key={role.id}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
@@ -380,7 +386,7 @@ export default function RolesPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-900">
-                        {role.description || 'No description provided'}
+                        {role.description || "No description provided"}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -388,15 +394,21 @@ export default function RolesPage() {
                         {getPermissionCount(role.permissions || [])} permissions
                       </div>
                       <div className="text-sm text-gray-500">
-                        {role.permissions && role.permissions.length > 0 
-                          ? `${role.permissions.slice(0, 2).map(p => p.module).join(', ')}${role.permissions.length > 2 ? '...' : ''}`
-                          : 'No permissions'
-                        }
+                        {role.permissions && role.permissions.length > 0
+                          ? `${role.permissions
+                              .slice(0, 2)
+                              .map((p) => p.module)
+                              .join(
+                                ", "
+                              )}${role.permissions.length > 2 ? "..." : ""}`
+                          : "No permissions"}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {role.created_at ? new Date(role.created_at).toLocaleDateString() : 'N/A'}
+                        {role.created_at
+                          ? new Date(role.created_at).toLocaleDateString()
+                          : "N/A"}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -445,7 +457,7 @@ export default function RolesPage() {
       <CreateRoleModal
         isOpen={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
-        onSuccess={handleCreateSuccess}
+        onSuccess={() => setCreateModalOpen(false)}
         permissions={permissions}
       />
 
@@ -453,10 +465,13 @@ export default function RolesPage() {
         <EditRoleModal
           isOpen={editModalOpen}
           onClose={() => {
-            setEditModalOpen(false)
-            setSelectedRole(null)
+            setEditModalOpen(false);
+            setSelectedRole(null);
           }}
-          onSuccess={handleEditSuccess}
+          onSuccess={() => {
+            setEditModalOpen(false);
+            setSelectedRole(null);
+          }}
           role={selectedRole}
           permissions={permissions}
         />
@@ -466,17 +481,17 @@ export default function RolesPage() {
         <DeleteConfirmModal
           isOpen={deleteModalOpen}
           onClose={() => {
-            setDeleteModalOpen(false)
-            setRoleToDelete(null)
+            setDeleteModalOpen(false);
+            setRoleToDelete(null);
           }}
           onConfirm={handleDeleteRole}
           title="Delete Role"
           message={`Are you sure you want to delete the "${roleToDelete.display_name || roleToDelete.name}" role? This action cannot be undone and will affect all users with this role.`}
           confirmText="Delete Role"
           type="danger"
-          isLoading={deleteLoading}
+          isLoading={deleteRoleMutation.isPending}
         />
       )}
     </div>
-  )
+  );
 }

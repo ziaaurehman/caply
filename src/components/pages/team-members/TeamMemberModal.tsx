@@ -13,17 +13,13 @@ import {
   ChevronDown,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
-import {
-  teamAPI,
-  type Role,
-  type Permission,
-  type TeamMember,
-} from "@/utils/api";
+import { type Role, type Permission, type TeamMember } from "@/utils/api";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { useAuthStore } from "@/lib/stores/authStore";
 import { useSession } from "next-auth/react";
+import { useRoles, useEmailProvider } from "@/lib/hooks/useTeamMembers";
 
 interface TeamMemberModalProps {
   isOpen: boolean;
@@ -62,14 +58,21 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   onSave,
 }) => {
   const { data: session } = useSession();
-  const [roles, setRoles] = useState<Role[]>([]);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingRoles, setLoadingRoles] = useState(false);
-  const [emailProvider, setEmailProvider] = useState<string | null>(null);
   const [showAllPermissions, setShowAllPermissions] = useState(false);
 
   const { currentOrganization } = useOrganizationStore();
+
+  // React Query hooks
+  const { data: rolesData, isLoading: loadingRoles } = useRoles(
+    currentOrganization?.id || ""
+  );
+
+  const { data: emailProviderData } = useEmailProvider();
+
+  const roles = rolesData?.roles || [];
+  const emailProvider = emailProviderData?.provider || "console";
 
   const isEditingSelf = member?.user_id === session?.user?.id;
   const isAdminEditingSelf = member?.roles.name === "admin" && isEditingSelf;
@@ -94,14 +97,12 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
 
   const watchedRoleId = watch("roleId");
 
-  // Fetch roles on component mount
+  // Reset permissions view when modal opens/closes
   useEffect(() => {
-    if (isOpen && currentOrganization?.id) {
-      fetchRoles();
-      checkEmailProvider();
+    if (isOpen) {
       setShowAllPermissions(false);
     }
-  }, [isOpen, currentOrganization?.id]);
+  }, [isOpen]);
 
   // Update form when member changes
   useEffect(() => {
@@ -130,31 +131,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
     // Reset permissions view when role changes
     setShowAllPermissions(false);
   }, [watchedRoleId, roles]);
-
-  const checkEmailProvider = async () => {
-    try {
-      const data = await teamAPI.getEmailProvider();
-      setEmailProvider(data.provider);
-    } catch (error) {
-      console.error("Error checking email provider:", error);
-      setEmailProvider("console");
-    }
-  };
-
-  const fetchRoles = async () => {
-    if (!currentOrganization?.id) return;
-
-    setLoadingRoles(true);
-    try {
-      const data = await teamAPI.getRoles(currentOrganization.id);
-      console.log("data", data);
-      setRoles(data.roles);
-    } catch (error) {
-      console.error("Error fetching roles:", error);
-    } finally {
-      setLoadingRoles(false);
-    }
-  };
 
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);

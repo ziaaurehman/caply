@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Plus,
   Pencil,
@@ -13,14 +13,12 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
-import Button from "@/components/ui/Button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { formatCurrency } from "@/lib/utils";
 import { useConfirmation } from "@/lib/hooks/useConfirmation";
 import { createDeleteConfirmation } from "@/utils/confirmations";
 import {
-  teamAPI,
   type TeamMember,
   type PendingInvitation,
   type CreateTeamMemberData,
@@ -32,18 +30,19 @@ import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import Pagination from "@/components/ui/Pagination";
 import { Input } from "@/components/ui/Input";
 import { useSession } from "next-auth/react";
+import {
+  useTeamMembers,
+  useCreateTeamMember,
+  useUpdateTeamMember,
+  useDeleteTeamMember,
+  useResendInvitation,
+  useCancelInvitation,
+} from "@/lib/hooks/useTeamMembers";
 
 const TeamMembersPage: React.FC = () => {
   const { data: session } = useSession();
-  const [allMembers, setAllMembers] = useState<TeamMember[]>([]);
-  const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [resendingInvitationId, setResendingInvitationId] = useState<
-    string | null
-  >(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -53,6 +52,29 @@ const TeamMembersPage: React.FC = () => {
   const { confirmation, confirm, handleConfirm, handleClose } =
     useConfirmation();
   const { currentOrganization } = useOrganizationStore();
+
+  // React Query hooks
+  const {
+    data: teamData,
+    isLoading,
+    error,
+    refetch: refetchTeamMembers,
+  } = useTeamMembers(currentOrganization?.id || "", {
+    page: 1,
+    limit: 1000, // Fetch all for client-side filtering
+    status: "active",
+  });
+
+  // Mutations
+  const createTeamMemberMutation = useCreateTeamMember();
+  const updateTeamMemberMutation = useUpdateTeamMember();
+  const deleteTeamMemberMutation = useDeleteTeamMember();
+  const resendInvitationMutation = useResendInvitation();
+  const cancelInvitationMutation = useCancelInvitation();
+
+  // Extract data
+  const allMembers = teamData?.members || [];
+  const invitations = teamData?.invitations || [];
 
   // Client-side filtering
   const filteredMembers = useMemo(() => {
@@ -87,44 +109,12 @@ const TeamMembersPage: React.FC = () => {
   const totalItems = filteredMembers.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage);
 
-  useEffect(() => {
-    if (currentOrganization?.id) {
-      fetchTeamMembers();
-    }
-  }, [currentOrganization?.id]);
-
   // Reset to first page when search term changes
-  useEffect(() => {
+  React.useEffect(() => {
     if (currentPage !== 1) {
       setCurrentPage(1);
     }
   }, [searchTerm]);
-
-  const fetchTeamMembers = async () => {
-    if (!currentOrganization?.id) return;
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // Fetch all members without search parameter
-      const data = await teamAPI.getTeamMembers(currentOrganization.id, {
-        page: 1,
-        limit: 1000, // Fetch all members for client-side filtering
-        status: "active",
-      });
-
-      setAllMembers(data.members || []);
-      setInvitations(data.invitations || []);
-    } catch (error: any) {
-      console.error("Error fetching team members:", error);
-      const errorMessage = error.message || "Failed to connect to server";
-      setError(errorMessage);
-      toast.error(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleEdit = (member: TeamMember) => {
     setSelectedMember(member);
@@ -140,25 +130,16 @@ const TeamMembersPage: React.FC = () => {
       itemType: "Team Member",
       additionalMessage: "will remove all associated data",
       onDelete: async () => {
-        try {
-          if (!currentOrganization?.id) {
-            throw new Error("No organization selected");
-          }
-          await teamAPI.deleteTeamMember(id, currentOrganization.id);
-          await fetchTeamMembers(); // Refresh the list
-        } catch (error: any) {
-          // Handle specific error messages
-          if (error.message.includes("organization owner")) {
-            throw new Error(
-              "Cannot remove organization owner. Please transfer ownership first."
-            );
-          } else if (error.message.includes("Cannot remove yourself")) {
-            throw new Error(
-              "You cannot remove yourself from the organization."
-            );
-          }
-          throw error;
+        if (!currentOrganization?.id) {
+          throw new Error("No organization selected");
         }
+
+        await deleteTeamMemberMutation.mutateAsync({
+          id,
+          organizationId: currentOrganization.id,
+        });
+
+        toast.success("Team member deleted successfully");
       },
     });
 
@@ -171,47 +152,71 @@ const TeamMembersPage: React.FC = () => {
   };
 
   const handleSave = async (data: any) => {
-    try {
-      if (data.id) {
-        // Update existing member
-        if (!currentOrganization?.id) {
-          throw new Error("No organization selected");
-        }
-
-        const updateData: UpdateTeamMemberData & { organizationId: string } = {
-          roleId: data.roleId,
-          department: data.department,
-          hourlyRate: data.hourlyRate,
-          weeklyCapacity: data.weeklyCapacity,
-          organizationId: currentOrganization.id,
-        };
-        await teamAPI.updateTeamMember(data.id, updateData);
-        toast.success("Team member updated successfully");
-      } else {
-        // Create new invitation
-        if (!currentOrganization?.id) {
-          throw new Error("No organization selected");
-        }
-
-        const createData: CreateTeamMemberData & { organizationId: string } = {
-          email: data.email,
-          roleId: data.roleId,
-          department: data.department,
-          hourlyRate: data.hourlyRate,
-          weeklyCapacity: data.weeklyCapacity,
-          message: data.message,
-          organizationId: currentOrganization.id,
-        };
-        await teamAPI.createTeamMember(createData);
-        toast.success("Team member invitation sent successfully");
-      }
-
-      await fetchTeamMembers(); // Refresh the list
-    } catch (error: any) {
-      console.error("Error saving member:", error);
-      toast.error(error.message || "Failed to save team member");
-      throw error; // Re-throw so modal can handle it
+    if (!currentOrganization?.id) {
+      throw new Error("No organization selected");
     }
+
+    if (data.id) {
+      // Update existing member
+      const updateData: UpdateTeamMemberData & { organizationId: string } = {
+        roleId: data.roleId,
+        department: data.department,
+        hourlyRate: data.hourlyRate,
+        weeklyCapacity: data.weeklyCapacity,
+        organizationId: currentOrganization.id,
+      };
+
+      await updateTeamMemberMutation.mutateAsync({
+        id: data.id,
+        data: updateData,
+      });
+      toast.success("Team member updated successfully");
+    } else {
+      // Create new invitation
+      const createData: CreateTeamMemberData & { organizationId: string } = {
+        email: data.email,
+        roleId: data.roleId,
+        department: data.department,
+        hourlyRate: data.hourlyRate,
+        weeklyCapacity: data.weeklyCapacity,
+        message: data.message,
+        organizationId: currentOrganization.id,
+      };
+
+      await createTeamMemberMutation.mutateAsync(createData);
+      toast.success("Team member invitation sent successfully");
+    }
+  };
+
+  const handleResendInvitation = async (invitationId: string) => {
+    if (!currentOrganization?.id) return;
+
+    await resendInvitationMutation.mutateAsync({
+      invitationId,
+      organizationId: currentOrganization.id,
+    });
+
+    toast.success("Invitation resent successfully!");
+  };
+
+  const handleCancelInvitation = async (invitation: PendingInvitation) => {
+    if (!currentOrganization?.id) return;
+
+    confirm(
+      async () => {
+        await cancelInvitationMutation.mutateAsync({
+          invitationId: invitation.id,
+          organizationId: currentOrganization.id,
+        });
+
+        toast.success("Invitation cancelled successfully!");
+      },
+      {
+        title: "Cancel Invitation",
+        message: `Are you sure you want to cancel the invitation for ${invitation.email}?`,
+        type: "danger",
+      }
+    );
   };
 
   const getStatusBadge = (status: string, isActive: boolean) => {
@@ -288,10 +293,10 @@ const TeamMembersPage: React.FC = () => {
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center space-x-2 text-red-600">
               <AlertCircle className="h-5 w-5" />
-              <p>{error}</p>
+              <p>{error.message || "Failed to load team members"}</p>
             </div>
             <button
-              onClick={() => fetchTeamMembers()}
+              onClick={() => refetchTeamMembers()}
               className="mt-4 px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
             >
               Try Again
@@ -388,24 +393,11 @@ const TeamMembersPage: React.FC = () => {
                       {new Date(invitation.expires_at).toLocaleDateString()}
                     </span>
                     <button
-                      onClick={async () => {
-                        setResendingInvitationId(invitation.id);
-                        try {
-                          await teamAPI.resendInvitation(invitation.id);
-                          toast.success("Invitation resent successfully!");
-                        } catch (error: any) {
-                          console.error("Error resending invitation:", error);
-                          toast.error(
-                            error.message || "Failed to resend invitation"
-                          );
-                        } finally {
-                          setResendingInvitationId(null);
-                        }
-                      }}
-                      disabled={resendingInvitationId === invitation.id}
+                      onClick={() => handleResendInvitation(invitation.id)}
+                      disabled={resendInvitationMutation.isPending}
                       className="px-3 py-1 text-xs font-medium text-blue-600 bg-blue-100 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                     >
-                      {resendingInvitationId === invitation.id ? (
+                      {resendInvitationMutation.isPending ? (
                         <>
                           <div className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin" />
                           Resending...
@@ -415,33 +407,9 @@ const TeamMembersPage: React.FC = () => {
                       )}
                     </button>
                     <button
-                      onClick={() => {
-                        confirm(
-                          async () => {
-                            try {
-                              await teamAPI.cancelInvitation(invitation.id);
-                              toast.success(
-                                "Invitation cancelled successfully!"
-                              );
-                              await fetchTeamMembers(); // Refresh the list
-                            } catch (error: any) {
-                              console.error(
-                                "Error cancelling invitation:",
-                                error
-                              );
-                              toast.error(
-                                error.message || "Failed to cancel invitation"
-                              );
-                            }
-                          },
-                          {
-                            title: "Cancel Invitation",
-                            message: `Are you sure you want to cancel the invitation for ${invitation.email}?`,
-                            type: "danger",
-                          }
-                        );
-                      }}
-                      className="px-3 py-1 text-xs font-medium text-red-600 bg-red-100 hover:bg-red-200 rounded transition-colors"
+                      onClick={() => handleCancelInvitation(invitation)}
+                      disabled={cancelInvitationMutation.isPending}
+                      className="px-3 py-1 text-xs font-medium text-red-600 bg-red-100 hover:bg-red-200 rounded transition-colors disabled:opacity-50"
                     >
                       Cancel
                     </button>
@@ -542,9 +510,6 @@ const TeamMembersPage: React.FC = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {paginatedMembers.map((member) => {
                     const isActive = member.users?.is_active || false;
-                    const statusIcon = isActive
-                      ? "border-green-500"
-                      : "border-gray-500";
 
                     // Check if this member is the current user
                     const isCurrentUser =
@@ -633,7 +598,10 @@ const TeamMembersPage: React.FC = () => {
                           </button>
                           <button
                             onClick={() => handleDelete(member.id)}
-                            disabled={isCurrentUser}
+                            disabled={
+                              isCurrentUser ||
+                              deleteTeamMemberMutation.isPending
+                            }
                             className={`${
                               isCurrentUser
                                 ? "text-gray-400 cursor-not-allowed"

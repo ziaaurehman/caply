@@ -5,6 +5,9 @@ import type {
   CreateTeamMemberData,
   UpdateTeamMemberData,
   TeamMembersResponse,
+  Role,
+  RolesResponse,
+  EmailProviderResponse,
 } from "@/utils/api/team";
 
 // Query Keys Factory
@@ -16,6 +19,10 @@ export const teamMemberKeys = {
   details: () => [...teamMemberKeys.all, "detail"] as const,
   detail: (id: string, organizationId: string) =>
     [...teamMemberKeys.details(), id, organizationId] as const,
+  roles: () => [...teamMemberKeys.all, "roles"] as const,
+  rolesByOrg: (organizationId: string) =>
+    [...teamMemberKeys.roles(), organizationId] as const,
+  emailProvider: () => [...teamMemberKeys.all, "emailProvider"] as const,
 };
 
 // Types for filters
@@ -55,6 +62,31 @@ export function useTeamMember(teamMemberId: string, organizationId: string) {
   });
 }
 
+// ===== ROLES =====
+
+export function useRoles(organizationId: string) {
+  return useQuery({
+    queryKey: teamMemberKeys.rolesByOrg(organizationId),
+    queryFn: () => teamAPI.getRoles(organizationId),
+    enabled: !!organizationId,
+    staleTime: 10 * 60 * 1000, // 10 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnWindowFocus: false,
+  });
+}
+
+// ===== EMAIL PROVIDER =====
+
+export function useEmailProvider() {
+  return useQuery({
+    queryKey: teamMemberKeys.emailProvider(),
+    queryFn: () => teamAPI.getEmailProvider(),
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 60 * 60 * 1000, // 1 hour
+    refetchOnWindowFocus: false,
+  });
+}
+
 // ===== MUTATIONS =====
 
 export function useCreateTeamMember() {
@@ -68,12 +100,6 @@ export function useCreateTeamMember() {
       queryClient.invalidateQueries({
         queryKey: teamMemberKeys.list(variables.organizationId),
       });
-
-      // Add the new team member to cache
-      queryClient.setQueryData(
-        teamMemberKeys.detail(data.member.id, variables.organizationId),
-        data
-      );
     },
     onError: (error) => {
       console.error("Failed to create team member:", error);
@@ -94,12 +120,6 @@ export function useUpdateTeamMember() {
     }) => teamAPI.updateTeamMember(id, data),
     onSuccess: (data, variables) => {
       const { id, data: updateData } = variables;
-
-      // Update the specific team member in cache
-      queryClient.setQueryData(
-        teamMemberKeys.detail(id, updateData.organizationId),
-        data
-      );
 
       // Invalidate team members list to reflect changes
       queryClient.invalidateQueries({
@@ -124,12 +144,7 @@ export function useDeleteTeamMember() {
       organizationId: string;
     }) => teamAPI.deleteTeamMember(id, organizationId),
     onSuccess: (_, variables) => {
-      const { id, organizationId } = variables;
-
-      // Remove the team member from cache
-      queryClient.removeQueries({
-        queryKey: teamMemberKeys.detail(id, organizationId),
-      });
+      const { organizationId } = variables;
 
       // Invalidate team members list
       queryClient.invalidateQueries({
@@ -138,6 +153,54 @@ export function useDeleteTeamMember() {
     },
     onError: (error) => {
       console.error("Failed to delete team member:", error);
+    },
+  });
+}
+
+// ===== INVITATION MUTATIONS =====
+
+export function useResendInvitation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      invitationId,
+      organizationId,
+    }: {
+      invitationId: string;
+      organizationId: string;
+    }) => teamAPI.resendInvitation(invitationId),
+    onSuccess: (_, variables) => {
+      // Invalidate team members list to refresh invitation data
+      queryClient.invalidateQueries({
+        queryKey: teamMemberKeys.list(variables.organizationId),
+      });
+    },
+    onError: (error) => {
+      console.error("Failed to resend invitation:", error);
+    },
+  });
+}
+
+export function useCancelInvitation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      invitationId,
+      organizationId,
+    }: {
+      invitationId: string;
+      organizationId: string;
+    }) => teamAPI.cancelInvitation(invitationId),
+    onSuccess: (_, variables) => {
+      // Invalidate team members list to refresh invitation data
+      queryClient.invalidateQueries({
+        queryKey: teamMemberKeys.list(variables.organizationId),
+      });
+    },
+    onError: (error) => {
+      console.error("Failed to cancel invitation:", error);
     },
   });
 }
