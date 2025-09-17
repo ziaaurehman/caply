@@ -36,7 +36,12 @@ import CardDetailModal from "./CardDetailModal";
 // import BoardSettingsModal from "./BoardSettingsModal"
 import KanbanSkeleton from "./KanbanSkeleton";
 import AddListModal from "./AddListModal";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 interface KanbanPageProps {
   projectId: string;
@@ -144,9 +149,34 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     })) || [];
 
   // Add individual card queries for each list
-  const cardQueries = listsWithCards.map((list) => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    return useQuery({
+  // const cardQueries = listsWithCards.map((list) => {
+  //   // eslint-disable-next-line react-hooks/rules-of-hooks
+  //   return useQuery({
+  //     queryKey: [
+  //       "kanban-cards",
+  //       list.id,
+  //       currentOrganization?.id,
+  //       searchTerm,
+  //       showArchived,
+  //     ],
+  //     queryFn: async () => {
+  //       if (!currentOrganization?.id) throw new Error("No organization");
+  //       const response = await kanbanAPI.getCardsByList(
+  //         list.id,
+  //         currentOrganization.id,
+  //         searchTerm,
+  //         showArchived
+  //       );
+  //       return response.cards;
+  //     },
+  //     enabled: !!list.id && !!currentOrganization?.id,
+  //     staleTime: 1 * 60 * 1000, // 1 minute
+  //     gcTime: 3 * 60 * 1000, // 3 minutes
+  //   });
+  // });
+
+  const cardQueries = useQueries({
+    queries: listsWithCards.map((list) => ({
       queryKey: [
         "kanban-cards",
         list.id,
@@ -167,7 +197,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       enabled: !!list.id && !!currentOrganization?.id,
       staleTime: 1 * 60 * 1000, // 1 minute
       gcTime: 3 * 60 * 1000, // 3 minutes
-    });
+    })),
   });
 
   // Combine lists with their cards
