@@ -36,12 +36,6 @@ import CardDetailModal from "./CardDetailModal";
 // import BoardSettingsModal from "./BoardSettingsModal"
 import KanbanSkeleton from "./KanbanSkeleton";
 import AddListModal from "./AddListModal";
-import {
-  useMutation,
-  useQueries,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
 
 interface KanbanPageProps {
   projectId: string;
@@ -54,158 +48,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     fetchUserOrganizations,
     userOrganizations,
   } = useOrganizationStore();
-  const queryClient = useQueryClient();
-
-  // Replace project data fetching with React Query
-  const {
-    data: projectData,
-    isLoading: projectLoading,
-    error: projectError,
-  } = useQuery({
-    queryKey: ["project", projectId, currentOrganization?.id],
-    queryFn: async () => {
-      if (!currentOrganization?.id) throw new Error("No organization");
-      const response = await projectAPI.getProject(
-        projectId,
-        currentOrganization.id
-      );
-      return response.project;
-    },
-    enabled: !!projectId && !!currentOrganization?.id,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
-  });
-
-  // Extract project members and name from the query data
-  const projectMembers: ProjectMember[] =
-    projectData?.project_members?.map((pm) => ({
-      id: pm.id,
-      organization_member_id: pm.organization_member_id,
-      role: pm.role,
-      joined_at: pm.joined_at,
-      organization_members: pm.organization_members,
-    })) || [];
-
-  const projectName = projectData?.name || "";
-
-  // Replace boards data fetching with React Query
-  const {
-    data: boardsData,
-    isLoading: boardsLoading,
-    error: boardsError,
-  } = useQuery({
-    queryKey: ["kanban-boards", projectId, currentOrganization?.id],
-    queryFn: async () => {
-      if (!currentOrganization?.id) throw new Error("No organization");
-      const response = await kanbanAPI.getBoards(
-        projectId,
-        currentOrganization.id
-      );
-      return response.boards;
-    },
-    enabled:
-      !!projectId && !!currentOrganization?.id && !!projectData?.kanban_enabled,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
-  });
-
-  const currentBoard = boardsData?.[0] || null;
-
-  const [showArchived, setShowArchived] = useState<boolean>(false);
-
-  // Replace lists data fetching with React Query
-  const {
-    data: listsData,
-    isLoading: listsLoading,
-    error: listsError,
-  } = useQuery({
-    queryKey: [
-      "kanban-lists",
-      currentBoard?.id,
-      currentOrganization?.id,
-      showArchived,
-    ],
-    queryFn: async () => {
-      if (!currentBoard?.id || !currentOrganization?.id)
-        throw new Error("Missing board or organization");
-      const response = await kanbanAPI.getLists(
-        currentBoard.id,
-        currentOrganization.id,
-        showArchived
-      );
-      return response.lists;
-    },
-    enabled: !!currentBoard?.id && !!currentOrganization?.id,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  // Process lists with cards loading state
-  const listsWithCards =
-    listsData?.map((list) => ({
-      ...list,
-      cards: [], // Will be populated by individual card queries
-      isLoadingCards: true,
-    })) || [];
-
-  // Add individual card queries for each list
-  // const cardQueries = listsWithCards.map((list) => {
-  //   // eslint-disable-next-line react-hooks/rules-of-hooks
-  //   return useQuery({
-  //     queryKey: [
-  //       "kanban-cards",
-  //       list.id,
-  //       currentOrganization?.id,
-  //       searchTerm,
-  //       showArchived,
-  //     ],
-  //     queryFn: async () => {
-  //       if (!currentOrganization?.id) throw new Error("No organization");
-  //       const response = await kanbanAPI.getCardsByList(
-  //         list.id,
-  //         currentOrganization.id,
-  //         searchTerm,
-  //         showArchived
-  //       );
-  //       return response.cards;
-  //     },
-  //     enabled: !!list.id && !!currentOrganization?.id,
-  //     staleTime: 1 * 60 * 1000, // 1 minute
-  //     gcTime: 3 * 60 * 1000, // 3 minutes
-  //   });
-  // });
-
-  const cardQueries = useQueries({
-    queries: listsWithCards.map((list) => ({
-      queryKey: [
-        "kanban-cards",
-        list.id,
-        currentOrganization?.id,
-        searchTerm,
-        showArchived,
-      ],
-      queryFn: async () => {
-        if (!currentOrganization?.id) throw new Error("No organization");
-        const response = await kanbanAPI.getCardsByList(
-          list.id,
-          currentOrganization.id,
-          searchTerm,
-          showArchived
-        );
-        return response.cards;
-      },
-      enabled: !!list.id && !!currentOrganization?.id,
-      staleTime: 1 * 60 * 1000, // 1 minute
-      gcTime: 3 * 60 * 1000, // 3 minutes
-    })),
-  });
-
-  // Combine lists with their cards
-  const listsWithCardsData = listsWithCards.map((list, index) => ({
-    ...list,
-    cards: cardQueries[index]?.data || [],
-    isLoadingCards: cardQueries[index]?.isLoading || false,
-  }));
 
   // Main state
   const [kanbanState, setKanbanState] = useState<KanbanState>({
@@ -216,198 +58,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     error: null,
   });
 
-  // Add update board mutation
-  const updateBoardMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const response = await kanbanAPI.updateBoard(id, data);
-      return response.board;
-    },
-    onSuccess: (updatedBoard) => {
-      // Update the board in cache
-      queryClient.setQueryData(
-        ["kanban-boards", projectId, currentOrganization?.id],
-        (oldBoards: Board[] = []) =>
-          oldBoards.map((board) =>
-            board.id === updatedBoard.id ? updatedBoard : board
-          )
-      );
-
-      toast.success("Board updated successfully!");
-    },
-    onError: (error) => {
-      console.error("Error updating board:", error);
-      toast.error("Failed to update board");
-    },
-  });
-
-  // Add create list mutation
-  const createListMutation = useMutation({
-    mutationFn: async (data: {
-      board_id: string;
-      name: string;
-      organizationId: string;
-    }) => {
-      const response = await kanbanAPI.createList(data);
-      return response.list;
-    },
-    onSuccess: (newList) => {
-      // Invalidate and refetch lists
-      queryClient.invalidateQueries({
-        queryKey: [
-          "kanban-lists",
-          currentBoard?.id,
-          currentOrganization?.id,
-          showArchived,
-        ],
-      });
-
-      toast.success("List created successfully!");
-    },
-    onError: (error) => {
-      console.error("Error creating list:", error);
-      toast.error("Failed to create list");
-    },
-  });
-
-  // Add update list mutation
-  const updateListMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const response = await kanbanAPI.updateList(id, data);
-      return response.list;
-    },
-    onSuccess: (updatedList) => {
-      // Update the list in cache
-      queryClient.setQueryData(
-        [
-          "kanban-lists",
-          currentBoard?.id,
-          currentOrganization?.id,
-          showArchived,
-        ],
-        (oldLists: List[] = []) =>
-          oldLists.map((list) =>
-            list.id === updatedList.id ? updatedList : list
-          )
-      );
-
-      toast.success("List updated successfully!");
-    },
-    onError: (error) => {
-      console.error("Error updating list:", error);
-      toast.error("Failed to update list");
-    },
-  });
-
-  // Add create card mutation
-  const createCardMutation = useMutation({
-    mutationFn: async (data: {
-      list_id: string;
-      title: string;
-      description?: string;
-      due_date?: string;
-      cover_color?: string;
-      organizationId: string;
-    }) => {
-      const response = await kanbanAPI.createCard(data);
-      return response.card;
-    },
-    onSuccess: (newCard, variables) => {
-      // Invalidate cards for the specific list
-      queryClient.invalidateQueries({
-        queryKey: [
-          "kanban-cards",
-          variables.list_id,
-          currentOrganization?.id,
-          searchTerm,
-          showArchived,
-        ],
-      });
-
-      toast.success("Card created successfully!");
-    },
-    onError: (error) => {
-      console.error("Error creating card:", error);
-      toast.error("Failed to create card");
-    },
-  });
-
-  // Add update card mutation
-  const updateCardMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: any }) => {
-      const response = await kanbanAPI.updateCard(id, data);
-      return response.card;
-    },
-    onSuccess: (updatedCard) => {
-      // Invalidate all card queries to refresh the data
-      queryClient.invalidateQueries({
-        queryKey: ["kanban-cards"],
-      });
-
-      toast.success("Card updated successfully!");
-    },
-    onError: (error) => {
-      console.error("Error updating card:", error);
-      toast.error("Failed to update card");
-    },
-  });
-
-  // Update board background function
-  const updateBoardBackground = async (
-    backgroundType: "image" | "color",
-    value: string
-  ) => {
-    if (!currentBoard || !currentOrganization?.id) return;
-
-    const updateData =
-      backgroundType === "image"
-        ? { background_image: value, background_color: undefined }
-        : { background_color: value, background_image: undefined };
-
-    updateBoardMutation.mutate({
-      id: currentBoard.id,
-      data: {
-        ...updateData,
-        organizationId: currentOrganization.id,
-      },
-    });
-  };
-
-  // Update loading states
-  const isLoading =
-    projectLoading ||
-    boardsLoading ||
-    listsLoading ||
-    cardQueries.some((query) => query.isLoading);
-  const hasError =
-    projectError ||
-    boardsError ||
-    listsError ||
-    cardQueries.some((query) => query.error);
-
-  // Update handleSaveList function
-  const handleSaveList = async (listName: string) => {
-    if (!currentBoard || !currentOrganization?.id) return;
-
-    createListMutation.mutate({
-      board_id: currentBoard.id,
-      name: listName,
-      organizationId: currentOrganization.id,
-    });
-  };
-
-  // Update handleSaveCard function
-  const handleSaveCard = async (listId: string, cardData: any) => {
-    if (!currentOrganization?.id) return;
-
-    createCardMutation.mutate({
-      list_id: listId,
-      title: cardData.title,
-      description: cardData.description,
-      due_date: cardData.due_date,
-      cover_color: cardData.cover_color,
-      organizationId: currentOrganization.id,
-    });
-  };
+  // Project data
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  const [projectName, setProjectName] = useState<string>("");
 
   const [isAddListModalOpen, setIsAddListModalOpen] = useState(false);
 
@@ -421,6 +74,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // Search state
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [showArchived, setShowArchived] = useState<boolean>(false);
 
   const [cardModal, setCardModal] = useState<CardModalState>({
     isOpen: false,
@@ -441,6 +95,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const listReorderAbortControllerRef = useRef<AbortController | null>(null);
   const [isListReordering, setIsListReordering] = useState(false);
   const loadingRequestsRef = useRef<Set<string>>(new Set());
+  const [creatingCardForList, setCreatingCardForList] = useState<string | null>(
+    null
+  );
 
   // List Drag & Drop State
   const [listDragState, setListDragState] = useState<{
@@ -625,7 +282,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         currentOrganization.id
       );
       const project = projectResponse.project;
-      // setProjectName(project.name);
+      setProjectName(project.name);
 
       // Map project members to the format expected by Kanban components
       const members =
@@ -636,7 +293,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           joined_at: pm.joined_at,
           organization_members: pm.organization_members,
         })) || [];
-      // setProjectMembers(members);
+      setProjectMembers(members);
 
       // Check if Kanban is enabled for this project
       if (!project.kanban_enabled) {
@@ -917,39 +574,39 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   );
 
   // Board management
-  // const updateBoardBackground = async (
-  //   backgroundType: "image" | "color",
-  //   value: string
-  // ) => {
-  //   if (!kanbanState.currentBoard || !currentOrganization?.id) return;
+  const updateBoardBackground = async (
+    backgroundType: "image" | "color",
+    value: string
+  ) => {
+    if (!kanbanState.currentBoard || !currentOrganization?.id) return;
 
-  //   try {
-  //     const updateData =
-  //       backgroundType === "image"
-  //         ? { background_image: value, background_color: undefined }
-  //         : { background_color: value, background_image: undefined };
+    try {
+      const updateData =
+        backgroundType === "image"
+          ? { background_image: value, background_color: undefined }
+          : { background_color: value, background_image: undefined };
 
-  //     const updatedBoard = await kanbanAPI.updateBoard(
-  //       kanbanState.currentBoard.id,
-  //       {
-  //         ...updateData,
-  //         organizationId: currentOrganization.id,
-  //       }
-  //     );
+      const updatedBoard = await kanbanAPI.updateBoard(
+        kanbanState.currentBoard.id,
+        {
+          ...updateData,
+          organizationId: currentOrganization.id,
+        }
+      );
 
-  //     setKanbanState((prev) => ({
-  //       ...prev,
-  //       currentBoard: updatedBoard.board,
-  //       boards: prev.boards.map((board) =>
-  //         board.id === updatedBoard.board.id ? updatedBoard.board : board
-  //       ),
-  //     }));
+      setKanbanState((prev) => ({
+        ...prev,
+        currentBoard: updatedBoard.board,
+        boards: prev.boards.map((board) =>
+          board.id === updatedBoard.board.id ? updatedBoard.board : board
+        ),
+      }));
 
-  //     setBackgroundDropdownOpen(false);
-  //   } catch (error) {
-  //     console.error("Error updating board background:", error);
-  //   }
-  // };
+      setBackgroundDropdownOpen(false);
+    } catch (error) {
+      console.error("Error updating board background:", error);
+    }
+  };
 
   useEffect(() => {
     dragStateRef.current = listDragState;
@@ -1457,71 +1114,71 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     setIsAddListModalOpen(true);
   };
 
-  // const handleSaveList = async (listName: string) => {
-  //   if (!kanbanState.currentBoard || !currentOrganization?.id) return;
+  const handleSaveList = async (listName: string) => {
+    if (!kanbanState.currentBoard || !currentOrganization?.id) return;
 
-  //   // Store original state for potential rollback
-  //   const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
+    // Store original state for potential rollback
+    const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
 
-  //   try {
-  //     // Create a temporary list for optimistic update
-  //     const tempList = {
-  //       id: `temp-${Date.now()}`, // Temporary ID
-  //       board_id: kanbanState.currentBoard.id,
-  //       name: listName,
-  //       position: kanbanState.lists.length,
-  //       is_archived: false,
-  //       created_at: new Date().toISOString(),
-  //       updated_at: new Date().toISOString(),
-  //       cards: [],
-  //     };
+    try {
+      // Create a temporary list for optimistic update
+      const tempList = {
+        id: `temp-${Date.now()}`, // Temporary ID
+        board_id: kanbanState.currentBoard.id,
+        name: listName,
+        position: kanbanState.lists.length,
+        is_archived: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        cards: [],
+      };
 
-  //     // OPTIMISTIC UPDATE: Add the temporary list immediately
-  //     setKanbanState((prev) => ({
-  //       ...prev,
-  //       lists: [...prev.lists, tempList],
-  //     }));
+      // OPTIMISTIC UPDATE: Add the temporary list immediately
+      setKanbanState((prev) => ({
+        ...prev,
+        lists: [...prev.lists, tempList],
+      }));
 
-  //     // Make API call in the background
-  //     setTimeout(async () => {
-  //       try {
-  //         const response = await kanbanAPI.createList({
-  //           board_id: kanbanState.currentBoard!.id,
-  //           name: listName,
-  //           organizationId: currentOrganization.id,
-  //         });
+      // Make API call in the background
+      setTimeout(async () => {
+        try {
+          const response = await kanbanAPI.createList({
+            board_id: kanbanState.currentBoard!.id,
+            name: listName,
+            organizationId: currentOrganization.id,
+          });
 
-  //         // Replace the temporary list with the real one
-  //         setKanbanState((prev) => ({
-  //           ...prev,
-  //           lists: prev.lists.map((list) =>
-  //             list.id === tempList.id ? response.list : list
-  //           ),
-  //         }));
+          // Replace the temporary list with the real one
+          setKanbanState((prev) => ({
+            ...prev,
+            lists: prev.lists.map((list) =>
+              list.id === tempList.id ? response.list : list
+            ),
+          }));
 
-  //         toast.success("List created successfully!");
-  //       } catch (error) {
-  //         console.error("Error creating list:", error);
-  //         toast.error("Failed to create list");
+          toast.success("List created successfully!");
+        } catch (error) {
+          console.error("Error creating list:", error);
+          toast.error("Failed to create list");
 
-  //         // ROLLBACK: Remove the temporary list
-  //         setKanbanState((prev) => ({
-  //           ...prev,
-  //           lists: originalLists,
-  //         }));
-  //       }
-  //     }, 0);
-  //   } catch (error) {
-  //     console.error("Error in add list logic:", error);
-  //     toast.error("Failed to create list");
+          // ROLLBACK: Remove the temporary list
+          setKanbanState((prev) => ({
+            ...prev,
+            lists: originalLists,
+          }));
+        }
+      }, 0);
+    } catch (error) {
+      console.error("Error in add list logic:", error);
+      toast.error("Failed to create list");
 
-  //     // ROLLBACK: Revert the optimistic update on failure
-  //     setKanbanState((prev) => ({
-  //       ...prev,
-  //       lists: originalLists,
-  //     }));
-  //   }
-  // };
+      // ROLLBACK: Revert the optimistic update on failure
+      setKanbanState((prev) => ({
+        ...prev,
+        lists: originalLists,
+      }));
+    }
+  };
 
   useEffect(() => {
     const handleGlobalDragEnd = (e: DragEvent) => {
@@ -1640,59 +1297,59 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     setIsAddTaskModalOpen(true);
   };
 
-  // const handleSaveCard = async (listId: string, cardData: any) => {
-  //   if (!currentOrganization?.id) return;
+  const handleSaveCard = async (listId: string, cardData: any) => {
+    if (!currentOrganization?.id) return;
 
-  //   try {
-  //     // Set loading state for this specific list
-  //     // setCreatingCardForList(listId);
+    try {
+      // Set loading state for this specific list
+      // setCreatingCardForList(listId);
 
-  //     // Create the card via API
-  //     const newCard = await kanbanAPI.createCard({
-  //       list_id: listId,
-  //       title: cardData.title,
-  //       description: cardData.description,
-  //       due_date: cardData.due_date,
-  //       cover_color: cardData.cover_color,
-  //       organizationId: currentOrganization.id,
-  //     });
+      // Create the card via API
+      const newCard = await kanbanAPI.createCard({
+        list_id: listId,
+        title: cardData.title,
+        description: cardData.description,
+        due_date: cardData.due_date,
+        cover_color: cardData.cover_color,
+        organizationId: currentOrganization.id,
+      });
 
-  //     // Assign members to the card if any were selected
-  //     if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
-  //       for (const projectMemberId of cardData.assignee_ids) {
-  //         await kanbanAPI.assignCardMember(
-  //           newCard.card.id,
-  //           projectMemberId,
-  //           currentOrganization.id
-  //         );
-  //       }
-  //     }
+      // Assign members to the card if any were selected
+      if (cardData.assignee_ids && cardData.assignee_ids.length > 0) {
+        for (const projectMemberId of cardData.assignee_ids) {
+          await kanbanAPI.assignCardMember(
+            newCard.card.id,
+            projectMemberId,
+            currentOrganization.id
+          );
+        }
+      }
 
-  //     // Add the real card to the state
-  //     setKanbanState((prev) => ({
-  //       ...prev,
-  //       lists: prev.lists.map((list) =>
-  //         list.id === listId
-  //           ? {
-  //               ...list,
-  //               cards: [...(list.cards || []), newCard.card],
-  //               isLoadingCards: false, // Ensure loading state is cleared
-  //             }
-  //           : list
-  //       ),
-  //     }));
+      // Add the real card to the state
+      setKanbanState((prev) => ({
+        ...prev,
+        lists: prev.lists.map((list) =>
+          list.id === listId
+            ? {
+                ...list,
+                cards: [...(list.cards || []), newCard.card],
+                isLoadingCards: false, // Ensure loading state is cleared
+              }
+            : list
+        ),
+      }));
 
-  //     setIsAddTaskModalOpen(false);
+      setIsAddTaskModalOpen(false);
 
-  //     toast.success("Card created successfully!");
-  //   } catch (error) {
-  //     console.error("Error creating card:", error);
-  //     toast.error("Failed to create card");
-  //   } finally {
-  //     // Clear loading state
-  //     // setCreatingCardForList(null);
-  //   }
-  // };
+      toast.success("Card created successfully!");
+    } catch (error) {
+      console.error("Error creating card:", error);
+      toast.error("Failed to create card");
+    } finally {
+      // Clear loading state
+      // setCreatingCardForList(null);
+    }
+  };
 
   const handleCardClick = (card: Card) => {
     // Ensure card has the expected structure and remove any unexpected properties
@@ -1775,11 +1432,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     return <KanbanSkeleton />;
   }
 
-  if (isLoading) {
+  if (kanbanState.isLoading) {
     return <KanbanSkeleton />;
   }
 
-  if (hasError || !projectData?.kanban_enabled) {
+  if (kanbanState.error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center max-w-md mx-auto">
@@ -1787,11 +1444,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             <h3 className="text-lg font-semibold text-red-800 mb-2">
               Error Loading Board
             </h3>
-            <p className="text-red-600 mb-4">
-              {!projectData?.kanban_enabled
-                ? "Kanban board is not enabled for this project"
-                : "Failed to load Kanban board"}
-            </p>
+            <p className="text-red-600 mb-4">{kanbanState.error}</p>
             <button
               onClick={() => initializeKanbanData()}
               className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
@@ -1812,10 +1465,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           <div className="flex justify-between items-center mb-6">
             <div>
               <h1 className="text-2xl font-semibold text-gray-800">
-                {currentBoard?.name || projectName}
+                {kanbanState.currentBoard?.name || projectName}
               </h1>
               <p className="text-sm text-gray-500">
-                {currentBoard?.description || "Manage tasks with Kanban board"}
+                {kanbanState.currentBoard?.description ||
+                  "Manage tasks with Kanban board"}
               </p>
             </div>
 
@@ -1831,6 +1485,23 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   className="pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
+
+              {/* Show Archived Toggle */}
+              {/* <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="showArchived"
+                  checked={showArchived}
+                  onChange={(e) => setShowArchived(e.target.checked)}
+                  className="w-4 h-4 text-orange-600 bg-gray-100 border-gray-300 rounded focus:ring-orange-500 focus:ring-2"
+                />
+                <label
+                  htmlFor="showArchived"
+                  className="text-sm font-medium text-gray-700"
+                >
+                  Show Archived
+                </label>
+              </div> */}
 
               {/* Assignee Filter */}
               <div className="relative">
@@ -1989,7 +1660,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           {/* Backdrop overlay */}
           <div className="absolute inset-0 rounded-lg bg-black/10 backdrop-blur-sm"></div>
 
-          {/* <div
+          <div
             onDrop={(e) => {
               console.log("Drop on container - resetting drag state");
             }}
@@ -2027,47 +1698,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               </div>
             ))}
 
-            <button
-              onClick={handleAddList}
-              className="flex-shrink-0 w-80 bg-gray-200/80 backdrop-blur-sm rounded-lg p-4 flex items-center justify-center text-gray-700 hover:bg-gray-300/80 transition-colors duration-200"
-            >
-              <Plus className="h-5 w-5 mr-2" />
-              Add another list
-            </button>
-          </div> */}
-          <div className="flex overflow-x-auto pb-4 gap-6 px-8 relative z-10 min-h-[500px] items-start w-full">
-            {listsWithCardsData.map((list) => (
-              <div
-                key={list.id}
-                data-list-id={list.id}
-                className="flex-shrink-0"
-              >
-                <KanbanColumn
-                  list={list}
-                  cards={getFilteredCards(list.cards || [])}
-                  projectMembers={projectMembers}
-                  isLoadingCards={list.isLoadingCards}
-                  onDragStart={handleDragStart}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  onAddCard={handleAddCard}
-                  onCardClick={handleCardClick}
-                  onListDragStart={handleListDragStart}
-                  onListDragOver={handleListDragOver}
-                  onListDragLeave={handleListDragLeave}
-                  onListDrop={handleListDrop}
-                  onListArchive={handleListArchive}
-                  onCardDragOver={handleCardDragOver}
-                  onCardDragLeave={handleCardDragLeave}
-                  onCardDrop={handleCardDrop}
-                  isDraggedOver={listDragState.dragOverListId === list.id}
-                  isBeingDragged={listDragState.draggedListId === list.id}
-                  draggedCardId={cardDragState.draggedCardId}
-                  dragOverCardId={cardDragState.dragOverCardId}
-                />
-              </div>
-            ))}
-
+            {/* Add List Button */}
             <button
               onClick={handleAddList}
               className="flex-shrink-0 w-80 bg-gray-200/80 backdrop-blur-sm rounded-lg p-4 flex items-center justify-center text-gray-700 hover:bg-gray-300/80 transition-colors duration-200"
@@ -2094,7 +1725,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         onSave={handleSaveList}
       />
 
-      {cardModal.isOpen && cardModal.card && currentBoard && (
+      {cardModal.isOpen && cardModal.card && kanbanState.currentBoard && (
         <CardDetailModal
           card={cardModal.card}
           isOpen={cardModal.isOpen}
@@ -2103,17 +1734,71 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           }
           projectMembers={projectMembers}
           organizationId={currentOrganization?.id || ""}
-          boardId={currentBoard.id}
+          boardId={kanbanState.currentBoard.id}
           projectId={projectId}
           onCardUpdate={(updatedCard: Card) => {
+            // Update the card in the current state
+            setKanbanState((prev) => ({
+              ...prev,
+              lists: prev.lists.map((list) => ({
+                ...list,
+                cards:
+                  list.cards?.map((card) =>
+                    card.id === updatedCard.id ? updatedCard : card
+                  ) || [],
+              })),
+            }));
+
+            // If card was archived and we're not showing archived items,
+            // close the modal and don't reload (card will be filtered out by getFilteredCards)
             if (updatedCard.is_archived && !showArchived) {
               setCardModal({ isOpen: false, card: null, mode: "view" });
               toast.success("Card archived and removed from view");
               return;
             }
+
+            // If card was unarchived and we're showing archived items,
+            // show success message but keep modal open
+            if (
+              !updatedCard.is_archived &&
+              updatedCard.is_archived !== cardModal.card?.is_archived
+            ) {
+              toast.success("Card unarchived successfully!");
+            }
           }}
         />
       )}
+
+      {/* TODO: Implement board settings modal
+      {boardSettingsOpen && kanbanState.currentBoard && (
+        <BoardSettingsModal
+          board={kanbanState.currentBoard}
+          isOpen={boardSettingsOpen}
+          onClose={() => setBoardSettingsOpen(false)}
+          onBoardUpdate={(updatedBoard: Board) => {
+            setKanbanState(prev => ({
+              ...prev,
+              currentBoard: updatedBoard,
+              boards: prev.boards.map(board =>
+                board.id === updatedBoard.id ? updatedBoard : board
+              )
+            }));
+          }}
+        />
+      )}
+      */}
     </div>
   );
 }
+
+// "use client";
+
+// import KanbanBoardOptimized from "./KanbanBoardOptimized";
+
+// interface KanbanPageProps {
+//   projectId: string;
+// }
+
+// export default function KanbanBoard({ projectId }: KanbanPageProps) {
+//   return <KanbanBoardOptimized projectId={projectId} />;
+// }
