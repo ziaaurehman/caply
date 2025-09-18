@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { kanbanAPI } from "@/utils/api/kanban";
-import { projectAPI } from "@/utils/api/project";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import KanbanColumn from "./KanbanColumn";
 import AddTaskModal from "./AddTaskModal";
@@ -29,10 +28,10 @@ import {
 } from "./types";
 import { useKanbanBoard } from "@/lib/hooks/useKanbanBoard";
 
-// Temporarily remove problematic imports for now
 import CardDetailModal from "./CardDetailModal";
 import KanbanSkeleton from "./KanbanSkeleton";
 import AddListModal from "./AddListModal";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface KanbanPageProps {
   projectId: string;
@@ -45,6 +44,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     fetchUserOrganizations,
     userOrganizations,
   } = useOrganizationStore();
+  const queryClient = useQueryClient();
 
   // Main state
   const [kanbanState, setKanbanState] = useState<KanbanState>({
@@ -54,10 +54,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     isLoading: false,
     error: null,
   });
-
-  // Project data
-  // const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
-  // const [projectName, setProjectName] = useState<string>("");
 
   const [isAddListModalOpen, setIsAddListModalOpen] = useState(false);
 
@@ -91,10 +87,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const listReorderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const listReorderAbortControllerRef = useRef<AbortController | null>(null);
   const [isListReordering, setIsListReordering] = useState(false);
-  const loadingRequestsRef = useRef<Set<string>>(new Set());
-  const [creatingCardForList, setCreatingCardForList] = useState<string | null>(
-    null
-  );
 
   const {
     data: boardData,
@@ -215,7 +207,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     { type: "color", value: "#1e293b", name: "Dark Gray" },
   ];
 
-  0; // Initialize organization store if needed
   useEffect(() => {
     if (!organizationLoading && userOrganizations.length === 0) {
       fetchUserOrganizations();
