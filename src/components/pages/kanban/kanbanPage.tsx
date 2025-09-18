@@ -27,6 +27,7 @@ import {
   CardModalState,
   BackgroundOption,
 } from "./types";
+import { useKanbanBoard } from "@/lib/hooks/useKanbanBoard";
 
 // Temporarily remove problematic imports for now
 import CardDetailModal from "./CardDetailModal";
@@ -50,13 +51,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     boards: [],
     currentBoard: null,
     lists: [],
-    isLoading: true,
+    isLoading: false,
     error: null,
   });
 
   // Project data
-  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
-  const [projectName, setProjectName] = useState<string>("");
+  // const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  // const [projectName, setProjectName] = useState<string>("");
 
   const [isAddListModalOpen, setIsAddListModalOpen] = useState(false);
 
@@ -94,6 +95,57 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const [creatingCardForList, setCreatingCardForList] = useState<string | null>(
     null
   );
+
+  const {
+    data: boardData,
+    isLoading: boardLoading,
+    isError: boardError,
+    error: boardErrorMessage,
+    refetch: refetchBoard,
+
+    // Derived data
+    project,
+    boards,
+    currentBoard,
+    lists,
+    cards,
+    labels,
+    projectMembers,
+    projectName,
+
+    // Optimistic updates
+    optimisticUpdateCard,
+    optimisticMoveCard,
+    optimisticAddCard,
+    optimisticDeleteCard,
+    invalidateBoard,
+  } = useKanbanBoard(projectId, currentOrganization?.id, {
+    includeArchived: showArchived,
+    search: searchTerm,
+  });
+
+  useEffect(() => {
+    if (boardData) {
+      setKanbanState({
+        boards: boards,
+        currentBoard: currentBoard || null,
+        lists: lists,
+        isLoading: false,
+        error: null,
+      });
+    }
+  }, [boardData, boards, currentBoard, lists]);
+
+  // Handle loading and error states
+  useEffect(() => {
+    setKanbanState((prev) => ({
+      ...prev,
+      isLoading: boardLoading,
+      error: boardError
+        ? boardErrorMessage?.message || "Failed to load board data"
+        : null,
+    }));
+  }, [boardLoading, boardError, boardErrorMessage]);
 
   // List Drag & Drop State
   const [listDragState, setListDragState] = useState<{
@@ -278,7 +330,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         currentOrganization.id
       );
       const project = projectResponse.project;
-      setProjectName(project.name);
+      // setProjectName(project.name);
 
       // Map project members to the format expected by Kanban components
       const members =
@@ -289,7 +341,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           joined_at: pm.joined_at,
           organization_members: pm.organization_members,
         })) || [];
-      setProjectMembers(members);
+      // setProjectMembers(members);
 
       // Check if Kanban is enabled for this project
       if (!project.kanban_enabled) {
@@ -327,8 +379,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           lists: [], // Empty lists initially
         }));
 
-        // Load board data progressively
-        loadBoardData(newBoard.board.id);
+        refetchBoard();
       } else {
         // Use the first board - show it immediately
         const currentBoard = boards[0];
@@ -340,8 +391,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           lists: [], // Empty lists initially
         }));
 
-        // Load board data progressively
-        loadBoardData(currentBoard.id);
+        refetchBoard();
       }
     } catch (error) {
       console.error("Error initializing Kanban data:", error);
@@ -354,7 +404,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             : "Failed to load Kanban board",
       }));
     }
-  }, [projectId, currentOrganization?.id, loadBoardData]);
+  }, [projectId, currentOrganization?.id, refetchBoard]);
 
   // Initialize organization store if needed
   useEffect(() => {
@@ -364,11 +414,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
 
   // Initialize kanban data when organization is ready
-  useEffect(() => {
-    if (currentOrganization?.id) {
-      initializeKanbanData();
-    }
-  }, [initializeKanbanData, currentOrganization?.id]);
+  // useEffect(() => {
+  //   if (currentOrganization?.id) {
+  //     initializeKanbanData();
+  //   }
+  // }, [initializeKanbanData, currentOrganization?.id]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -383,13 +433,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Reload board data when showArchived changes
-  useEffect(() => {
-    if (kanbanState.currentBoard) {
-      loadBoardData(kanbanState.currentBoard.id);
-    }
-  }, [showArchived, kanbanState.currentBoard, loadBoardData]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent, card: Card) => {
@@ -593,9 +636,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       setKanbanState((prev) => ({
         ...prev,
         currentBoard: updatedBoard.board,
-        boards: prev.boards.map((board) =>
-          board.id === updatedBoard.board.id ? updatedBoard.board : board
-        ),
+        // boards: prev.boards.map((board) =>
+        //   board.id === updatedBoard.board.id ? updatedBoard.board : board
+        // ),
       }));
 
       setBackgroundDropdownOpen(false);
@@ -1424,15 +1467,22 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   };
 
   // Show loading while organization is loading or not loaded
-  if (organizationLoading || !currentOrganization?.id) {
-    return <KanbanSkeleton />;
+  if (organizationLoading || !currentOrganization?.id || boardLoading) {
+    return (
+      <div className="min-h-screen">
+        <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+        <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+        <KanbanSkeleton />
+      </div>
+    );
   }
 
   if (kanbanState.isLoading) {
     return <KanbanSkeleton />;
   }
 
-  if (kanbanState.error) {
+  // Update error condition to use hook's error state:
+  if (boardError || kanbanState.error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center max-w-md mx-auto">
@@ -1440,9 +1490,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             <h3 className="text-lg font-semibold text-red-800 mb-2">
               Error Loading Board
             </h3>
-            <p className="text-red-600 mb-4">{kanbanState.error}</p>
+            <p className="text-red-600 mb-4">
+              {boardErrorMessage?.message ||
+                kanbanState.error ||
+                "Failed to load board data"}
+            </p>
             <button
-              onClick={() => initializeKanbanData()}
+              onClick={() => refetchBoard()}
               className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
             >
               Try Again

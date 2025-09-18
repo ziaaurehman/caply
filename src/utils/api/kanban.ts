@@ -477,8 +477,65 @@ interface ReorderResponse {
   };
 }
 
+// Complete Board Data Response
+interface CompleteBoardDataResponse {
+  success: boolean;
+  data: {
+    project: any; // Project with members
+    boards: Board[];
+    currentBoard: Board;
+    lists: List[]; // Lists with cards included
+    cards: Card[];
+    labels: Label[];
+  };
+}
+
 // Kanban API
 export const kanbanAPI = {
+  // ===== COMPLETE BOARD DATA =====
+  
+  // Get complete board data in a single request
+  getCompleteBoardData: async (
+    projectId: string,
+    organizationId: string,
+    options?: {
+      boardId?: string;
+      includeArchived?: boolean;
+      search?: string;
+    }
+  ): Promise<CompleteBoardDataResponse> => {
+    const params = new URLSearchParams({
+      project_id: projectId,
+      organizationId: organizationId,
+    });
+
+    if (options?.boardId) {
+      params.append('board_id', options.boardId);
+    }
+    if (options?.includeArchived) {
+      params.append('include_archived', 'true');
+    }
+    if (options?.search) {
+      params.append('search', options.search);
+    }
+
+    const response = await fetch(
+      `/api/kanban/board-data?${params.toString()}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to fetch board data");
+    }
+
+    return response.json();
+  },
+
   // ===== BOARDS =====
 
   // Get boards by project
