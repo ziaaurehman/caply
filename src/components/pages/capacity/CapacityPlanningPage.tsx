@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ChevronDown,
   Settings,
@@ -10,8 +10,13 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
+import { projectAPI } from "@/utils/api/project";
+import {
+  capacityAPI,
+  CapacityOverview,
+  ResourceAllocation,
+} from "@/utils/api/capacity";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
-import { useCapacityData, useCapacityProjects } from "@/lib/hooks/useCapacity";
 
 import WeeklyCapacityTable from "./WeeklyCapacityTable";
 import CapacitySkeleton from "./CapacitySkeleton";
@@ -50,6 +55,22 @@ export default function CapacityPlanningPage() {
   } = useOrganizationStore();
 
   const [selectedProject, setSelectedProject] = useState<string>("all");
+  const [capacityOverview, setCapacityOverview] = useState<CapacityOverview[]>(
+    []
+  );
+  const [summary, setSummary] = useState({
+    totalMembers: 0,
+    overallocatedMembers: 0,
+    optimalMembers: 0,
+    underutilizedMembers: 0,
+    totalCapacity: 0,
+    totalAllocated: 0,
+    totalAvailable: 0,
+  });
+  const [allocations, setAllocations] = useState<ResourceAllocation[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
   const [selectedDateRange, setSelectedDateRange] = useState({
     startDate: new Date().toISOString().split("T")[0],
@@ -90,6 +111,13 @@ export default function CapacityPlanningPage() {
     }
   }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
 
+  // Fetch projects on component mount
+  useEffect(() => {
+    if (currentOrganization?.id) {
+      fetchProjects();
+    }
+  }, [currentOrganization?.id]);
+
   // Update date range when month/year changes
   useEffect(() => {
     const newDateRange = calculateDateRange(
@@ -97,12 +125,6 @@ export default function CapacityPlanningPage() {
       selectedYear,
       viewMode
     );
-    console.log("Date range updated:", {
-      selectedMonth,
-      selectedYear,
-      viewMode,
-      newDateRange,
-    });
     setSelectedDateRange(newDateRange);
   }, [selectedMonth, selectedYear, viewMode]);
 
@@ -112,38 +134,26 @@ export default function CapacityPlanningPage() {
     year: number,
     mode: "overview" | "weekly" | "monthly"
   ) => {
-    // Create a date based on the selected month and year
-    const selectedDate = new Date(year, month, 1);
+    const startDate = new Date(year, month, 1);
+    let endDate: Date;
 
-    if (mode === "weekly") {
-      // For weekly view, show the week containing the 1st of the selected month
-      const weekStart = new Date(selectedDate);
-      const dayOfWeek = weekStart.getDay();
-      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      weekStart.setDate(weekStart.getDate() - daysToSubtract);
-
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
-
-      return {
-        startDate: weekStart.toISOString().split("T")[0],
-        endDate: weekEnd.toISOString().split("T")[0],
-      };
+    if (mode === "monthly") {
+      // For monthly view, show the entire month
+      endDate = new Date(year, month + 1, 0); // Last day of the month
+    } else if (mode === "weekly") {
+      // For weekly view, show 4 weeks from the start of the month
+      endDate = new Date(year, month, 1);
+      endDate.setDate(endDate.getDate() + 28); // 4 weeks
     } else {
-      // For overview and monthly, show 5 weeks starting from the week containing the 1st of the selected month
-      const weekStart = new Date(selectedDate);
-      const dayOfWeek = weekStart.getDay();
-      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      weekStart.setDate(weekStart.getDate() - daysToSubtract);
-
-      const fiveWeeksEnd = new Date(weekStart);
-      fiveWeeksEnd.setDate(weekStart.getDate() + 5 * 7 - 1); // 5 weeks minus 1 day
-
-      return {
-        startDate: weekStart.toISOString().split("T")[0],
-        endDate: fiveWeeksEnd.toISOString().split("T")[0],
-      };
+      // For overview, show 30 days from start of month
+      endDate = new Date(year, month, 1);
+      endDate.setDate(endDate.getDate() + 30);
     }
+
+    return {
+      startDate: startDate.toISOString().split("T")[0],
+      endDate: endDate.toISOString().split("T")[0],
+    };
   };
 
   // Handle month change
@@ -161,99 +171,201 @@ export default function CapacityPlanningPage() {
     setViewMode(mode);
   };
 
-  // Prepare capacity data query parameters
-  const capacityParams = useMemo(
-    () => ({
-      project_id: selectedProject !== "all" ? selectedProject : undefined,
-      start_date: selectedDateRange.startDate,
-      end_date: selectedDateRange.endDate,
-      filter_project_ids:
-        filters.projectIds.length > 0 ? filters.projectIds : undefined,
-      filter_user_ids: filters.userIds.length > 0 ? filters.userIds : undefined,
-      only_overallocated: filters.onlyOverallocated,
-      only_active: filters.onlyActive,
-    }),
-    [selectedProject, selectedDateRange, filters]
-  );
+  // Fetch projects from API
+  const fetchProjects = async () => {
+    if (!currentOrganization?.id) return;
 
-  // React Query hooks
-  const {
-    data: projectsData,
-    isLoading: projectsLoading,
-    error: projectsError,
-  } = useCapacityProjects(currentOrganization?.id || "");
+    try {
+      const response = await projectAPI.getProjects(currentOrganization.id, {
+        capacity_planning_enabled: true,
+      });
+      const fetchedProjects = response.projects;
+      setProjects(fetchedProjects);
 
-  const {
-    allocations,
-    capacityOverview,
-    summary,
-    isLoading: capacityLoading,
-    isError: capacityError,
-    error: capacityErrorObj,
-    refetch: refetchCapacityData,
-  } = useCapacityData(currentOrganization?.id || "", capacityParams);
+      // Auto-select first project if any projects exist and no project is selected
+      if (fetchedProjects.length > 0 && selectedProject === "all") {
+        // Keep 'all' selected by default to show overview of all projects
+      }
+    } catch (err) {
+      console.error("Error fetching projects:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch projects");
+    }
+  };
 
-  // Extract projects data
-  const projects = projectsData?.projects || [];
+  useEffect(() => {
+    if (selectedProject) {
+      fetchCapacityData();
+    }
+  }, [
+    selectedProject,
+    selectedDateRange,
+    filters,
+    selectedMonth,
+    selectedYear,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Calculate summary from capacity overview if not provided by API
-  const calculatedSummary = useMemo(() => {
-    if (summary) return summary;
+  const fetchCapacityData = async () => {
+    console.log("fetchCapacityData called");
+    setLoading(true);
+    setError(null);
 
-    const members = capacityOverview || [];
-    const totalCapacity = members.reduce((sum, m) => sum + m.capacity, 0);
-    const totalAllocated = members.reduce(
-      (sum, m) => sum + m.totalAllocatedHours,
-      0
-    );
-    const totalAvailable = Math.max(0, totalCapacity - totalAllocated);
+    try {
+      // Fetch allocations first
+      const allocationsParams: any = {
+        start_date: selectedDateRange.startDate,
+        end_date: selectedDateRange.endDate,
+      };
 
-    const overallocatedMembers = members.filter(
-      (m) => m.totalAllocatedHours > m.capacity
-    ).length;
-    const optimalMembers = members.filter(
-      (m) =>
-        m.totalAllocatedHours >= m.capacity * 0.6 &&
-        m.totalAllocatedHours <= m.capacity
-    ).length;
-    const underutilizedMembers = members.filter(
-      (m) => m.totalAllocatedHours < m.capacity * 0.6
-    ).length;
+      if (selectedProject !== "all") {
+        allocationsParams.project_id = selectedProject;
+      }
 
-    return {
-      totalMembers: members.length,
-      overallocatedMembers,
-      optimalMembers,
-      underutilizedMembers,
-      totalCapacity,
-      totalAllocated,
-      totalAvailable,
-    };
-  }, [capacityOverview, summary]);
+      if (filters.projectIds.length > 0)
+        allocationsParams.filter_project_ids = filters.projectIds;
+
+      const allocationsResponse = await capacityAPI.getAllocations(
+        currentOrganization!.id,
+        allocationsParams
+      );
+      setAllocations(allocationsResponse.allocations);
+
+      // Fetch capacity overview for member info
+      const overviewParams: any = {
+        start_date: selectedDateRange.startDate,
+        end_date: selectedDateRange.endDate,
+      };
+
+      if (selectedProject !== "all") {
+        overviewParams.project_id = selectedProject;
+      }
+
+      if (filters.projectIds.length > 0)
+        overviewParams.filter_project_ids = filters.projectIds;
+      if (filters.userIds.length > 0)
+        overviewParams.filter_user_ids = filters.userIds;
+      overviewParams.only_overallocated = filters.onlyOverallocated;
+      overviewParams.only_active = filters.onlyActive;
+
+      const overviewResponse = await capacityAPI.getOverview(
+        currentOrganization!.id,
+        overviewParams
+      );
+      setCapacityOverview(overviewResponse.capacityOverview);
+
+      // Calculate summary from allocations data
+      const memberAllocations = new Map<
+        string,
+        { capacity: number; allocated: number; user: any; role: string }
+      >();
+
+      // Group allocations by member
+      allocationsResponse.allocations.forEach((allocation) => {
+        const orgMemberId =
+          (allocation as any)?.organization_member_id ||
+          (allocation as any)?.resource_allocations?.organization_member_id;
+
+        if (orgMemberId) {
+          if (!memberAllocations.has(orgMemberId)) {
+            // Find member info from overview
+            const memberInfo = overviewResponse.capacityOverview.find(
+              (o) => (o as any)?.member?.organization_member_id === orgMemberId
+            );
+
+            memberAllocations.set(orgMemberId, {
+              capacity: memberInfo?.capacity || 40,
+              allocated: 0,
+              user: memberInfo?.member?.user,
+              role: memberInfo?.member?.role || "",
+            });
+          }
+
+          const member = memberAllocations.get(orgMemberId)!;
+          member.allocated += Number(allocation.hours_per_week || 0);
+        }
+      });
+
+      // Calculate summary
+      const members = Array.from(memberAllocations.values());
+      const totalCapacity = members.reduce((sum, m) => sum + m.capacity, 0);
+      const totalAllocated = members.reduce((sum, m) => sum + m.allocated, 0);
+      const totalAvailable = Math.max(0, totalCapacity - totalAllocated);
+
+      const overallocatedMembers = members.filter(
+        (m) => m.allocated > m.capacity
+      ).length;
+      const optimalMembers = members.filter(
+        (m) => m.allocated >= m.capacity * 0.6 && m.allocated <= m.capacity
+      ).length;
+      const underutilizedMembers = members.filter(
+        (m) => m.allocated < m.capacity * 0.6
+      ).length;
+
+      setSummary({
+        totalMembers: members.length,
+        overallocatedMembers,
+        optimalMembers,
+        underutilizedMembers,
+        totalCapacity,
+        totalAllocated,
+        totalAvailable,
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to fetch capacity data"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "overallocated":
+        return "bg-red-100 text-red-800";
+      case "optimal":
+        return "bg-green-100 text-green-800";
+      case "nearOptimal":
+        return "bg-blue-100 text-blue-800";
+      case "underutilized":
+        return "bg-yellow-100 text-yellow-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case "overallocated":
+        return "Overallocated";
+      case "optimal":
+        return "Optimal";
+      case "nearOptimal":
+        return "Near Optimal";
+      case "underutilized":
+        return "Underutilized";
+      default:
+        return "Unknown";
+    }
+  };
 
   // Show loading while organization is loading or not loaded
   if (organizationLoading || !currentOrganization?.id) {
     return <CapacitySkeleton />;
   }
 
-  if (projectsError || capacityError) {
-    const errorMessage =
-      projectsError?.message ||
-      capacityErrorObj?.message ||
-      "Failed to load capacity data";
-
+  if (error) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
-        <div className=" mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="text-center">
               <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">
                 Error Loading Capacity Data
               </h3>
-              <p className="text-red-600 mb-4">{errorMessage}</p>
+              <p className="text-red-600 mb-4">{error}</p>
               <button
-                onClick={() => refetchCapacityData()}
+                onClick={fetchCapacityData}
                 className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
               >
                 Try Again
@@ -265,13 +377,13 @@ export default function CapacityPlanningPage() {
     );
   }
 
-  if (projectsLoading || capacityLoading) {
+  if (loading) {
     return <CapacitySkeleton />;
   }
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <div className=" mx-auto">
+      <div className="max-w-7xl mx-auto">
         {/* Header Section */}
         <div className="mb-6">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -385,6 +497,8 @@ export default function CapacityPlanningPage() {
               </Button>
             </div>
           </div>
+
+          {/* Removed project/date filters per new requirements. Actions moved to header. */}
         </div>
 
         {/* Capacity Overview */}
@@ -402,23 +516,23 @@ export default function CapacityPlanningPage() {
               <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-500">Total Capacity:</span>
                 <span className="text-sm font-medium text-gray-900">
-                  {calculatedSummary.totalCapacity}h/week
+                  {summary.totalCapacity}h/week
                 </span>
                 <span className="text-sm text-gray-500">|</span>
                 <span className="text-sm text-gray-500">Allocated:</span>
                 <span className="text-sm font-medium text-gray-900">
-                  {calculatedSummary.totalAllocated}h/week
+                  {summary.totalAllocated}h/week
                 </span>
                 <span className="text-sm text-gray-500">|</span>
                 <span className="text-sm text-gray-500">Available:</span>
                 <span className="text-sm font-medium text-green-600">
-                  {calculatedSummary.totalAvailable}h/week
+                  {summary.totalAvailable}h/week
                 </span>
               </div>
             </div>
           </div>
 
-          {capacityLoading ? (
+          {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
               <span className="ml-2 text-gray-600">
@@ -459,7 +573,7 @@ export default function CapacityPlanningPage() {
               onWeekCellClick={({ userId, week, member }) =>
                 setShowWeekModal({ userId, week, member })
               }
-              onRefresh={refetchCapacityData}
+              onRefresh={fetchCapacityData}
               onProjectClick={(projectId) => {
                 // Navigate to Kanban tab for the project
                 window.location.href = `/kanban?projectId=${projectId}`;
@@ -473,11 +587,13 @@ export default function CapacityPlanningPage() {
         </div>
       </div>
 
+      {/* Settings modal removed per new UI spec */}
+
       {/* Add Resource Modal */}
       <AddResourceModal
         isOpen={showAddResourceModal}
         onClose={() => setShowAddResourceModal(false)}
-        onResourceAdded={refetchCapacityData}
+        onResourceAdded={fetchCapacityData}
       />
 
       {showWeekModal && (
