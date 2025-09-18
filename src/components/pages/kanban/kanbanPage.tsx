@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { kanbanAPI } from "@/utils/api/kanban";
-import { projectAPI } from "@/utils/api/project";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import KanbanColumn from "./KanbanColumn";
 import AddTaskModal from "./AddTaskModal";
@@ -27,11 +26,12 @@ import {
   CardModalState,
   BackgroundOption,
 } from "./types";
+import { useKanbanBoard } from "@/lib/hooks/useKanbanBoard";
 
-// Temporarily remove problematic imports for now
 import CardDetailModal from "./CardDetailModal";
 import KanbanSkeleton from "./KanbanSkeleton";
 import AddListModal from "./AddListModal";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface KanbanPageProps {
   projectId: string;
@@ -44,19 +44,16 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     fetchUserOrganizations,
     userOrganizations,
   } = useOrganizationStore();
+  const queryClient = useQueryClient();
 
   // Main state
   const [kanbanState, setKanbanState] = useState<KanbanState>({
     boards: [],
     currentBoard: null,
     lists: [],
-    isLoading: true,
+    isLoading: false,
     error: null,
   });
-
-  // Project data
-  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
-  const [projectName, setProjectName] = useState<string>("");
 
   const [isAddListModalOpen, setIsAddListModalOpen] = useState(false);
 
@@ -90,10 +87,57 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const listReorderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const listReorderAbortControllerRef = useRef<AbortController | null>(null);
   const [isListReordering, setIsListReordering] = useState(false);
-  const loadingRequestsRef = useRef<Set<string>>(new Set());
-  const [creatingCardForList, setCreatingCardForList] = useState<string | null>(
-    null
-  );
+
+  const {
+    data: boardData,
+    isLoading: boardLoading,
+    isError: boardError,
+    error: boardErrorMessage,
+    refetch: refetchBoard,
+
+    // Derived data
+    project,
+    boards,
+    currentBoard,
+    lists,
+    cards,
+    labels,
+    projectMembers,
+    projectName,
+
+    // Optimistic updates
+    optimisticUpdateCard,
+    optimisticMoveCard,
+    optimisticAddCard,
+    optimisticDeleteCard,
+    invalidateBoard,
+  } = useKanbanBoard(projectId, currentOrganization?.id, {
+    includeArchived: showArchived,
+    search: searchTerm,
+  });
+
+  useEffect(() => {
+    if (boardData) {
+      setKanbanState({
+        boards: boards,
+        currentBoard: currentBoard || null,
+        lists: lists,
+        isLoading: false,
+        error: null,
+      });
+    }
+  }, [boardData, boards, currentBoard, lists]);
+
+  // Handle loading and error states
+  useEffect(() => {
+    setKanbanState((prev) => ({
+      ...prev,
+      isLoading: boardLoading,
+      error: boardError
+        ? boardErrorMessage?.message || "Failed to load board data"
+        : null,
+    }));
+  }, [boardLoading, boardError, boardErrorMessage]);
 
   // List Drag & Drop State
   const [listDragState, setListDragState] = useState<{
@@ -163,212 +207,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     { type: "color", value: "#1e293b", name: "Dark Gray" },
   ];
 
-  const loadBoardData = useCallback(
-    async (boardId: string) => {
-      if (!currentOrganization?.id) return;
-
-      // Prevent duplicate requests - remove searchTerm from key
-      const requestKey = `${boardId}-${currentOrganization.id}-${showArchived}`;
-      if (loadingRequestsRef.current.has(requestKey)) {
-        console.log("Request already in progress, skipping duplicate");
-        return;
-      }
-
-      loadingRequestsRef.current.add(requestKey);
-
-      try {
-        console.log("Loading board data for:", boardId);
-
-        // Step 1: Load basic list structure (show lists immediately)
-        const listsResponse = await kanbanAPI.getLists(
-          boardId,
-          currentOrganization.id,
-          showArchived
-        );
-
-        const basicLists = listsResponse.lists.map((list) => ({
-          ...list,
-          cards: [], // Initialize with empty cards array
-          isLoadingCards: true, // Add loading state for cards
-        }));
-
-        // Show lists immediately (even without cards)
-        setKanbanState((prev) => ({
-          ...prev,
-          lists: basicLists,
-        }));
-
-        // Step 2: Load ALL cards in parallel instead of sequentially
-        if (basicLists.length > 0) {
-          console.log(
-            `Loading cards for ${basicLists.length} lists in parallel`
-          );
-
-          // Create promises for all card requests - remove searchTerm from API call
-          const cardPromises = basicLists.map(async (list) => {
-            try {
-              const cardsResponse = await kanbanAPI.getCardsByList(
-                list.id,
-                currentOrganization.id,
-                "", // Remove searchTerm - search will be client-side
-                showArchived
-              );
-              return {
-                listId: list.id,
-                cards: cardsResponse.cards,
-                success: true,
-              };
-            } catch (error) {
-              console.error(`Error loading cards for list ${list.id}:`, error);
-              return {
-                listId: list.id,
-                cards: [],
-                success: false,
-              };
-            }
-          });
-
-          // Wait for all card requests to complete
-          const cardResults = await Promise.all(cardPromises);
-
-          // Update all lists with their cards at once
-          setKanbanState((prev) => ({
-            ...prev,
-            lists: prev.lists.map((list) => {
-              const result = cardResults.find((r) => r.listId === list.id);
-              return result
-                ? {
-                    ...list,
-                    cards: result.cards,
-                    isLoadingCards: false,
-                  }
-                : list;
-            }),
-          }));
-
-          console.log("All cards loaded successfully");
-        }
-      } catch (error) {
-        console.error("Error loading board data:", error);
-        setKanbanState((prev) => ({
-          ...prev,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Failed to load board data",
-        }));
-      } finally {
-        // Remove request from deduplication set
-        loadingRequestsRef.current.delete(requestKey);
-      }
-    },
-    [currentOrganization?.id, showArchived] // Remove searchTerm from dependencies
-  );
-
-  // Initialize data
-  const initializeKanbanData = useCallback(async () => {
-    if (!currentOrganization?.id) return;
-
-    try {
-      setKanbanState((prev) => ({ ...prev, isLoading: true, error: null }));
-
-      // Step 1: Fetch project details and members (show project info immediately)
-      const projectResponse = await projectAPI.getProject(
-        projectId,
-        currentOrganization.id
-      );
-      const project = projectResponse.project;
-      setProjectName(project.name);
-
-      // Map project members to the format expected by Kanban components
-      const members =
-        project.project_members?.map((pm) => ({
-          id: pm.id,
-          organization_member_id: pm.organization_member_id,
-          role: pm.role,
-          joined_at: pm.joined_at,
-          organization_members: pm.organization_members,
-        })) || [];
-      setProjectMembers(members);
-
-      // Check if Kanban is enabled for this project
-      if (!project.kanban_enabled) {
-        setKanbanState((prev) => ({
-          ...prev,
-          isLoading: false,
-          error: "Kanban board is not enabled for this project",
-        }));
-        return;
-      }
-
-      // Step 2: Fetch boards for the project (show board header immediately)
-      const boardsResponse = await kanbanAPI.getBoards(
-        projectId,
-        currentOrganization.id
-      );
-      const boards = boardsResponse.boards;
-
-      if (boards.length === 0) {
-        // Create default board if none exists
-        const newBoard = await kanbanAPI.createBoard({
-          project_id: projectId,
-          name: `${project.name} Board`,
-          description: `Kanban board for ${project.name}`,
-          background_color: "#0079bf",
-          organizationId: currentOrganization.id,
-        });
-
-        // Show board immediately (even before lists load)
-        setKanbanState((prev) => ({
-          ...prev,
-          boards: [newBoard.board],
-          currentBoard: newBoard.board,
-          isLoading: false,
-          lists: [], // Empty lists initially
-        }));
-
-        // Load board data progressively
-        loadBoardData(newBoard.board.id);
-      } else {
-        // Use the first board - show it immediately
-        const currentBoard = boards[0];
-        setKanbanState((prev) => ({
-          ...prev,
-          boards,
-          currentBoard,
-          isLoading: false,
-          lists: [], // Empty lists initially
-        }));
-
-        // Load board data progressively
-        loadBoardData(currentBoard.id);
-      }
-    } catch (error) {
-      console.error("Error initializing Kanban data:", error);
-      setKanbanState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to load Kanban board",
-      }));
-    }
-  }, [projectId, currentOrganization?.id, loadBoardData]);
-
-  // Initialize organization store if needed
   useEffect(() => {
     if (!organizationLoading && userOrganizations.length === 0) {
       fetchUserOrganizations();
     }
   }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
-
-  // Initialize kanban data when organization is ready
-  useEffect(() => {
-    if (currentOrganization?.id) {
-      initializeKanbanData();
-    }
-  }, [initializeKanbanData, currentOrganization?.id]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -383,13 +226,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Reload board data when showArchived changes
-  useEffect(() => {
-    if (kanbanState.currentBoard) {
-      loadBoardData(kanbanState.currentBoard.id);
-    }
-  }, [showArchived, kanbanState.currentBoard, loadBoardData]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent, card: Card) => {
@@ -593,9 +429,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       setKanbanState((prev) => ({
         ...prev,
         currentBoard: updatedBoard.board,
-        boards: prev.boards.map((board) =>
-          board.id === updatedBoard.board.id ? updatedBoard.board : board
-        ),
+        // boards: prev.boards.map((board) =>
+        //   board.id === updatedBoard.board.id ? updatedBoard.board : board
+        // ),
       }));
 
       setBackgroundDropdownOpen(false);
@@ -1424,15 +1260,22 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   };
 
   // Show loading while organization is loading or not loaded
-  if (organizationLoading || !currentOrganization?.id) {
-    return <KanbanSkeleton />;
+  if (organizationLoading || !currentOrganization?.id || boardLoading) {
+    return (
+      <div className="min-h-screen">
+        <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+        <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+        <KanbanSkeleton />
+      </div>
+    );
   }
 
   if (kanbanState.isLoading) {
     return <KanbanSkeleton />;
   }
 
-  if (kanbanState.error) {
+  // Update error condition to use hook's error state:
+  if (boardError || kanbanState.error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center max-w-md mx-auto">
@@ -1440,9 +1283,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             <h3 className="text-lg font-semibold text-red-800 mb-2">
               Error Loading Board
             </h3>
-            <p className="text-red-600 mb-4">{kanbanState.error}</p>
+            <p className="text-red-600 mb-4">
+              {boardErrorMessage?.message ||
+                kanbanState.error ||
+                "Failed to load board data"}
+            </p>
             <button
-              onClick={() => initializeKanbanData()}
+              onClick={() => refetchBoard()}
               className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
             >
               Try Again
