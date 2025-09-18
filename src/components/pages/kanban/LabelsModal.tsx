@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { X, ChevronLeft, Search, Plus, Edit3 } from "lucide-react";
 import { kanbanAPI } from "@/utils/api/kanban";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface Label {
   id: string;
@@ -18,6 +19,8 @@ interface LabelsModalProps {
   organizationId: string;
   selectedLabels: string[];
   onLabelsChange: (labelIds: string[]) => void;
+  labels: any[];
+  isLoading: boolean;
 }
 
 export default function LabelsModal({
@@ -27,10 +30,11 @@ export default function LabelsModal({
   organizationId,
   selectedLabels,
   onLabelsChange,
+  labels,
+  isLoading,
 }: LabelsModalProps) {
-  const [labels, setLabels] = useState<Label[]>([]);
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
@@ -53,30 +57,10 @@ export default function LabelsModal({
     "#F3F4F6", // light gray
   ];
 
-  useEffect(() => {
-    if (isOpen) {
-      loadLabels();
-    }
-  }, [isOpen]);
-
   // Sync local state when selectedLabels prop changes
   useEffect(() => {
     setLocalSelectedLabels(selectedLabels);
   }, [selectedLabels]);
-
-  const loadLabels = async () => {
-    try {
-      setIsLoading(true);
-      console.log("Loading labels for board:", boardId, "org:", organizationId);
-      const response = await kanbanAPI.getLabels(boardId, organizationId);
-      console.log("Labels response:", response);
-      setLabels(response.labels || []);
-    } catch (error) {
-      console.error("Error loading labels:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleCreateLabel = async () => {
     if (!newLabelName.trim()) return;
@@ -91,23 +75,11 @@ export default function LabelsModal({
         organizationId,
       };
 
-      console.log("Creating label with data:", labelData);
-      console.log("Board ID:", boardId);
-      console.log("Organization ID:", organizationId);
-
       const response = await kanbanAPI.createLabel(labelData);
+      queryClient.invalidateQueries({
+        queryKey: ["board-labels", boardId, organizationId],
+      });
       console.log("Create label response:", response);
-
-      // Add the new label to the list
-      setLabels((prev) => [...prev, response.label]);
-
-      // Automatically select the newly created label
-      // const newLabelId = response.label.id
-      // if (!localSelectedLabels.includes(newLabelId)) {
-      //   const newSelection = [...localSelectedLabels, newLabelId]
-      //   setLocalSelectedLabels(newSelection)
-      //   onLabelsChange(newSelection)
-      // }
 
       setNewLabelName("");
       setNewLabelColor("#3B82F6");
