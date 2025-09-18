@@ -3,16 +3,10 @@
 import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 import KanbanBoard from "@/components/pages/kanban/kanbanPage";
-import { projectAPI } from "@/utils/api/project";
 import KanbanSkeleton from "@/components/pages/kanban/KanbanSkeleton";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { useSearchParams } from "next/navigation";
-
-interface Project {
-  id: string;
-  name: string;
-  kanban_enabled?: boolean;
-}
+import { useKanbanProjects } from "@/lib/hooks/useProjects";
 
 // Custom debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -32,14 +26,33 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 function KanbanPageComponent() {
-  const [projects, setProjects] = useState<Project[]>([]);
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     projectId || null
   );
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const {
+    currentOrganization,
+    loading: organizationLoading,
+    fetchUserOrganizations,
+    userOrganizations,
+  } = useOrganizationStore();
+
+  // Remove selectedProjectId from dependencies to prevent reloading
+  const {
+    data: projects = [],
+    isLoading,
+    error,
+    refetch: loadProjects,
+  } = useKanbanProjects(currentOrganization?.id);
+
+  // Auto-select first project when projects load
+  useEffect(() => {
+    if (projects.length > 0 && !selectedProjectId) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [projects, selectedProjectId]);
   const [projectSearch, setProjectSearch] = useState("");
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(false);
@@ -57,58 +70,12 @@ function KanbanPageComponent() {
     }
   }, [projectId, projects]);
 
-  const {
-    currentOrganization,
-    loading: organizationLoading,
-    fetchUserOrganizations,
-    userOrganizations,
-  } = useOrganizationStore();
-
   // Initialize organization store if needed
   useEffect(() => {
     if (!organizationLoading && userOrganizations.length === 0) {
       fetchUserOrganizations();
     }
   }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
-
-  // Remove selectedProjectId from dependencies to prevent reloading
-  const loadProjects = useCallback(async () => {
-    if (!currentOrganization?.id) return;
-
-    try {
-      setIsLoading(true);
-      setError(null);
-      const response = await projectAPI.getProjects(currentOrganization.id);
-      const kanbanProjects = response.projects.filter((p) => p.kanban_enabled);
-      setProjects(kanbanProjects);
-
-      // Auto-select first project if available and no saved selection
-      if (kanbanProjects.length > 0 && !selectedProjectId) {
-        // const savedProjectId = localStorage.getItem("kanban-selected-project");
-        // if (
-        //   // savedProjectId &&
-        //   kanbanProjects.find((p) => p.id === savedProjectId)
-        // ) {
-        //   // Saved project exists in current list
-        //   setSelectedProjectId(savedProjectId);
-        // } else {
-        // Select first project and save it
-        setSelectedProjectId(kanbanProjects[0].id);
-        // localStorage.setItem("kanban-selected-project", kanbanProjects[0].id);
-        // }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load projects");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentOrganization?.id]); // Removed selectedProjectId from dependencies
-
-  useEffect(() => {
-    if (currentOrganization?.id) {
-      loadProjects();
-    }
-  }, [loadProjects, currentOrganization?.id]);
 
   // Memoize filtered projects to prevent unnecessary recalculations
   const filteredProjects = useMemo(() => {
@@ -193,9 +160,9 @@ function KanbanPageComponent() {
             <h3 className="text-lg font-semibold text-red-800 mb-2">
               Error Loading Projects
             </h3>
-            <p className="text-red-600 mb-4">{error}</p>
+            <p className="text-red-600 mb-4">{error.message}</p>
             <button
-              onClick={loadProjects}
+              onClick={() => loadProjects()}
               className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
             >
               Try Again

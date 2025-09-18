@@ -19,21 +19,17 @@ import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import KanbanColumn from "./KanbanColumn";
 import AddTaskModal from "./AddTaskModal";
 import {
-  Board,
   List,
   Card,
-  KanbanBoardProps,
   ProjectMember,
   KanbanState,
   DragState,
   CardModalState,
-  KanbanFilters,
   BackgroundOption,
 } from "./types";
 
 // Temporarily remove problematic imports for now
 import CardDetailModal from "./CardDetailModal";
-// import BoardSettingsModal from "./BoardSettingsModal"
 import KanbanSkeleton from "./KanbanSkeleton";
 import AddListModal from "./AddListModal";
 

@@ -1,10 +1,10 @@
-"use client"
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { X, Users, Clock, Calendar, User } from 'lucide-react';
-import { capacityAPI } from '@/utils/api/capacity';
-import { useOrganizationStore } from '@/lib/stores/organizationStore';
-import { teamAPI } from '@/utils/api/team';
+import React, { useState, useEffect } from "react";
+import { X, Users, Clock, Calendar, User } from "lucide-react";
+import { capacityAPI } from "@/utils/api/capacity";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { teamAPI } from "@/utils/api/team";
 
 interface AddResourceModalProps {
   isOpen: boolean;
@@ -35,7 +35,11 @@ interface Project {
   project_members?: ProjectMember[];
 }
 
-export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: AddResourceModalProps) {
+export default function AddResourceModal({
+  isOpen,
+  onClose,
+  onResourceAdded,
+}: AddResourceModalProps) {
   const { currentOrganization } = useOrganizationStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,11 +51,11 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
     end_date: string;
     notes: string;
   }>({
-    organization_member_id: '',
+    organization_member_id: "",
     weekly_capacity_hours: 40,
-    start_date: '',
-    end_date: '',
-    notes: ''
+    start_date: "",
+    end_date: "",
+    notes: "",
   });
 
   useEffect(() => {
@@ -64,16 +68,18 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
         const members = (teamRes.members || []).map((m: any) => ({
           id: m.id,
           organization_member_id: m.id,
-          role: m.roles?.name || '',
+          role: m.roles?.name || "",
           organization_members: {
             id: m.id,
             user_id: m.users?.id,
-            users: m.users
-          }
+            users: m.users,
+          },
         }));
         setAvailableMembers(members);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch members');
+        setError(
+          err instanceof Error ? err.message : "Failed to fetch members"
+        );
       } finally {
         setLoading(false);
       }
@@ -87,11 +93,11 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
       const dayOfWeek = today.getDay();
       const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       currentWeekStart.setDate(today.getDate() - daysToSubtract);
-      
-      setFormData(prev => ({
+
+      setFormData((prev) => ({
         ...prev,
-        start_date: currentWeekStart.toISOString().split('T')[0],
-        weekly_capacity_hours: 40
+        start_date: currentWeekStart.toISOString().split("T")[0],
+        weekly_capacity_hours: 40,
       }));
     }
   }, [isOpen, currentOrganization?.id]);
@@ -99,12 +105,12 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.organization_member_id) {
-      setError('Please fill in all required fields');
+      setError("Please fill in all required fields");
       return;
     }
 
     if (!currentOrganization?.id) {
-      setError('Organization not found');
+      setError("Organization not found");
       return;
     }
 
@@ -112,30 +118,35 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
       setLoading(true);
       setError(null);
 
-      const member = availableMembers.find(m => m.id === formData.organization_member_id);
-      const res = await fetch('/api/capacity/resources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const member = availableMembers.find(
+        (m) => m.id === formData.organization_member_id
+      );
+      const res = await fetch("/api/capacity/resources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           organizationId: currentOrganization.id,
-          organization_member_id: member?.organization_member_id || formData.organization_member_id,
+          organization_member_id:
+            member?.organization_member_id || formData.organization_member_id,
           weekly_capacity_hours: formData.weekly_capacity_hours,
           start_date: formData.start_date,
           end_date: formData.end_date || null,
           notes: formData.notes || null,
-          is_active: true
-        })
+          is_active: true,
+        }),
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        throw new Error(e.error || 'Failed to add resource');
+        throw new Error(e.error || "Failed to add resource");
       }
 
       onResourceAdded();
       onClose();
       resetForm();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add resource allocation');
+      setError(
+        err instanceof Error ? err.message : "Failed to add resource allocation"
+      );
     } finally {
       setLoading(false);
     }
@@ -143,11 +154,11 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
 
   const resetForm = () => {
     setFormData({
-      organization_member_id: '',
+      organization_member_id: "",
       weekly_capacity_hours: 40,
-      start_date: '',
-      end_date: '',
-      notes: ''
+      start_date: "",
+      end_date: "",
+      notes: "",
     });
     setError(null);
   };
@@ -157,7 +168,9 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
     onClose();
   };
 
-  const selectedMember = availableMembers.find(member => member.id === formData.organization_member_id);
+  const selectedMember = availableMembers.find(
+    (member) => member.id === formData.organization_member_id
+  );
 
   if (!isOpen) return null;
 
@@ -166,7 +179,9 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
       <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white px-6 py-4 border-b border-gray-200">
           <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-gray-900">Add Resource</h2>
+            <h2 className="text-xl font-semibold text-gray-900">
+              Add Resource
+            </h2>
             <button
               onClick={handleClose}
               className="text-gray-400 hover:text-gray-600 p-2"
@@ -189,26 +204,37 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Team Member Selection */}
             <div>
-              <label htmlFor="organization_member_id" className="block text-sm font-medium text-gray-700 mb-2">
+              <label
+                htmlFor="organization_member_id"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
                 <Users className="inline h-4 w-4 mr-1" />
                 Team Member *
               </label>
               <select
                 id="organization_member_id"
                 value={formData.organization_member_id}
-                onChange={(e) => setFormData(prev => ({ ...prev, organization_member_id: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    organization_member_id: e.target.value,
+                  }))
+                }
                 className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 required
               >
                 <option value="">Select a team member...</option>
-                 {availableMembers.map((member) => (
+                {availableMembers.map((member) => (
                   <option key={member.id} value={member.id}>
-                     {member.organization_members.users.full_name} - {member.role}
+                    {member.organization_members.users.full_name} -{" "}
+                    {member.role}
                   </option>
                 ))}
               </select>
               {availableMembers.length === 0 && (
-                <p className="text-sm text-gray-500 mt-1">No team members available.</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  No team members available.
+                </p>
               )}
             </div>
 
@@ -224,7 +250,8 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
                       {selectedMember.organization_members.users.full_name}
                     </p>
                     <p className="text-sm text-gray-600">
-                      {selectedMember.organization_members.users.email} • {selectedMember.role}
+                      {selectedMember.organization_members.users.email} •{" "}
+                      {selectedMember.role}
                     </p>
                   </div>
                 </div>
@@ -234,7 +261,10 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
             {/* Capacity Configuration */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="weekly_capacity_hours" className="block text-sm font-medium text-gray-700 mb-2">
+                <label
+                  htmlFor="weekly_capacity_hours"
+                  className="block text-sm font-medium text-gray-700 mb-2"
+                >
                   <Clock className="inline h-4 w-4 mr-1" />
                   Weekly Capacity Hours *
                 </label>
@@ -242,7 +272,12 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
                   type="number"
                   id="weekly_capacity_hours"
                   value={formData.weekly_capacity_hours}
-                  onChange={(e) => setFormData(prev => ({ ...prev, weekly_capacity_hours: Number(e.target.value) }))}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      weekly_capacity_hours: Number(e.target.value),
+                    }))
+                  }
                   min="0"
                   max="168"
                   step="0.5"
@@ -250,7 +285,9 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
                   placeholder="e.g., 40"
                   required
                 />
-                <p className="text-xs text-gray-500 mt-1">Maximum 168 hours per week</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Maximum 168 hours per week
+                </p>
               </div>
 
               <div></div>
@@ -259,7 +296,10 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
             {/* Date Range */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-2">
+                <label
+                  htmlFor="start_date"
+                  className="block text-sm font-medium text-gray-700 mb-2"
+                >
                   <Calendar className="inline h-4 w-4 mr-1" />
                   Start Date *
                 </label>
@@ -267,37 +307,57 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
                   type="date"
                   id="start_date"
                   value={formData.start_date}
-                  onChange={(e) => setFormData(prev => ({ ...prev, start_date: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      start_date: e.target.value,
+                    }))
+                  }
                   className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                   required
                 />
               </div>
 
               <div>
-                <label htmlFor="end_date" className="block text-sm font-medium text-gray-700 mb-2">
+                <label
+                  htmlFor="end_date"
+                  className="block text-sm font-medium text-gray-700 mb-2"
+                >
                   End Date (Optional)
                 </label>
                 <input
                   type="date"
                   id="end_date"
                   value={formData.end_date}
-                  onChange={(e) => setFormData(prev => ({ ...prev, end_date: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      end_date: e.target.value,
+                    }))
+                  }
                   min={formData.start_date}
                   className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 />
-                <p className="text-xs text-gray-500 mt-1">Leave empty for ongoing allocation</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Leave empty for ongoing allocation
+                </p>
               </div>
             </div>
 
             {/* Notes */}
             <div>
-              <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-2">
+              <label
+                htmlFor="notes"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
                 Notes
               </label>
               <textarea
                 id="notes"
                 value={formData.notes}
-                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, notes: e.target.value }))
+                }
                 rows={3}
                 className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 placeholder="Additional notes about this allocation..."
@@ -328,7 +388,7 @@ export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: A
                   Adding...
                 </div>
               ) : (
-                'Add Resource'
+                "Add Resource"
               )}
             </button>
           </div>

@@ -47,6 +47,22 @@ export interface ProjectFilters {
   capacity_planning_enabled?: boolean;
 }
 
+export const useKanbanProjects = (organizationId: string | undefined) => {
+  return useQuery({
+    queryKey: ["kanban-projects", organizationId],
+    queryFn: async () => {
+      if (!organizationId) {
+        throw new Error("Organization ID is required");
+      }
+      const response = await projectAPI.getProjects(organizationId);
+      return response.projects.filter((p) => p.kanban_enabled);
+    },
+    enabled: !!organizationId, // Only run query when organizationId exists
+    staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+  });
+};
+
 // ===== PROJECTS LIST =====
 
 export function useProjects(
