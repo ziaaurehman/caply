@@ -45,6 +45,15 @@ import CoverModal from "./CoverModal";
 import DatesModal from "./DatesModal";
 import ChecklistModal from "./ChecklistModal";
 import AttachmentsModal from "./AttachmentsModal";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
+
+interface LabelsResponse {
+  labels: any[];
+}
+
+interface MembersResponse {
+  project_members: any[];
+}
 
 interface ProjectMember {
   id: string;
@@ -84,6 +93,7 @@ export default function CardDetailModal({
   projectId,
   onCardUpdate,
 }: CardDetailModalProps) {
+  const queryClient = useQueryClient();
   const { data: session } = useSession();
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingDescription, setIsEditingDescription] = useState(false);
@@ -114,6 +124,12 @@ export default function CardDetailModal({
   const [newItemContent, setNewItemContent] = useState("");
   const [addingItemSubmitting, setAddingItemSubmitting] = useState(false);
 
+  const invalidateKanbanBoard = useCallback(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["kanban-board-data", projectId, organizationId],
+    });
+  }, [queryClient, projectId, organizationId]);
+
   useEffect(() => {
     if (isOpen) {
       // Ensure card has the expected structure and remove any unexpected properties
@@ -132,6 +148,17 @@ export default function CardDetailModal({
       loadActivities();
     }
   }, [isOpen, card]);
+
+  const { data: labelsData, isLoading: labelsLoading } =
+    useQuery<LabelsResponse>({
+      queryKey: ["board-labels", boardId, organizationId],
+      queryFn: async () => {
+        const response = await kanbanAPI.getLabels(boardId, organizationId);
+        return response;
+      },
+      enabled: !!boardId && !!organizationId,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    });
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -187,6 +214,7 @@ export default function CardDetailModal({
         cover_image: editedCard.cover?.image,
         organizationId,
       });
+      invalidateKanbanBoard();
       onCardUpdate(response.card);
 
       // Reset edit states based on what was being edited
@@ -284,6 +312,7 @@ export default function CardDetailModal({
       });
 
       // Update the card state
+      invalidateKanbanBoard();
       const archivedCard = { ...response.card, is_archived: true };
       setEditedCard(archivedCard);
 
@@ -312,6 +341,7 @@ export default function CardDetailModal({
       // Update the card state
       const unarchivedCard = { ...response.card, is_archived: false };
       setEditedCard(unarchivedCard);
+      invalidateKanbanBoard();
 
       // Call the parent callback to update the card in the main view
       onCardUpdate(unarchivedCard);
@@ -374,6 +404,7 @@ export default function CardDetailModal({
         ...prev,
         labels: updatedCard.labels || [],
       }));
+      invalidateKanbanBoard();
 
       // Call the parent callback to update the card in the main view
       onCardUpdate(updatedCard);
@@ -438,6 +469,7 @@ export default function CardDetailModal({
         ...prev,
         card_members: updatedCard.card_members || [],
       }));
+      invalidateKanbanBoard();
 
       // Call the parent callback to update the card in the main view
       onCardUpdate(updatedCard);
@@ -468,7 +500,7 @@ export default function CardDetailModal({
         cover_image: cover.image,
         organizationId,
       });
-
+      invalidateKanbanBoard();
       // Update both the edited card state and the original card
       setEditedCard((prev) => ({
         ...prev,
@@ -507,7 +539,7 @@ export default function CardDetailModal({
         ...prev,
         due_date: dates.due_date,
       }));
-
+      invalidateKanbanBoard();
       // Call the parent callback to update the card in the main view
       onCardUpdate(response.card);
 
@@ -542,7 +574,7 @@ export default function CardDetailModal({
         is_completed: isCompleted,
         organizationId,
       });
-
+      invalidateKanbanBoard();
       // Update local state
       const updatedChecklists =
         editedCard.checklists?.map((checklist) => {
@@ -575,7 +607,7 @@ export default function CardDetailModal({
   const handleDeleteChecklist = async (checklistId: string) => {
     try {
       await kanbanAPI.deleteChecklist(checklistId);
-
+      invalidateKanbanBoard();
       // Update local state - remove the deleted checklist
       const updatedChecklists =
         editedCard.checklists?.filter(
@@ -599,7 +631,7 @@ export default function CardDetailModal({
   const handleDeleteChecklistItem = async (itemId: string) => {
     try {
       await kanbanAPI.deleteChecklistItem(itemId);
-
+      invalidateKanbanBoard();
       // Update local state - remove the deleted item
       const updatedChecklists =
         editedCard.checklists?.map((checklist) => ({
@@ -633,7 +665,7 @@ export default function CardDetailModal({
         content: newItemContent,
         organizationId,
       });
-
+      invalidateKanbanBoard();
       // Update local state - add the new item
       const updatedChecklists =
         editedCard.checklists?.map((checklist) => {
@@ -1605,6 +1637,8 @@ export default function CardDetailModal({
         organizationId={organizationId}
         selectedLabels={editedCard.labels?.map((l) => l.id) || []}
         onLabelsChange={handleLabelsChange}
+        labels={labelsData?.labels || []}
+        isLoading={labelsLoading}
       />
 
       <MembersModal
@@ -1616,6 +1650,7 @@ export default function CardDetailModal({
           editedCard.card_members?.map((m) => m.project_member_id) || []
         }
         onMembersChange={handleMembersChange}
+        members={projectMembers}
       />
 
       <CoverModal

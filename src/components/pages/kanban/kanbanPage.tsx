@@ -370,7 +370,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               organizationId: currentOrganization.id,
             });
             console.log("API call successful - card moved");
-            // No need to refetch data since optimistic update already handled the UI
+            // Invalidate query to refresh data
+            invalidateBoard();
           } catch (error) {
             console.error("Error moving card:", error);
 
@@ -402,7 +403,12 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         sourceListId: null,
       });
     },
-    [kanbanState.lists, currentOrganization?.id, dragState.sourceListId]
+    [
+      kanbanState.lists,
+      currentOrganization?.id,
+      dragState.sourceListId,
+      invalidateBoard,
+    ]
   );
 
   // Board management
@@ -435,6 +441,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       }));
 
       setBackgroundDropdownOpen(false);
+      // Invalidate query to refresh data
+      invalidateBoard();
     } catch (error) {
       console.error("Error updating board background:", error);
     }
@@ -613,6 +621,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
               console.log("Card reorder API call successful");
               toast.success("Cards reordered successfully!");
+              // Invalidate query to refresh data
+              invalidateBoard();
             } catch (error: any) {
               // Don't show error if request was cancelled
               if (error.name === "AbortError") {
@@ -661,6 +671,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       currentOrganization?.id,
       cardDragState.sourceListId,
       isCardReordering,
+      invalidateBoard,
     ]
   );
 
@@ -821,6 +832,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
             console.log("List reorder API call successful");
             toast.success("List reordered successfully!");
+            // Invalidate query to refresh data
+            invalidateBoard();
           } catch (error: any) {
             // Don't show error if request was cancelled
             if (error.name === "AbortError") {
@@ -912,7 +925,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             toast.success(
               `List ${isArchived ? "archived" : "unarchived"} successfully!`
             );
-            // No need to refetch data since optimistic update already handled the UI
+            // Invalidate query to refresh data
+            invalidateBoard();
           } catch (error) {
             console.error("Error archiving/unarchiving list:", error);
             toast.error(
@@ -989,6 +1003,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           }));
 
           toast.success("List created successfully!");
+          // Invalidate query to refresh data
+          invalidateBoard();
         } catch (error) {
           console.error("Error creating list:", error);
           toast.error("Failed to create list");
@@ -1174,6 +1190,8 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       setIsAddTaskModalOpen(false);
 
       toast.success("Card created successfully!");
+      // Invalidate query to refresh data
+      invalidateBoard();
     } catch (error) {
       console.error("Error creating card:", error);
       toast.error("Failed to create card");
@@ -1471,14 +1489,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   </div>
                 )}
               </div>
-
-              {/* Board Settings
-              <button
-                onClick={() => setBoardSettingsOpen(true)}
-                className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-orange-500"
-              >
-                <Settings className="h-4 w-4" />
-              </button> */}
             </div>
           </div>
         </div>
@@ -1611,37 +1621,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           }}
         />
       )}
-
-      {/* TODO: Implement board settings modal
-      {boardSettingsOpen && kanbanState.currentBoard && (
-        <BoardSettingsModal
-          board={kanbanState.currentBoard}
-          isOpen={boardSettingsOpen}
-          onClose={() => setBoardSettingsOpen(false)}
-          onBoardUpdate={(updatedBoard: Board) => {
-            setKanbanState(prev => ({
-              ...prev,
-              currentBoard: updatedBoard,
-              boards: prev.boards.map(board =>
-                board.id === updatedBoard.id ? updatedBoard : board
-              )
-            }));
-          }}
-        />
-      )}
-      */}
     </div>
   );
 }
-
-// "use client";
-
-// import KanbanBoardOptimized from "./KanbanBoardOptimized";
-
-// interface KanbanPageProps {
-//   projectId: string;
-// }
-
-// export default function KanbanBoard({ projectId }: KanbanPageProps) {
-//   return <KanbanBoardOptimized projectId={projectId} />;
-// }
