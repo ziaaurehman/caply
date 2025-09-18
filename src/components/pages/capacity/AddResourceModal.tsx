@@ -1,11 +1,10 @@
-"use client";
+"use client"
 
-import React, { useState, useEffect } from "react";
-import { X, Users, Clock, Calendar, User } from "lucide-react";
-import { useOrganizationStore } from "@/lib/stores/organizationStore";
-import { useTeamMembers } from "@/lib/hooks/useTeamMembers";
-import { useCreateAllocation } from "@/lib/hooks/useCapacity";
-import { toast } from "sonner";
+import React, { useState, useEffect } from 'react';
+import { X, Users, Clock, Calendar, User } from 'lucide-react';
+import { capacityAPI } from '@/utils/api/capacity';
+import { useOrganizationStore } from '@/lib/stores/organizationStore';
+import { teamAPI } from '@/utils/api/team';
 
 interface AddResourceModalProps {
   isOpen: boolean;
@@ -29,303 +28,311 @@ interface ProjectMember {
   };
 }
 
-export default function AddResourceModal({
-  isOpen,
-  onClose,
-  onResourceAdded,
-}: AddResourceModalProps) {
+interface Project {
+  id: string;
+  name: string;
+  code?: string;
+  project_members?: ProjectMember[];
+}
+
+export default function AddResourceModal({ isOpen, onClose, onResourceAdded }: AddResourceModalProps) {
   const { currentOrganization } = useOrganizationStore();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [availableMembers, setAvailableMembers] = useState<any[]>([]);
   const [formData, setFormData] = useState<{
     organization_member_id: string;
-    project_id: string;
     weekly_capacity_hours: number;
     start_date: string;
     end_date: string;
     notes: string;
   }>({
-    organization_member_id: "",
-    project_id: "",
+    organization_member_id: '',
     weekly_capacity_hours: 40,
-    start_date: "",
-    end_date: "",
-    notes: "",
+    start_date: '',
+    end_date: '',
+    notes: ''
   });
 
-  // React Query hooks
-  const {
-    data: teamData,
-    isLoading: loadingMembers,
-    error: membersError,
-  } = useTeamMembers(currentOrganization?.id || "");
-
-  const createAllocationMutation = useCreateAllocation();
-
-  // Extract team members
-  const availableMembers = teamData?.members || [];
-
   useEffect(() => {
+    const fetchMembers = async () => {
+      if (!currentOrganization?.id) return;
+      try {
+        setLoading(true);
+        const teamRes = await teamAPI.getTeamMembers(currentOrganization.id);
+        // Use organization members
+        const members = (teamRes.members || []).map((m: any) => ({
+          id: m.id,
+          organization_member_id: m.id,
+          role: m.roles?.name || '',
+          organization_members: {
+            id: m.id,
+            user_id: m.users?.id,
+            users: m.users
+          }
+        }));
+        setAvailableMembers(members);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch members');
+      } finally {
+        setLoading(false);
+      }
+    };
+
     if (isOpen) {
+      fetchMembers();
       // Set default start date to current week
       const today = new Date();
       const currentWeekStart = new Date(today);
       const dayOfWeek = today.getDay();
       const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       currentWeekStart.setDate(today.getDate() - daysToSubtract);
-
-      setFormData((prev) => ({
+      
+      setFormData(prev => ({
         ...prev,
-        start_date: currentWeekStart.toISOString().split("T")[0],
-        weekly_capacity_hours: 40,
+        start_date: currentWeekStart.toISOString().split('T')[0],
+        weekly_capacity_hours: 40
       }));
     }
-  }, [isOpen]);
+  }, [isOpen, currentOrganization?.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.organization_member_id) {
+      setError('Please fill in all required fields');
+      return;
+    }
 
     if (!currentOrganization?.id) {
-      toast.error("No organization selected");
+      setError('Organization not found');
       return;
     }
 
     try {
-      await createAllocationMutation.mutateAsync({
-        organization_id: currentOrganization.id,
-        project_id: formData.project_id,
-        organization_member_id: formData.organization_member_id,
-        hours_per_week: formData.weekly_capacity_hours,
-        start_date: formData.start_date,
-        end_date: formData.end_date || null,
-        notes: formData.notes || null,
-      });
+      setLoading(true);
+      setError(null);
 
-      toast.success("Resource allocation added successfully!");
+      const member = availableMembers.find(m => m.id === formData.organization_member_id);
+      const res = await fetch('/api/capacity/resources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId: currentOrganization.id,
+          organization_member_id: member?.organization_member_id || formData.organization_member_id,
+          weekly_capacity_hours: formData.weekly_capacity_hours,
+          start_date: formData.start_date,
+          end_date: formData.end_date || null,
+          notes: formData.notes || null,
+          is_active: true
+        })
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || 'Failed to add resource');
+      }
+
       onResourceAdded();
       onClose();
-
-      // Reset form
-      setFormData({
-        organization_member_id: "",
-        project_id: "",
-        weekly_capacity_hours: 40,
-        start_date: "",
-        end_date: "",
-        notes: "",
-      });
-    } catch (error) {
-      console.error("Error adding resource:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to add resource"
-      );
+      resetForm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add resource allocation');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleInputChange = (
-    field: keyof typeof formData,
-    value: string | number
-  ) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+  const resetForm = () => {
+    setFormData({
+      organization_member_id: '',
+      weekly_capacity_hours: 40,
+      start_date: '',
+      end_date: '',
+      notes: ''
+    });
+    setError(null);
   };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
+  const selectedMember = availableMembers.find(member => member.id === formData.organization_member_id);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-6 border-b border-gray-200">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">
-              Add Resource Allocation
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Assign team members to projects with specific capacity allocation
-            </p>
+        <div className="sticky top-0 bg-white px-6 py-4 border-b border-gray-200">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-semibold text-gray-900">Add Resource</h2>
+            <button
+              onClick={handleClose}
+              className="text-gray-400 hover:text-gray-600 p-2"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-500 transition-colors"
-            disabled={createAllocationMutation.isPending}
-          >
-            <X size={24} />
-          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Team Member Selection */}
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <User className="h-5 w-5 text-orange-500" />
-              <h3 className="text-lg font-medium text-gray-900">Team Member</h3>
+        <div className="px-6 py-6">
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+              <div className="flex items-center">
+                <div className="text-red-400 mr-3">⚠️</div>
+                <div>{error}</div>
+              </div>
             </div>
+          )}
 
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Team Member Selection */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Select Team Member
+              <label htmlFor="organization_member_id" className="block text-sm font-medium text-gray-700 mb-2">
+                <Users className="inline h-4 w-4 mr-1" />
+                Team Member *
               </label>
               <select
+                id="organization_member_id"
                 value={formData.organization_member_id}
-                onChange={(e) =>
-                  handleInputChange("organization_member_id", e.target.value)
-                }
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                onChange={(e) => setFormData(prev => ({ ...prev, organization_member_id: e.target.value }))}
+                className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 required
-                disabled={loadingMembers}
               >
-                <option value="">
-                  {loadingMembers
-                    ? "Loading team members..."
-                    : "Select a team member"}
-                </option>
-                {availableMembers.map((member) => (
+                <option value="">Select a team member...</option>
+                 {availableMembers.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.users?.full_name} ({member.users?.email})
-                    {member.department && ` - ${member.department}`}
+                     {member.organization_members.users.full_name} - {member.role}
                   </option>
                 ))}
               </select>
-              {membersError && (
-                <p className="mt-1 text-sm text-red-600">
-                  Error loading team members: {membersError.message}
-                </p>
+              {availableMembers.length === 0 && (
+                <p className="text-sm text-gray-500 mt-1">No team members available.</p>
               )}
             </div>
-          </div>
 
-          {/* Project Selection */}
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Users className="h-5 w-5 text-orange-500" />
-              <h3 className="text-lg font-medium text-gray-900">Project</h3>
-            </div>
+            {/* Selected Member Preview */}
+            {selectedMember && (
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                    <User className="h-5 w-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {selectedMember.organization_members.users.full_name}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {selectedMember.organization_members.users.email} • {selectedMember.role}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Project ID
-              </label>
-              <input
-                type="text"
-                value={formData.project_id}
-                onChange={(e) =>
-                  handleInputChange("project_id", e.target.value)
-                }
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-                placeholder="Enter project ID"
-                required
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Enter the project ID where this team member will be allocated
-              </p>
-            </div>
-          </div>
-
-          {/* Capacity Details */}
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Clock className="h-5 w-5 text-orange-500" />
-              <h3 className="text-lg font-medium text-gray-900">
-                Capacity Details
-              </h3>
-            </div>
-
+            {/* Capacity Configuration */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Weekly Hours
+                <label htmlFor="weekly_capacity_hours" className="block text-sm font-medium text-gray-700 mb-2">
+                  <Clock className="inline h-4 w-4 mr-1" />
+                  Weekly Capacity Hours *
                 </label>
                 <input
                   type="number"
-                  min="1"
-                  max="168"
+                  id="weekly_capacity_hours"
                   value={formData.weekly_capacity_hours}
-                  onChange={(e) =>
-                    handleInputChange(
-                      "weekly_capacity_hours",
-                      Number(e.target.value)
-                    )
-                  }
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                  onChange={(e) => setFormData(prev => ({ ...prev, weekly_capacity_hours: Number(e.target.value) }))}
+                  min="0"
+                  max="168"
+                  step="0.5"
+                  className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  placeholder="e.g., 40"
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">Maximum 168 hours per week</p>
               </div>
-            </div>
-          </div>
 
-          {/* Date Range */}
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Calendar className="h-5 w-5 text-orange-500" />
-              <h3 className="text-lg font-medium text-gray-900">Date Range</h3>
+              <div></div>
             </div>
 
+            {/* Date Range */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Start Date
+                <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-2">
+                  <Calendar className="inline h-4 w-4 mr-1" />
+                  Start Date *
                 </label>
                 <input
                   type="date"
+                  id="start_date"
                   value={formData.start_date}
-                  onChange={(e) =>
-                    handleInputChange("start_date", e.target.value)
-                  }
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                  onChange={(e) => setFormData(prev => ({ ...prev, start_date: e.target.value }))}
+                  className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="end_date" className="block text-sm font-medium text-gray-700 mb-2">
                   End Date (Optional)
                 </label>
                 <input
                   type="date"
+                  id="end_date"
                   value={formData.end_date}
-                  onChange={(e) =>
-                    handleInputChange("end_date", e.target.value)
-                  }
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
+                  onChange={(e) => setFormData(prev => ({ ...prev, end_date: e.target.value }))}
                   min={formData.start_date}
+                  className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 />
+                <p className="text-xs text-gray-500 mt-1">Leave empty for ongoing allocation</p>
               </div>
             </div>
-          </div>
 
-          {/* Notes */}
-          <div className="space-y-4">
+            {/* Notes */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Notes (Optional)
+              <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-2">
+                Notes
               </label>
               <textarea
+                id="notes"
                 value={formData.notes}
-                onChange={(e) => handleInputChange("notes", e.target.value)}
+                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
                 rows={3}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-orange-500 focus:border-orange-500 sm:text-sm"
-                placeholder="Add any additional notes about this allocation..."
+                className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                placeholder="Additional notes about this allocation..."
               />
             </div>
-          </div>
+          </form>
+        </div>
 
-          <div className="flex justify-end space-x-3 pt-6 border-t">
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t border-gray-200">
+          <div className="flex justify-end space-x-3">
             <button
               type="button"
-              onClick={onClose}
-              disabled={createAllocationMutation.isPending}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+              onClick={handleClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={createAllocationMutation.isPending}
-              className="px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50"
+              onClick={handleSubmit}
+              disabled={loading || !formData.organization_member_id}
+              className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              {createAllocationMutation.isPending
-                ? "Adding Resource..."
-                : "Add Resource"}
+              {loading ? (
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Adding...
+                </div>
+              ) : (
+                'Add Resource'
+              )}
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
