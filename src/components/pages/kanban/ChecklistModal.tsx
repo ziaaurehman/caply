@@ -1,33 +1,33 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { X, CheckSquare, Plus, Trash2 } from "lucide-react"
-import { kanbanAPI } from "@/utils/api/kanban"
-import { toast } from "sonner"
+import { useState } from "react";
+import { X, CheckSquare, Plus, Trash2 } from "lucide-react";
+import { kanbanAPI } from "@/utils/api/kanban";
+import { toast } from "sonner";
 
 interface ChecklistItem {
-  id: string
-  content: string
-  is_completed: boolean
-  position: number
-  due_date?: string
-  assigned_to_project_member_id?: string
+  id: string;
+  content: string;
+  is_completed: boolean;
+  position: number;
+  due_date?: string;
+  assigned_to_project_member_id?: string;
 }
 
 interface Checklist {
-  id: string
-  name: string
-  position: number
-  checklist_items: ChecklistItem[]
+  id: string;
+  name: string;
+  position: number;
+  checklist_items: ChecklistItem[];
 }
 
 interface ChecklistModalProps {
-  isOpen: boolean
-  onClose: () => void
-  cardId: string
-  organizationId: string
-  checklists: Checklist[]
-  onChecklistsChange: (checklists: Checklist[]) => void
+  isOpen: boolean;
+  onClose: () => void;
+  cardId: string;
+  organizationId: string;
+  checklists: Checklist[];
+  onChecklistsChange: (checklists: Checklist[]) => void;
 }
 
 export default function ChecklistModal({
@@ -36,65 +36,70 @@ export default function ChecklistModal({
   cardId,
   organizationId,
   checklists,
-  onChecklistsChange
+  onChecklistsChange,
 }: ChecklistModalProps) {
-  const [newChecklistName, setNewChecklistName] = useState("")
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [newChecklistName, setNewChecklistName] = useState("");
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleCreateChecklist = async () => {
-    if (!newChecklistName.trim()) return
+    if (!newChecklistName.trim()) return;
 
     try {
-      setIsSubmitting(true)
+      setIsSubmitting(true);
       const response = await kanbanAPI.createChecklist({
         card_id: cardId,
         name: newChecklistName,
-        organizationId
-      })
+        organizationId,
+      });
 
       // Add the new checklist to the list
-      onChecklistsChange([...checklists, { ...response.checklist, checklist_items: [] }])
-      setNewChecklistName("")
-      setShowCreateForm(false)
-      toast.success('Checklist created successfully!')
+      onChecklistsChange([
+        ...checklists,
+        { ...response.checklist, checklist_items: [] },
+      ]);
+      setNewChecklistName("");
+      setShowCreateForm(false);
+      toast.success("Checklist created successfully!");
     } catch (error) {
-      console.error("Error creating checklist:", error)
-      toast.error('Failed to create checklist')
+      console.error("Error creating checklist:", error);
+      toast.error("Failed to create checklist");
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   const handleDeleteChecklist = (checklistId: string) => {
-    onChecklistsChange(checklists.filter(c => c.id !== checklistId))
-  }
+    onChecklistsChange(checklists.filter((c) => c.id !== checklistId));
+  };
 
   const handleToggleItem = (checklistId: string, itemId: string) => {
-    const updatedChecklists = checklists.map(checklist => {
+    const updatedChecklists = checklists.map((checklist) => {
       if (checklist.id === checklistId) {
         return {
           ...checklist,
-          checklist_items: checklist.checklist_items.map(item => {
+          checklist_items: checklist.checklist_items.map((item) => {
             if (item.id === itemId) {
-              return { ...item, is_completed: !item.is_completed }
+              return { ...item, is_completed: !item.is_completed };
             }
-            return item
-          })
-        }
+            return item;
+          }),
+        };
       }
-      return checklist
-    })
-    onChecklistsChange(updatedChecklists)
-  }
+      return checklist;
+    });
+    onChecklistsChange(updatedChecklists);
+  };
 
   const getProgress = (checklist: Checklist) => {
-    const total = checklist.checklist_items.length
-    const completed = checklist.checklist_items.filter(item => item.is_completed).length
-    return total > 0 ? Math.round((completed / total) * 100) : 0
-  }
+    const total = checklist.checklist_items.length;
+    const completed = checklist.checklist_items.filter(
+      (item) => item.is_completed
+    ).length;
+    return total > 0 ? Math.round((completed / total) * 100) : 0;
+  };
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -111,12 +116,14 @@ export default function ChecklistModal({
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Create New Checklist */}
           {showCreateForm ? (
             <div className="space-y-3">
               <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Title</label>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  Title
+                </label>
                 <input
                   type="text"
                   placeholder="Checklist"
@@ -132,7 +139,7 @@ export default function ChecklistModal({
                   disabled={isSubmitting}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Adding...' : 'Add'}
+                  {isSubmitting ? "Adding..." : "Add"}
                 </button>
                 <button
                   onClick={() => setShowCreateForm(false)}
@@ -153,15 +160,19 @@ export default function ChecklistModal({
 
           {/* Existing Checklists */}
           {checklists.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-gray-700">Existing checklists</h3>
+            <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              <h3 className="text-sm font-medium text-gray-700">
+                Existing checklists
+              </h3>
               {checklists.map((checklist) => (
                 <div
                   key={checklist.id}
                   className="border border-gray-200 rounded-lg p-3 hover:border-gray-300 transition-colors"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-medium text-gray-900">{checklist.name}</h4>
+                    <h4 className="text-sm font-medium text-gray-900">
+                      {checklist.name}
+                    </h4>
                     <button
                       onClick={() => handleDeleteChecklist(checklist.id)}
                       className="p-1 text-gray-400 hover:text-red-500"
@@ -169,13 +180,18 @@ export default function ChecklistModal({
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
-                  
+
                   {/* Progress Bar */}
                   <div className="mb-2">
                     <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
                       <span>{getProgress(checklist)}% complete</span>
                       <span>
-                        {checklist.checklist_items.filter(item => item.is_completed).length} of {checklist.checklist_items.length}
+                        {
+                          checklist.checklist_items.filter(
+                            (item) => item.is_completed
+                          ).length
+                        }{" "}
+                        of {checklist.checklist_items.length}
                       </span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
@@ -194,18 +210,24 @@ export default function ChecklistModal({
                         className="flex items-center gap-2 text-sm"
                       >
                         <button
-                          onClick={() => handleToggleItem(checklist.id, item.id)}
+                          onClick={() =>
+                            handleToggleItem(checklist.id, item.id)
+                          }
                           className={`w-4 h-4 rounded border-2 flex items-center justify-center ${
                             item.is_completed
-                              ? 'bg-blue-600 border-blue-600 text-white'
-                              : 'border-gray-300 hover:border-gray-400'
+                              ? "bg-blue-600 border-blue-600 text-white"
+                              : "border-gray-300 hover:border-gray-400"
                           }`}
                         >
-                          {item.is_completed && <CheckSquare className="h-3 w-3" />}
+                          {item.is_completed && (
+                            <CheckSquare className="h-3 w-3" />
+                          )}
                         </button>
                         <span
                           className={`flex-1 ${
-                            item.is_completed ? 'line-through text-gray-500' : 'text-gray-700'
+                            item.is_completed
+                              ? "line-through text-gray-500"
+                              : "text-gray-700"
                           }`}
                         >
                           {item.content}
@@ -225,5 +247,5 @@ export default function ChecklistModal({
         </div>
       </div>
     </div>
-  )
+  );
 }

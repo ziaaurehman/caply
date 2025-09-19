@@ -32,6 +32,7 @@ import CardDetailModal from "./CardDetailModal";
 import KanbanSkeleton from "./KanbanSkeleton";
 import AddListModal from "./AddListModal";
 import { useQueryClient } from "@tanstack/react-query";
+import { useDebounce } from "@/lib/hooks/useDebounce";
 
 interface KanbanPageProps {
   projectId: string;
@@ -67,6 +68,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // Search state
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
   const [showArchived, setShowArchived] = useState<boolean>(false);
 
   const [cardModal, setCardModal] = useState<CardModalState>({
@@ -94,6 +96,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     isError: boardError,
     error: boardErrorMessage,
     refetch: refetchBoard,
+    isFetching: boardFetching,
 
     // Derived data
     project,
@@ -113,8 +116,10 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     invalidateBoard,
   } = useKanbanBoard(projectId, currentOrganization?.id, {
     includeArchived: showArchived,
-    search: searchTerm,
+    search: debouncedSearchTerm,
   });
+
+  console.log("boardData", boardData);
 
   useEffect(() => {
     if (boardData) {
@@ -1277,46 +1282,48 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     return { backgroundColor: "#f3f4f6" };
   };
 
+  const isLoading = boardLoading && !boardData; // Only show skeleton on initial load
+  const isSearching = boardFetching && boardData && debouncedSearchTerm;
+
   // Show loading while organization is loading or not loaded
-  if (organizationLoading || !currentOrganization?.id || boardLoading) {
-    return (
-      <div className="min-h-screen">
-        <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
-        <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
-        <KanbanSkeleton />
-      </div>
-    );
-  }
+  // if (organizationLoading || !currentOrganization?.id || isLoading) {
+  //   return (
+  //     <div className="min-h-screen">
+  //       <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+  //       <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
+  //       <KanbanSkeleton />
+  //     </div>
+  //   );
+  // }
 
-  if (kanbanState.isLoading) {
-    return <KanbanSkeleton />;
-  }
+  // if (kanbanState.isLoading || isSearching) {
+  //   return <KanbanSkeleton />;
+  // }
 
-  // Update error condition to use hook's error state:
-  if (boardError || kanbanState.error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center max-w-md mx-auto">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-red-800 mb-2">
-              Error Loading Board
-            </h3>
-            <p className="text-red-600 mb-4">
-              {boardErrorMessage?.message ||
-                kanbanState.error ||
-                "Failed to load board data"}
-            </p>
-            <button
-              onClick={() => refetchBoard()}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-            >
-              Try Again
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // if (boardError || kanbanState.error) {
+  //   return (
+  //     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+  //       <div className="text-center max-w-md mx-auto">
+  //         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+  //           <h3 className="text-lg font-semibold text-red-800 mb-2">
+  //             Error Loading Board
+  //           </h3>
+  //           <p className="text-red-600 mb-4">
+  //             {boardErrorMessage?.message ||
+  //               kanbanState.error ||
+  //               "Failed to load board data"}
+  //           </p>
+  //           <button
+  //             onClick={() => refetchBoard()}
+  //             className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+  //           >
+  //             Try Again
+  //           </button>
+  //         </div>
+  //       </div>
+  //     </div>
+  //   );
+  // }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1345,24 +1352,22 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
+                {/* Search loading indicator */}
+                {isSearching && (
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                  </div>
+                )}
+                {/* Clear search button */}
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
-
-              {/* Show Archived Toggle */}
-              {/* <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="showArchived"
-                  checked={showArchived}
-                  onChange={(e) => setShowArchived(e.target.checked)}
-                  className="w-4 h-4 text-orange-600 bg-gray-100 border-gray-300 rounded focus:ring-orange-500 focus:ring-2"
-                />
-                <label
-                  htmlFor="showArchived"
-                  className="text-sm font-medium text-gray-700"
-                >
-                  Show Archived
-                </label>
-              </div> */}
 
               {/* Assignee Filter */}
               <div className="relative">
@@ -1372,7 +1377,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md appearance-none pr-8 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="all">All Assignees</option>
-                  {projectMembers.map((member) => (
+                  {projectMembers.map((member: ProjectMember) => (
                     <option key={member.id} value={member.id}>
                       {member.organization_members.users.full_name}
                     </option>
@@ -1513,53 +1518,71 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           {/* Backdrop overlay */}
           <div className="absolute inset-0 rounded-lg bg-black/10 backdrop-blur-sm"></div>
 
-          <div
-            onDrop={(e) => {
-              console.log("Drop on container - resetting drag state");
-            }}
-            className="flex overflow-x-auto pb-4 gap-6 px-8 relative z-10 min-h-[500px] items-start w-full"
-          >
-            {kanbanState.lists.map((list) => (
-              <div
-                key={list.id}
-                data-list-id={list.id}
-                className="flex-shrink-0"
+          {isLoading ? (
+            <KanbanSkeleton />
+          ) : boardError ? (
+            <div className="p-8 text-center">
+              <p className="text-red-500">
+                Error loading board: {boardErrorMessage?.message}
+              </p>
+              <button
+                onClick={() => refetchBoard()}
+                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded"
               >
-                <KanbanColumn
-                  list={list}
-                  cards={getFilteredCards(list.cards || [])}
-                  projectMembers={projectMembers}
-                  isLoadingCards={(list as any).isLoadingCards}
-                  onDragStart={handleDragStart}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  onAddCard={handleAddCard}
-                  onCardClick={handleCardClick}
-                  onListDragStart={handleListDragStart}
-                  onListDragOver={handleListDragOver}
-                  onListDragLeave={handleListDragLeave}
-                  onListDrop={handleListDrop}
-                  onListArchive={handleListArchive}
-                  onCardDragOver={handleCardDragOver}
-                  onCardDragLeave={handleCardDragLeave}
-                  onCardDrop={handleCardDrop}
-                  isDraggedOver={listDragState.dragOverListId === list.id}
-                  isBeingDragged={listDragState.draggedListId === list.id}
-                  draggedCardId={cardDragState.draggedCardId}
-                  dragOverCardId={cardDragState.dragOverCardId}
-                />
-              </div>
-            ))}
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="p-6">
+              <div
+                onDrop={(e) => {
+                  console.log("Drop on container - resetting drag state");
+                }}
+                className="flex overflow-x-auto pb-4 gap-6 px-8 relative z-10 min-h-[500px] items-start w-full"
+              >
+                {kanbanState.lists.map((list) => (
+                  <div
+                    key={list.id}
+                    data-list-id={list.id}
+                    className="flex-shrink-0"
+                  >
+                    <KanbanColumn
+                      list={list}
+                      cards={getFilteredCards(list.cards || [])}
+                      projectMembers={projectMembers}
+                      isLoadingCards={(list as any).isLoadingCards}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDrop={handleDrop}
+                      onAddCard={handleAddCard}
+                      onCardClick={handleCardClick}
+                      onListDragStart={handleListDragStart}
+                      onListDragOver={handleListDragOver}
+                      onListDragLeave={handleListDragLeave}
+                      onListDrop={handleListDrop}
+                      onListArchive={handleListArchive}
+                      onCardDragOver={handleCardDragOver}
+                      onCardDragLeave={handleCardDragLeave}
+                      onCardDrop={handleCardDrop}
+                      isDraggedOver={listDragState.dragOverListId === list.id}
+                      isBeingDragged={listDragState.draggedListId === list.id}
+                      draggedCardId={cardDragState.draggedCardId}
+                      dragOverCardId={cardDragState.dragOverCardId}
+                    />
+                  </div>
+                ))}
 
-            {/* Add List Button */}
-            <button
-              onClick={handleAddList}
-              className="flex-shrink-0 w-80 bg-gray-200/80 backdrop-blur-sm rounded-lg p-4 flex items-center justify-center text-gray-700 hover:bg-gray-300/80 transition-colors duration-200"
-            >
-              <Plus className="h-5 w-5 mr-2" />
-              Add another list
-            </button>
-          </div>
+                {/* Add List Button */}
+                <button
+                  onClick={handleAddList}
+                  className="flex-shrink-0 w-80 bg-gray-200/80 backdrop-blur-sm rounded-lg p-4 flex items-center justify-center text-gray-700 hover:bg-gray-300/80 transition-colors duration-200"
+                >
+                  <Plus className="h-5 w-5 mr-2" />
+                  Add another list
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1590,7 +1613,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           boardId={kanbanState.currentBoard.id}
           projectId={projectId}
           onCardUpdate={(updatedCard: Card) => {
-            // Update the card in the current state
             setKanbanState((prev) => ({
               ...prev,
               lists: prev.lists.map((list) => ({
@@ -1602,16 +1624,12 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               })),
             }));
 
-            // If card was archived and we're not showing archived items,
-            // close the modal and don't reload (card will be filtered out by getFilteredCards)
             if (updatedCard.is_archived && !showArchived) {
               setCardModal({ isOpen: false, card: null, mode: "view" });
               toast.success("Card archived and removed from view");
               return;
             }
 
-            // If card was unarchived and we're showing archived items,
-            // show success message but keep modal open
             if (
               !updatedCard.is_archived &&
               updatedCard.is_archived !== cardModal.card?.is_archived

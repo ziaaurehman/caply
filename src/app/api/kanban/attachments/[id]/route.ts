@@ -6,7 +6,7 @@ import { authConfig } from "@/auth";
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authConfig);
@@ -15,7 +15,7 @@ export async function DELETE(
     }
 
     const supabase = await createClient();
-    const attachmentId = params.id;
+    const attachmentId = (await params).id;
 
     // First get the attachment to find the organization and file path
     const { data: existingAttachment, error: attachmentError } = await supabase
@@ -119,7 +119,7 @@ export async function DELETE(
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authConfig);
@@ -128,7 +128,7 @@ export async function GET(
     }
 
     const supabase = await createClient();
-    const attachmentId = params.id;
+    const attachmentId = (await params).id;
 
     // Get the attachment with organization validation
     const { data: attachment, error: attachmentError } = await supabase

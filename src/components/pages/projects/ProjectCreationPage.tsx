@@ -116,7 +116,7 @@ export default function ProjectCreationPage() {
   );
   const { data: teamMembersData, isLoading: loadingTeamMembers } =
     useTeamMembers(currentOrganization?.id || "");
-  const createProjectMutation = useCreateProject();
+  const createProjectMutation = useCreateProject(currentOrganization?.id || "");
   const createClientMutation = useCreateClient();
 
   // Extract data

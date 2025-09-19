@@ -277,7 +277,9 @@ export async function GET(request: NextRequest) {
       );
 
       // Attach card labels
-      const cardLabelsList = cardLabels.filter((cl) => cl.card_id === card.id);
+      const cardLabelsList = cardLabels
+        .filter((cl) => cl.card_id === card.id)
+        .map((cardLabel) => cardLabel.labels);
 
       // Attach checklists with items
       const cardChecklists = checklists
@@ -308,7 +310,7 @@ export async function GET(request: NextRequest) {
       return {
         ...card,
         card_members: cardMembersList,
-        card_labels: cardLabelsList,
+        labels: cardLabelsList,
         checklists: cardChecklists,
         comments: cardComments,
         attachments: cardAttachments,

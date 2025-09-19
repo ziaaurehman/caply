@@ -493,7 +493,7 @@ interface CompleteBoardDataResponse {
 // Kanban API
 export const kanbanAPI = {
   // ===== COMPLETE BOARD DATA =====
-  
+
   // Get complete board data in a single request
   getCompleteBoardData: async (
     projectId: string,
@@ -510,13 +510,13 @@ export const kanbanAPI = {
     });
 
     if (options?.boardId) {
-      params.append('board_id', options.boardId);
+      params.append("board_id", options.boardId);
     }
     if (options?.includeArchived) {
-      params.append('include_archived', 'true');
+      params.append("include_archived", "true");
     }
     if (options?.search) {
-      params.append('search', options.search);
+      params.append("search", options.search);
     }
 
     const response = await fetch(
@@ -791,6 +791,18 @@ export const kanbanAPI = {
     }
     const data = await response.json();
     return { cards: data.cards || [] };
+  },
+
+  getProjectWithLists: async (projectId: string) => {
+    const response = await fetch(
+      `/api/kanban/projects/${projectId}/with-lists`
+    );
+    return response.json();
+  },
+
+  getListWithCards: async (listId: string) => {
+    const response = await fetch(`/api/kanban/lists/${listId}/with-cards`);
+    return response.json();
   },
 
   // Get single card

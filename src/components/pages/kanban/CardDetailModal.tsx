@@ -46,6 +46,7 @@ import DatesModal from "./DatesModal";
 import ChecklistModal from "./ChecklistModal";
 import AttachmentsModal from "./AttachmentsModal";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { dateUtils } from "@/utils/dateUtils";
 
 interface LabelsResponse {
   labels: any[];
@@ -116,6 +117,13 @@ export default function CardDetailModal({
   const [showDatesModal, setShowDatesModal] = useState(false);
   const [showChecklistModal, setShowChecklistModal] = useState(false);
   const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
+
+  const [deletingChecklistId, setDeletingChecklistId] = useState<string | null>(
+    null
+  );
+  const [updatingChecklistItemId, setUpdatingChecklistItemId] = useState<
+    string | null
+  >(null);
 
   // Checklist item states
   const [addingItemToChecklist, setAddingItemToChecklist] = useState<
@@ -210,8 +218,8 @@ export default function CardDetailModal({
         title: editedCard.title,
         description: editedCard.description,
         due_date: editedCard.due_date,
-        cover_color: editedCard.cover?.color,
-        cover_image: editedCard.cover?.image,
+        cover_color: editedCard.cover?.color || editedCard.cover_color,
+        cover_image: editedCard.cover?.image || editedCard.cover_image,
         organizationId,
       });
       invalidateKanbanBoard();
@@ -606,6 +614,7 @@ export default function CardDetailModal({
 
   const handleDeleteChecklist = async (checklistId: string) => {
     try {
+      setDeletingChecklistId(checklistId);
       await kanbanAPI.deleteChecklist(checklistId);
       invalidateKanbanBoard();
       // Update local state - remove the deleted checklist
@@ -625,11 +634,15 @@ export default function CardDetailModal({
     } catch (error) {
       console.error("Error deleting checklist:", error);
       toast.error("Failed to delete checklist");
+    } finally {
+      setDeletingChecklistId(null);
     }
   };
 
   const handleDeleteChecklistItem = async (itemId: string) => {
     try {
+      setUpdatingChecklistItemId(itemId);
+
       await kanbanAPI.deleteChecklistItem(itemId);
       invalidateKanbanBoard();
       // Update local state - remove the deleted item
@@ -652,6 +665,8 @@ export default function CardDetailModal({
     } catch (error) {
       console.error("Error deleting checklist item:", error);
       toast.error("Failed to delete item");
+    } finally {
+      setUpdatingChecklistItemId(null);
     }
   };
 
@@ -849,10 +864,10 @@ export default function CardDetailModal({
             {/* Left Column - Card Content */}
             <div className="flex-1 p-6 overflow-y-auto">
               {/* Cover */}
-              {editedCard.cover?.color && (
+              {editedCard.cover_color && (
                 <div
-                  className={`w-full rounded-lg mb-6 ${editedCard.cover.size === "large" ? "h-32" : "h-4"}`}
-                  style={{ backgroundColor: editedCard.cover.color }}
+                  className={`w-full rounded-lg mb-6 ${editedCard.cover?.size === "large" ? "h-32" : "h-4"}`}
+                  style={{ backgroundColor: editedCard.cover_color }}
                 />
               )}
 
@@ -1044,14 +1059,9 @@ export default function CardDetailModal({
                     </h3>
                     <div className="flex items-center gap-1">
                       <div className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-medium">
-                        {new Date(editedCard.due_date).toLocaleDateString(
-                          "en-US",
-                          {
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          }
+                        {dateUtils.formatForDisplay(
+                          editedCard.due_date,
+                          "MMM d, yyyy h:mm a"
                         )}
                         <span className="ml-1 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-xs">
                           Due soon
@@ -1193,8 +1203,12 @@ export default function CardDetailModal({
                         </h3>
                       </div>
                       <div className="flex items-center gap-2">
+                        {deletingChecklistId === checklist.id && (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                        )}
                         <button
                           onClick={() => handleDeleteChecklist(checklist.id)}
+                          disabled={deletingChecklistId === checklist.id}
                           className="px-2 py-1 text-xs text-gray-600 bg-gray-100 rounded hover:bg-red-200 hover:text-red-600"
                         >
                           Delete
@@ -1250,6 +1264,7 @@ export default function CardDetailModal({
                                 !item.is_completed
                               )
                             }
+                            disabled={updatingChecklistItemId === item.id}
                             className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
                               item.is_completed
                                 ? "bg-blue-600 border-blue-600 text-white"
@@ -1275,6 +1290,9 @@ export default function CardDetailModal({
                           >
                             {item.content}
                           </span>
+                          {updatingChecklistItemId === item.id && (
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-900"></div>
+                          )}
                           <button
                             onClick={() => handleDeleteChecklistItem(item.id)}
                             className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-600 transition-opacity"
@@ -1635,7 +1653,7 @@ export default function CardDetailModal({
         onClose={() => setShowLabelsModal(false)}
         boardId={boardId}
         organizationId={organizationId}
-        selectedLabels={editedCard.labels?.map((l) => l.id) || []}
+        selectedLabels={editedCard.labels?.map((label) => label.id) || []}
         onLabelsChange={handleLabelsChange}
         labels={labelsData?.labels || []}
         isLoading={labelsLoading}
@@ -1697,6 +1715,8 @@ export default function CardDetailModal({
           users: attachment.users,
         }))}
         onAttachmentsChange={handleAttachmentsChange}
+        projectId={projectId}
+        boardId={boardId}
       />
     </>
   );
