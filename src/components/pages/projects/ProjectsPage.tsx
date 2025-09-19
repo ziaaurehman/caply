@@ -100,10 +100,10 @@ export default function ProjectsPage() {
   } = useProjects(currentOrganization?.id || "", filters);
 
   // Extract projects and pagination data
-  const projects = projectsData?.projects || [];
-  const pagination = projectsData?.pagination;
-  const totalPages = pagination?.totalPages || 1;
-  const totalItems = pagination?.total || 0;
+  const projects = useMemo(() => projectsData?.projects || [], [projectsData]);
+  const pagination = useMemo(() => projectsData?.pagination, [projectsData]);
+  const totalPages = useMemo(() => pagination?.totalPages || 1, [pagination]);
+  const totalItems = useMemo(() => pagination?.total || 0, [pagination]);
 
   // Fetch progress data for projects
   const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);

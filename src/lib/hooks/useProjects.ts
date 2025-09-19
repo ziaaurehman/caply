@@ -69,8 +69,9 @@ export function useProjects(
   organizationId: string,
   filters: ProjectFilters = {}
 ) {
+  const projectQueryKey = projectKeys.list(organizationId, filters);
   return useQuery({
-    queryKey: projectKeys.list(organizationId, filters),
+    queryKey: projectQueryKey,
     queryFn: () => projectAPI.getProjects(organizationId, filters),
     enabled: !!organizationId,
     staleTime: 2 * 60 * 1000, // 2 minutes
@@ -129,19 +130,40 @@ export function useProjectDocuments(projectId: string, organizationId: string) {
 
 // ===== MUTATIONS =====
 
-export function useCreateProject() {
+export function useCreateProject(organizationId: string) {
   const queryClient = useQueryClient();
+  console.log("organizationId", organizationId);
 
   return useMutation({
     mutationFn: (data: CreateProjectData) => projectAPI.createProject(data),
     onSuccess: (data, variables) => {
       // Invalidate projects list for the organization
+      const queryKey = projectKeys.list(organizationId, {
+        page: 1,
+        limit: 10,
+        search: undefined,
+        status: undefined,
+      });
+      console.log("queryKey", queryKey);
       queryClient.invalidateQueries({
-        queryKey: projectKeys.lists(),
-        predicate: (query) => {
-          const [, , organizationId] = query.queryKey;
-          return organizationId === variables.organization_id;
-        },
+        queryKey: queryKey,
+      });
+
+      // Invalidate specific organization project list
+      if (organizationId) {
+        queryClient.invalidateQueries({
+          queryKey: projectKeys.list(organizationId, {}),
+        });
+      }
+
+      // Invalidate kanban projects query
+      queryClient.invalidateQueries({
+        queryKey: ["kanban-projects", variables.organization_id],
+      });
+
+      // Invalidate capacity projects query
+      queryClient.invalidateQueries({
+        queryKey: projectKeys.capacityAll(variables.organization_id),
       });
 
       // Add the new project to cache
@@ -150,10 +172,17 @@ export function useCreateProject() {
         data
       );
 
-      // Invalidate capacity projects if applicable
-      queryClient.invalidateQueries({
-        queryKey: projectKeys.capacityAll(variables.organization_id),
-      });
+      // Optimistically add to cache if needed
+      queryClient.setQueryData(
+        projectKeys.list(variables.organization_id, {}),
+        (old: ProjectsResponse | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            projects: [...old.projects, data.project],
+          };
+        }
+      );
     },
     onError: (error) => {
       console.error("Failed to create project:", error);

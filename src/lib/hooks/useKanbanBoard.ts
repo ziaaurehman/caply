@@ -46,8 +46,9 @@ export const useKanbanBoard = (
       return failureCount < 2;
     },
     refetchOnWindowFocus: false,
-    refetchOnMount: "always", // Change this to prevent unnecessary refetches
+    refetchOnMount: false, // Change this to prevent unnecessary refetches
     refetchOnReconnect: false,
+    refetchInterval: false,
   });
 
   // Helper functions for data manipulation
@@ -191,6 +192,7 @@ export const useKanbanBoard = (
     isError: query.isError,
     error: query.error,
     refetch: query.refetch,
+    isFetching: query.isFetching,
 
     // Helper functions
     invalidateBoard,
