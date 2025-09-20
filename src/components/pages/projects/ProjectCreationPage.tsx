@@ -103,10 +103,6 @@ export default function ProjectCreationPage() {
     "Project Management",
   ]);
   const [newCategory, setNewCategory] = useState("");
-  // const [clients, setClients] = useState<Client[]>([]);
-  // const [loadingClients, setLoadingClients] = useState(false);
-  // const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  // const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 

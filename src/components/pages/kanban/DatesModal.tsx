@@ -28,6 +28,7 @@ export default function DatesModal({
 }: DatesModalProps) {
   const [dueDate, setDueDate] = useState("");
   const [dueTime, setDueTime] = useState("12:00");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Initialize state with proper date handling
   useEffect(() => {
@@ -48,23 +49,37 @@ export default function DatesModal({
   }, [currentDates.due_date, isOpen]);
 
   const handleSave = () => {
-    if (dueDate && dueTime) {
-      // Create local datetime and convert to UTC
-      const localDateTime = dateUtils.createDateTime(dueDate, dueTime);
-      const utcString = dateUtils.localToUTC(localDateTime);
+    // setIsSubmitting(true);
+    try {
+      if (dueDate && dueTime) {
+        // Create local datetime and convert to UTC
+        const localDateTime = dateUtils.createDateTime(dueDate, dueTime);
+        const utcString = dateUtils.localToUTC(localDateTime);
 
-      onDatesChange({
-        due_date: utcString,
-      });
-    } else {
-      onDatesChange({});
+        onDatesChange({
+          due_date: utcString,
+        });
+      } else {
+        onDatesChange({});
+      }
+      onClose();
+    } catch (error) {
+      console.error("Error saving dates:", error);
+    } finally {
+      // setIsSubmitting(false);
     }
-    onClose();
   };
 
-  const handleRemove = () => {
-    onDatesChange({});
-    onClose();
+  const handleRemove = async () => {
+    setIsSubmitting(true);
+    try {
+      await onDatesChange({ due_date: undefined });
+      onClose();
+    } catch (error) {
+      console.error("Error removing dates:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Generate calendar days using date-fns
@@ -169,12 +184,14 @@ export default function DatesModal({
           {dueDate && (
             <button
               onClick={handleRemove}
+              disabled={isSubmitting}
               className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium"
             >
-              Remove
+              {isSubmitting ? "Removing..." : "Remove"}
             </button>
           )}
           <button
+            disabled={isSubmitting}
             onClick={handleSave}
             className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
           >
