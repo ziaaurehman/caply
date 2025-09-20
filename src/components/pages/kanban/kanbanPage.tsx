@@ -48,13 +48,13 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   const queryClient = useQueryClient();
 
   // Main state
-  const [kanbanState, setKanbanState] = useState<KanbanState>({
-    boards: [],
-    currentBoard: null,
-    lists: [],
-    isLoading: false,
-    error: null,
-  });
+  // const [kanbanState, setKanbanState] = useState<KanbanState>({
+  //   boards: [],
+  //   currentBoard: null,
+  //   lists: [],
+  //   isLoading: false,
+  //   error: null,
+  // });
 
   const [isAddListModalOpen, setIsAddListModalOpen] = useState(false);
 
@@ -114,32 +114,33 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     optimisticAddCard,
     optimisticDeleteCard,
     invalidateBoard,
+    updateBoardData,
   } = useKanbanBoard(projectId, currentOrganization?.id, {
     includeArchived: showArchived,
   });
 
-  useEffect(() => {
-    if (boardData) {
-      setKanbanState({
-        boards: boards,
-        currentBoard: currentBoard || null,
-        lists: lists,
-        isLoading: false,
-        error: null,
-      });
-    }
-  }, [boardData, boards, currentBoard, lists]);
+  // useEffect(() => {
+  //   if (boardData) {
+  //     setKanbanState({
+  //       boards: boards,
+  //       currentBoard: currentBoard || null,
+  //       lists: lists,
+  //       isLoading: false,
+  //       error: null,
+  //     });
+  //   }
+  // }, [boardData, boards, currentBoard, lists]);
 
   // Handle loading and error states
-  useEffect(() => {
-    setKanbanState((prev) => ({
-      ...prev,
-      isLoading: boardLoading,
-      error: boardError
-        ? boardErrorMessage?.message || "Failed to load board data"
-        : null,
-    }));
-  }, [boardLoading, boardError, boardErrorMessage]);
+  // useEffect(() => {
+  //   setKanbanState((prev) => ({
+  //     ...prev,
+  //     isLoading: boardLoading,
+  //     error: boardError
+  //       ? boardErrorMessage?.message || "Failed to load board data"
+  //       : null,
+  //   }));
+  // }, [boardLoading, boardError, boardErrorMessage]);
 
   // List Drag & Drop State
   const [listDragState, setListDragState] = useState<{
@@ -233,7 +234,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     (e: React.DragEvent, card: Card) => {
       // Find the source list ID by searching for the card in our current state
       let sourceListId = null;
-      for (const list of kanbanState.lists) {
+      for (const list of lists) {
         const foundCard = (list.cards || []).find((c) => c.id === card.id);
         if (foundCard) {
           sourceListId = list.id;
@@ -259,7 +260,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       e.dataTransfer.setData("sourceListId", sourceListId || "");
       e.dataTransfer.setData("dragType", "card");
     },
-    [kanbanState.lists]
+    [lists]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -304,46 +305,30 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
         // Find the card being moved - more explicit approach
         let cardToMove = null;
-        let sourceList = null;
 
-        for (const list of kanbanState.lists) {
+        for (const list of lists) {
           const foundCard = (list.cards || []).find(
             (card) => card.id === cardId
           );
           if (foundCard) {
             cardToMove = foundCard;
-            sourceList = list;
             break;
           }
         }
 
         if (!cardToMove) {
           console.warn("Card not found:", cardId);
-          console.log(
-            "Available cards:",
-            kanbanState.lists
-              .flatMap((l) => l.cards || [])
-              .map((c) => ({ id: c.id, title: c.title }))
-          );
           return;
         }
 
-        // Store original state for potential rollback
-        const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
+        updateBoardData((oldData: any) => {
+          if (!oldData) return oldData;
 
-        // OPTIMISTIC UPDATE: Immediately move the card in the UI
-        console.log("Starting optimistic update...");
-
-        // Force immediate state update
-        setKanbanState((prevState) => {
-          const newLists = prevState.lists.map((list) => {
+          const newLists = oldData.lists.map((list: any) => {
             if (list.id === sourceListId) {
               // Remove from source list
               const cardsWithoutMoved = (list.cards || []).filter(
-                (card) => card.id !== cardId
-              );
-              console.log(
-                `Removing card ${cardId} from ${list.name}, cards left: ${cardsWithoutMoved.length}`
+                (card: any) => card.id !== cardId
               );
               return { ...list, cards: cardsWithoutMoved };
             }
@@ -351,16 +336,12 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               // Add to target list
               const movedCard = { ...cardToMove, list_id: targetListId };
               const cardsWithMoved = [...(list.cards || []), movedCard];
-              console.log(
-                `Adding card ${cardId} to ${list.name}, total cards: ${cardsWithMoved.length}`
-              );
               return { ...list, cards: cardsWithMoved };
             }
             return list;
           });
 
-          console.log("Optimistic update completed");
-          return { ...prevState, lists: newLists };
+          return { ...oldData, lists: newLists };
         });
 
         // Make API call in the background after a small delay to ensure UI update
@@ -373,17 +354,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             });
             console.log("API call successful - card moved");
             // Invalidate query to refresh data
-            invalidateBoard();
+            // invalidateBoard();
           } catch (error) {
             console.error("Error moving card:", error);
-
-            // ROLLBACK: Revert the optimistic update on failure
-            console.log("Rolling back to original state");
-            setKanbanState((prev) => ({
-              ...prev,
-              lists: originalLists,
-            }));
-
             // Show error toast
             toast.error("Failed to move card. Please try again.");
           }
@@ -405,12 +378,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         sourceListId: null,
       });
     },
-    [
-      kanbanState.lists,
-      currentOrganization?.id,
-      dragState.sourceListId,
-      invalidateBoard,
-    ]
+    [lists, currentOrganization?.id, dragState.sourceListId, updateBoardData]
   );
 
   // Board management
@@ -418,7 +386,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     backgroundType: "image" | "color",
     value: string
   ) => {
-    if (!kanbanState.currentBoard || !currentOrganization?.id) return;
+    if (!currentBoard || !currentOrganization?.id) return;
 
     try {
       const updateData =
@@ -426,25 +394,19 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           ? { background_image: value, background_color: undefined }
           : { background_color: value, background_image: undefined };
 
-      const updatedBoard = await kanbanAPI.updateBoard(
-        kanbanState.currentBoard.id,
-        {
-          ...updateData,
-          organizationId: currentOrganization.id,
-        }
-      );
+      const updatedBoard = await kanbanAPI.updateBoard(currentBoard.id, {
+        ...updateData,
+        organizationId: currentOrganization.id,
+      });
 
-      setKanbanState((prev) => ({
+      updateBoardData((prev) => ({
         ...prev,
         currentBoard: updatedBoard.board,
-        // boards: prev.boards.map((board) =>
-        //   board.id === updatedBoard.board.id ? updatedBoard.board : board
-        // ),
       }));
 
       setBackgroundDropdownOpen(false);
       // Invalidate query to refresh data
-      invalidateBoard();
+      // invalidateBoard();
     } catch (error) {
       console.error("Error updating board background:", error);
     }
@@ -513,7 +475,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       }
 
       // Find the target list
-      const targetList = kanbanState.lists.find((list) =>
+      const targetList = lists.find((list) =>
         list.cards?.some((card) => card.id === targetCard.id)
       );
 
@@ -540,14 +502,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           return;
         }
 
-        // Store original state for potential rollback
-        const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
-
         try {
-          console.log(
-            `Reordering card ${draggedCardId} to position of ${targetCard.id}`
-          );
-
           // Find current positions
           const cards = targetList.cards || [];
           const draggedCard = cards.find((c) => c.id === draggedCardId);
@@ -583,17 +538,18 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           }));
 
           // OPTIMISTIC UPDATE: Immediately update the UI
-          setKanbanState((prev) => ({
-            ...prev,
-            lists: prev.lists.map((list) =>
-              list.id === targetList.id
-                ? { ...list, cards: updatedCards }
-                : list
-            ),
-          }));
+          updateBoardData((oldData: any) => {
+            if (!oldData) return oldData;
 
-          // Set reordering state
-          setIsCardReordering(true);
+            return {
+              ...oldData,
+              lists: oldData.lists.map((list: any) =>
+                list.id === targetList.id
+                  ? { ...list, cards: updatedCards }
+                  : list
+              ),
+            };
+          });
 
           // Prepare API payload
           const cardPositions = updatedCards.map((card) => ({
@@ -601,62 +557,24 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
             position: card.position,
           }));
 
-          // Create new abort controller for this request
-          cardReorderAbortControllerRef.current = new AbortController();
-
-          // Debounced API call with cancellation support
-          cardReorderTimeoutRef.current = setTimeout(async () => {
+          setTimeout(async () => {
             try {
-              console.log("Making debounced API call to reorder cards...");
-
-              // Check if request was cancelled
-              if (cardReorderAbortControllerRef.current?.signal.aborted) {
-                console.log("Card reorder request was cancelled");
-                return;
-              }
-
               await kanbanAPI.reorderCards(
                 targetList.id,
                 cardPositions,
                 currentOrganization.id
               );
-
-              console.log("Card reorder API call successful");
               toast.success("Cards reordered successfully!");
-              // Invalidate query to refresh data
-              invalidateBoard();
+              // Don't call invalidateBoard() - let React Query handle it
             } catch (error: any) {
-              // Don't show error if request was cancelled
-              if (error.name === "AbortError") {
-                console.log("Card reorder request was cancelled");
-                return;
-              }
-
               console.error("Error reordering cards:", error);
               toast.error("Failed to reorder cards");
-
-              // ROLLBACK: Revert the optimistic update on failure
-              console.log("Rolling back card reorder to original state");
-              setKanbanState((prev) => ({
-                ...prev,
-                lists: originalLists,
-              }));
-            } finally {
-              setIsCardReordering(false);
-              cardReorderAbortControllerRef.current = null;
+              // React Query will automatically revert the optimistic update
             }
-          }, 300); // 300ms debounce delay
+          }, 300);
         } catch (error) {
           console.error("Error in card reorder logic:", error);
           toast.error("Failed to reorder cards");
-
-          // ROLLBACK: Revert the optimistic update on failure
-          setKanbanState((prev) => ({
-            ...prev,
-            lists: originalLists,
-          }));
-
-          setIsCardReordering(false);
         }
       }
 
@@ -669,11 +587,10 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       });
     },
     [
-      kanbanState.lists,
+      lists,
       currentOrganization?.id,
       cardDragState.sourceListId,
-      isCardReordering,
-      invalidateBoard,
+      updateBoardData,
     ]
   );
 
@@ -749,26 +666,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         return;
       }
 
-      // Cancel any pending reorder operation
-      if (listReorderAbortControllerRef.current) {
-        listReorderAbortControllerRef.current.abort();
-      }
-
-      // Clear any pending timeout
-      if (listReorderTimeoutRef.current) {
-        clearTimeout(listReorderTimeoutRef.current);
-      }
-
-      // Store original state for potential rollback
-      const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
-
       try {
         console.log(
           `Moving list ${draggedListId} to position of ${targetListId}`
         );
 
-        // Find current positions
-        const lists = kanbanState.lists;
         const draggedList = lists.find((l) => l.id === draggedListId);
         const targetList = lists.find((l) => l.id === targetListId);
 
@@ -797,14 +699,10 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           position: index,
         }));
 
-        // OPTIMISTIC UPDATE: Immediately update the UI
-        setKanbanState((prev) => ({
-          ...prev,
-          lists: updatedLists,
-        }));
-
-        // Set reordering state
-        setIsListReordering(true);
+        updateBoardData((oldData: any) => {
+          if (!oldData) return oldData;
+          return { ...oldData, lists: updatedLists };
+        });
 
         // Prepare API payload
         const listPositions = updatedLists.map((list) => ({
@@ -812,60 +710,25 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           position: list.position,
         }));
 
-        // Create new abort controller for this request
-        listReorderAbortControllerRef.current = new AbortController();
-
-        // Debounced API call with cancellation support
-        listReorderTimeoutRef.current = setTimeout(async () => {
+        // Debounced API call
+        setTimeout(async () => {
           try {
-            console.log("Making debounced API call to reorder lists...");
-
-            // Check if request was cancelled
-            if (listReorderAbortControllerRef.current?.signal.aborted) {
-              console.log("List reorder request was cancelled");
-              return;
-            }
-
             await kanbanAPI.reorderLists(
-              kanbanState.currentBoard!.id,
+              currentBoard!.id,
               listPositions,
               currentOrganization.id
             );
-
-            console.log("List reorder API call successful");
             toast.success("List reordered successfully!");
-            // Invalidate query to refresh data
-            invalidateBoard();
+            // Don't call invalidateBoard() - let React Query handle it
           } catch (error: any) {
-            // Don't show error if request was cancelled
-            if (error.name === "AbortError") {
-              console.log("List reorder request was cancelled");
-              return;
-            }
-
             console.error("Error reordering lists:", error);
             toast.error("Failed to reorder list");
-
-            // ROLLBACK: Revert the optimistic update on failure
-            console.log("Rolling back list reorder to original state");
-            setKanbanState((prev) => ({
-              ...prev,
-              lists: originalLists,
-            }));
-          } finally {
-            setIsListReordering(false);
-            listReorderAbortControllerRef.current = null;
+            // React Query will automatically revert the optimistic update
           }
-        }, 300); // 300ms debounce delay
+        }, 300);
       } catch (error) {
         console.error("Error in list reorder logic:", error);
         toast.error("Failed to reorder list");
-
-        // ROLLBACK: Revert the optimistic update on failure
-        setKanbanState((prev) => ({
-          ...prev,
-          lists: originalLists,
-        }));
 
         setIsListReordering(false);
       } finally {
@@ -877,10 +740,11 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       }
     },
     [
-      kanbanState.lists,
-      kanbanState.currentBoard,
+      lists,
+      currentBoard,
       currentOrganization?.id,
       isListReordering,
+      updateBoardData,
     ]
   );
 
@@ -899,9 +763,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     async (listId: string, isArchived: boolean) => {
       if (!currentOrganization?.id) return;
 
-      // Store original state for potential rollback
-      const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
-
       try {
         console.log(
           `${isArchived ? "Archiving" : "Unarchiving"} list:`,
@@ -909,9 +770,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         );
 
         // Optimistic update
-        setKanbanState((prev) => ({
+        updateBoardData((prev) => ({
           ...prev,
-          lists: prev.lists.map((list) =>
+          lists: prev.lists.map((list: any) =>
             list.id === listId ? { ...list, is_archived: isArchived } : list
           ),
         }));
@@ -928,18 +789,12 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
               `List ${isArchived ? "archived" : "unarchived"} successfully!`
             );
             // Invalidate query to refresh data
-            invalidateBoard();
+            // invalidateBoard();
           } catch (error) {
             console.error("Error archiving/unarchiving list:", error);
             toast.error(
               `Failed to ${isArchived ? "archive" : "unarchive"} list`
             );
-
-            // ROLLBACK: Revert the optimistic update on failure
-            setKanbanState((prev) => ({
-              ...prev,
-              lists: originalLists,
-            }));
           }
         }, 0);
 
@@ -947,15 +802,9 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       } catch (error) {
         console.error("Error archiving/unarchiving list:", error);
         toast.error(`Failed to ${isArchived ? "archive" : "unarchive"} list`);
-
-        // ROLLBACK: Revert the optimistic update on failure
-        setKanbanState((prev) => ({
-          ...prev,
-          lists: originalLists,
-        }));
       }
     },
-    [currentOrganization?.id]
+    [currentOrganization?.id, updateBoardData]
   );
 
   const handleAddList = () => {
@@ -963,18 +812,15 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   };
 
   const handleSaveList = async (listName: string) => {
-    if (!kanbanState.currentBoard || !currentOrganization?.id) return;
-
-    // Store original state for potential rollback
-    const originalLists = JSON.parse(JSON.stringify(kanbanState.lists));
+    if (!currentBoard || !currentOrganization?.id) return;
 
     try {
       // Create a temporary list for optimistic update
       const tempList = {
         id: `temp-${Date.now()}`, // Temporary ID
-        board_id: kanbanState.currentBoard.id,
+        board_id: currentBoard.id,
         name: listName,
-        position: kanbanState.lists.length,
+        position: lists.length,
         is_archived: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -982,7 +828,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       };
 
       // OPTIMISTIC UPDATE: Add the temporary list immediately
-      setKanbanState((prev) => ({
+      updateBoardData((prev) => ({
         ...prev,
         lists: [...prev.lists, tempList],
       }));
@@ -991,42 +837,22 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       setTimeout(async () => {
         try {
           const response = await kanbanAPI.createList({
-            board_id: kanbanState.currentBoard!.id,
+            board_id: currentBoard!.id,
             name: listName,
             organizationId: currentOrganization.id,
           });
 
-          // Replace the temporary list with the real one
-          setKanbanState((prev) => ({
-            ...prev,
-            lists: prev.lists.map((list) =>
-              list.id === tempList.id ? response.list : list
-            ),
-          }));
-
           toast.success("List created successfully!");
           // Invalidate query to refresh data
-          invalidateBoard();
+          // invalidateBoard();
         } catch (error) {
           console.error("Error creating list:", error);
           toast.error("Failed to create list");
-
-          // ROLLBACK: Remove the temporary list
-          setKanbanState((prev) => ({
-            ...prev,
-            lists: originalLists,
-          }));
         }
       }, 0);
     } catch (error) {
       console.error("Error in add list logic:", error);
       toast.error("Failed to create list");
-
-      // ROLLBACK: Revert the optimistic update on failure
-      setKanbanState((prev) => ({
-        ...prev,
-        lists: originalLists,
-      }));
     }
   };
 
@@ -1175,14 +1001,19 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         }
       }
 
+      const completeCardData = await kanbanAPI.getCard(
+        newCard.card.id,
+        currentOrganization.id
+      );
+
       // Add the real card to the state
-      setKanbanState((prev) => ({
+      updateBoardData((prev) => ({
         ...prev,
-        lists: prev.lists.map((list) =>
+        lists: prev.lists.map((list: any) =>
           list.id === listId
             ? {
                 ...list,
-                cards: [...(list.cards || []), newCard.card],
+                cards: [...(list.cards || []), completeCardData.card],
                 isLoadingCards: false, // Ensure loading state is cleared
               }
             : list
@@ -1193,7 +1024,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
       toast.success("Card created successfully!");
       // Invalidate query to refresh data
-      invalidateBoard();
+      // invalidateBoard();
     } catch (error) {
       console.error("Error creating card:", error);
       toast.error("Failed to create card");
@@ -1266,16 +1097,16 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
 
   // Get background style
   const getBoardStyle = () => {
-    if (!kanbanState.currentBoard) return {};
+    if (!currentBoard) return {};
 
-    if (kanbanState.currentBoard.background_image) {
+    if (currentBoard.background_image) {
       return {
-        backgroundImage: `url(${kanbanState.currentBoard.background_image})`,
+        backgroundImage: `url(${currentBoard.background_image})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
       };
-    } else if (kanbanState.currentBoard.background_color) {
-      return { backgroundColor: kanbanState.currentBoard.background_color };
+    } else if (currentBoard.background_color) {
+      return { backgroundColor: currentBoard.background_color };
     }
 
     return { backgroundColor: "#f3f4f6" };
@@ -1291,11 +1122,10 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           <div className="flex justify-between items-center mb-6">
             <div>
               <h1 className="text-2xl font-semibold text-gray-800">
-                {kanbanState.currentBoard?.name || projectName}
+                {currentBoard?.name || projectName}
               </h1>
               <p className="text-sm text-gray-500">
-                {kanbanState.currentBoard?.description ||
-                  "Manage tasks with Kanban board"}
+                {currentBoard?.description || "Manage tasks with Kanban board"}
               </p>
             </div>
 
@@ -1385,8 +1215,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                             <button
                               key={bg.value}
                               className={`group relative rounded-lg overflow-hidden border-2 transition-all duration-200 focus:outline-none ${
-                                kanbanState.currentBoard?.background_image ===
-                                bg.value
+                                currentBoard?.background_image === bg.value
                                   ? "border-orange-500 ring-2 ring-orange-200"
                                   : "border-transparent"
                               }`}
@@ -1404,8 +1233,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                               <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs py-1 px-2 text-center">
                                 {bg.name}
                               </span>
-                              {kanbanState.currentBoard?.background_image ===
-                                bg.value && (
+                              {currentBoard?.background_image === bg.value && (
                                 <span className="absolute top-2 right-2 bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full shadow">
                                   Selected
                                 </span>
@@ -1421,8 +1249,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                             <button
                               key={color.value}
                               className={`relative w-14 h-14 rounded-lg border-2 transition-all duration-200 focus:outline-none ${
-                                kanbanState.currentBoard?.background_color ===
-                                color.value
+                                currentBoard?.background_color === color.value
                                   ? "border-orange-500 ring-2 ring-orange-200"
                                   : "border-transparent"
                               }`}
@@ -1432,7 +1259,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                                 updateBoardBackground("color", color.value)
                               }
                             >
-                              {kanbanState.currentBoard?.background_color ===
+                              {currentBoard?.background_color ===
                                 color.value && (
                                 <span className="absolute -top-2 -right-2 bg-orange-500 text-white text-xs px-1 py-0.5 rounded-full shadow">
                                   ✓
@@ -1492,7 +1319,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                 }}
                 className="flex overflow-x-auto pb-4 gap-6 px-8 relative z-10 min-h-[500px] items-start w-full"
               >
-                {kanbanState.lists.map((list) => (
+                {lists.map((list: any) => (
                   <div
                     key={list.id}
                     data-list-id={list.id}
@@ -1553,7 +1380,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
         onSave={handleSaveList}
       />
 
-      {cardModal.isOpen && cardModal.card && kanbanState.currentBoard && (
+      {cardModal.isOpen && cardModal.card && currentBoard && (
         <CardDetailModal
           card={cardModal.card}
           isOpen={cardModal.isOpen}
@@ -1562,15 +1389,15 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
           }
           projectMembers={projectMembers}
           organizationId={currentOrganization?.id || ""}
-          boardId={kanbanState.currentBoard.id}
+          boardId={currentBoard.id}
           projectId={projectId}
           onCardUpdate={(updatedCard: Card) => {
-            setKanbanState((prev) => ({
+            updateBoardData((prev) => ({
               ...prev,
-              lists: prev.lists.map((list) => ({
+              lists: prev.lists.map((list: any) => ({
                 ...list,
                 cards:
-                  list.cards?.map((card) =>
+                  list.cards?.map((card: any) =>
                     card.id === updatedCard.id ? updatedCard : card
                   ) || [],
               })),
