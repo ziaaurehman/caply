@@ -131,6 +131,7 @@ export default function CardDetailModal({
   >(null);
   const [newItemContent, setNewItemContent] = useState("");
   const [addingItemSubmitting, setAddingItemSubmitting] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<any>(null);
 
   const invalidateKanbanBoard = useCallback(() => {
     queryClient.invalidateQueries({
@@ -791,6 +792,161 @@ export default function CardDetailModal({
     return "performed an action on this card";
   };
 
+  const handlePreviewAttachment = async (attachment: any) => {
+    try {
+      console.log("Getting preview for attachment:", attachment.id);
+
+      const response = await kanbanAPI.getAttachmentDownload(attachment.id);
+      console.log("Preview response:", response);
+
+      if (response.download_url) {
+        setPreviewAttachment({
+          ...attachment,
+          preview_url: response.download_url,
+        });
+      } else {
+        toast.error("No preview URL available");
+      }
+    } catch (error) {
+      console.error("Error getting preview:", error);
+      toast.error("Failed to load preview");
+    }
+  };
+
+  const canPreview = (mimeType: string) => {
+    return (
+      mimeType.startsWith("image/") ||
+      mimeType.includes("pdf") ||
+      mimeType.includes("text/")
+    );
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  const renderPreviewModal = () => {
+    if (!previewAttachment) return null;
+
+    const { mime_type, preview_url, original_filename } = previewAttachment;
+
+    return (
+      <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+        <div className="bg-white rounded-xl shadow-2xl max-w-6xl max-h-[95vh] w-full flex flex-col">
+          {/* Preview Header */}
+          <div className="flex items-center justify-between p-4 border-b border-gray-200 flex-shrink-0">
+            <h3 className="text-lg font-semibold text-gray-900 truncate">
+              {original_filename}
+            </h3>
+            <button
+              onClick={() => setPreviewAttachment(null)}
+              className="p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Preview Content */}
+          <div className="flex-1 overflow-auto p-4">
+            {mime_type.startsWith("image/") ? (
+              <div className="flex justify-center">
+                <img
+                  src={preview_url}
+                  alt={original_filename}
+                  className="max-w-full max-h-full object-contain"
+                />
+              </div>
+            ) : mime_type.includes("pdf") ? (
+              <div className="w-full h-full">
+                <iframe
+                  src={preview_url}
+                  className="w-full h-full min-h-[600px] border-0"
+                  title={original_filename}
+                />
+              </div>
+            ) : mime_type.includes("text/") ? (
+              <div className="w-full h-full">
+                <iframe
+                  src={preview_url}
+                  className="w-full h-full min-h-[600px] border-0"
+                  title={original_filename}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <FileText className="h-16 w-16 text-gray-400 mb-4" />
+                <p className="text-lg font-medium">Preview not available</p>
+                <p className="text-sm">This file type cannot be previewed</p>
+                <button
+                  onClick={async () => {
+                    try {
+                      const response = await kanbanAPI.getAttachmentDownload(
+                        previewAttachment.id
+                      );
+                      const link = document.createElement("a");
+                      link.href = response.download_url;
+                      link.download = original_filename;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    } catch (error) {
+                      console.error("Error downloading attachment:", error);
+                      toast.error("Failed to download file");
+                    }
+                  }}
+                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Download File
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Preview Footer with actions */}
+          <div className="flex items-center justify-between p-4 border-t border-gray-200 flex-shrink-0">
+            <div className="text-sm text-gray-500">
+              {formatFileSize(previewAttachment.file_size)} •{" "}
+              {previewAttachment.mime_type}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    const response = await kanbanAPI.getAttachmentDownload(
+                      previewAttachment.id
+                    );
+                    const link = document.createElement("a");
+                    link.href = response.download_url;
+                    link.download = original_filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  } catch (error) {
+                    console.error("Error downloading attachment:", error);
+                    toast.error("Failed to download file");
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
+              >
+                Download
+              </button>
+              <button
+                onClick={() => setPreviewAttachment(null)}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -1392,6 +1548,17 @@ export default function CardDetailModal({
                           </p>
                         </div>
                         <div className="flex items-center gap-1">
+                          {canPreview(attachment.mime_type) && (
+                            <button
+                              onClick={() =>
+                                handlePreviewAttachment(attachment)
+                              }
+                              className="p-1 text-gray-400 hover:text-blue-500"
+                              title="Preview"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          )}
                           <button
                             onClick={async () => {
                               try {
@@ -1648,6 +1815,9 @@ export default function CardDetailModal({
         selectedLabels: editedCard.labels?.map((l) => l.id) || [],
         labels: editedCard.labels,
       })}
+
+      {renderPreviewModal()}
+
       <LabelsModal
         isOpen={showLabelsModal}
         onClose={() => setShowLabelsModal(false)}
@@ -1697,6 +1867,8 @@ export default function CardDetailModal({
           checklist_items: checklist.checklist_items || [],
         }))}
         onChecklistsChange={handleChecklistsChange}
+        projectId={projectId}
+        boardId={boardId}
       />
 
       <AttachmentsModal

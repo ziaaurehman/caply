@@ -292,7 +292,7 @@ export async function PATCH(
         description,
         list_id,
         position,
-        due_date,
+        due_date: due_date || null,
         is_completed,
         is_archived,
         cover_color,

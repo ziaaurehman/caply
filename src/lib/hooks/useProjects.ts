@@ -144,7 +144,6 @@ export function useCreateProject(organizationId: string) {
         search: undefined,
         status: undefined,
       });
-      console.log("queryKey", queryKey);
       queryClient.invalidateQueries({
         queryKey: queryKey,
       });
@@ -158,23 +157,27 @@ export function useCreateProject(organizationId: string) {
 
       // Invalidate kanban projects query
       queryClient.invalidateQueries({
-        queryKey: ["kanban-projects", variables.organization_id],
+        queryKey: ["projects", organizationId],
+      });
+
+      queryClient.invalidateQueries({
+        queryKey: ["kanban-projects", organizationId],
       });
 
       // Invalidate capacity projects query
       queryClient.invalidateQueries({
-        queryKey: projectKeys.capacityAll(variables.organization_id),
+        queryKey: projectKeys.capacityAll(organizationId),
       });
 
       // Add the new project to cache
       queryClient.setQueryData(
-        projectKeys.detail(data.project.id, variables.organization_id),
+        projectKeys.detail(data.project.id, organizationId),
         data
       );
 
       // Optimistically add to cache if needed
       queryClient.setQueryData(
-        projectKeys.list(variables.organization_id, {}),
+        projectKeys.list(organizationId, {}),
         (old: ProjectsResponse | undefined) => {
           if (!old) return old;
           return {

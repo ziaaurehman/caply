@@ -116,10 +116,7 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
     invalidateBoard,
   } = useKanbanBoard(projectId, currentOrganization?.id, {
     includeArchived: showArchived,
-    search: debouncedSearchTerm,
   });
-
-  console.log("boardData", boardData);
 
   useEffect(() => {
     if (boardData) {
@@ -1247,8 +1244,10 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
       // Search filter
       if (
         searchTerm &&
-        !card.title.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        !card.description?.toLowerCase().includes(searchTerm.toLowerCase())
+        !card.title.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) &&
+        !card.description
+          ?.toLowerCase()
+          .includes(debouncedSearchTerm.toLowerCase())
       ) {
         return false;
       }
@@ -1283,47 +1282,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   };
 
   const isLoading = boardLoading && !boardData; // Only show skeleton on initial load
-  const isSearching = boardFetching && boardData && debouncedSearchTerm;
-
-  // Show loading while organization is loading or not loaded
-  // if (organizationLoading || !currentOrganization?.id || isLoading) {
-  //   return (
-  //     <div className="min-h-screen">
-  //       <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
-  //       <div className="w-full h-16 bg-gray-200 animate-pulse"></div>
-  //       <KanbanSkeleton />
-  //     </div>
-  //   );
-  // }
-
-  // if (kanbanState.isLoading || isSearching) {
-  //   return <KanbanSkeleton />;
-  // }
-
-  // if (boardError || kanbanState.error) {
-  //   return (
-  //     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-  //       <div className="text-center max-w-md mx-auto">
-  //         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-  //           <h3 className="text-lg font-semibold text-red-800 mb-2">
-  //             Error Loading Board
-  //           </h3>
-  //           <p className="text-red-600 mb-4">
-  //             {boardErrorMessage?.message ||
-  //               kanbanState.error ||
-  //               "Failed to load board data"}
-  //           </p>
-  //           <button
-  //             onClick={() => refetchBoard()}
-  //             className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-  //           >
-  //             Try Again
-  //           </button>
-  //         </div>
-  //       </div>
-  //     </div>
-  //   );
-  // }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1352,12 +1310,6 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
-                {/* Search loading indicator */}
-                {isSearching && (
-                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                  </div>
-                )}
                 {/* Clear search button */}
                 {searchTerm && (
                   <button

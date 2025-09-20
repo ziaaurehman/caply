@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, CheckSquare, Plus, Trash2 } from "lucide-react";
 import { kanbanAPI } from "@/utils/api/kanban";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface ChecklistItem {
   id: string;
@@ -28,6 +29,8 @@ interface ChecklistModalProps {
   organizationId: string;
   checklists: Checklist[];
   onChecklistsChange: (checklists: Checklist[]) => void;
+  projectId: string;
+  boardId: string;
 }
 
 export default function ChecklistModal({
@@ -37,10 +40,33 @@ export default function ChecklistModal({
   organizationId,
   checklists,
   onChecklistsChange,
+  projectId,
+  boardId,
 }: ChecklistModalProps) {
   const [newChecklistName, setNewChecklistName] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingChecklistId, setDeletingChecklistId] = useState<string | null>(
+    null
+  );
+  const queryClient = useQueryClient();
+
+  // Function to invalidate board queries
+  const invalidateBoardQueries = () => {
+    if (projectId && organizationId) {
+      // Invalidate all board data queries
+      queryClient.invalidateQueries({
+        queryKey: ["kanban-board-data", projectId, organizationId],
+      });
+
+      // Also invalidate specific board if provided
+      if (boardId) {
+        queryClient.invalidateQueries({
+          queryKey: ["kanban-board-data", projectId, organizationId, boardId],
+        });
+      }
+    }
+  };
 
   const handleCreateChecklist = async () => {
     if (!newChecklistName.trim()) return;
@@ -58,6 +84,7 @@ export default function ChecklistModal({
         ...checklists,
         { ...response.checklist, checklist_items: [] },
       ]);
+      invalidateBoardQueries();
       setNewChecklistName("");
       setShowCreateForm(false);
       toast.success("Checklist created successfully!");
@@ -69,8 +96,25 @@ export default function ChecklistModal({
     }
   };
 
-  const handleDeleteChecklist = (checklistId: string) => {
-    onChecklistsChange(checklists.filter((c) => c.id !== checklistId));
+  const handleDeleteChecklist = async (checklistId: string) => {
+    try {
+      setDeletingChecklistId(checklistId);
+
+      // Call the API to delete the checklist
+      await kanbanAPI.deleteChecklist(checklistId);
+
+      // Update local state by removing the deleted checklist
+      const updatedChecklists = checklists.filter((c) => c.id !== checklistId);
+      onChecklistsChange(updatedChecklists);
+
+      toast.success("Checklist deleted successfully!");
+      invalidateBoardQueries();
+    } catch (error) {
+      console.error("Error deleting checklist:", error);
+      toast.error("Failed to delete checklist");
+    } finally {
+      setDeletingChecklistId(null);
+    }
   };
 
   const handleToggleItem = (checklistId: string, itemId: string) => {
@@ -128,6 +172,12 @@ export default function ChecklistModal({
                   type="text"
                   placeholder="Checklist"
                   value={newChecklistName}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleCreateChecklist();
+                    }
+                  }}
+                  disabled={isSubmitting}
                   onChange={(e) => setNewChecklistName(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                   autoFocus
@@ -175,9 +225,15 @@ export default function ChecklistModal({
                     </h4>
                     <button
                       onClick={() => handleDeleteChecklist(checklist.id)}
-                      className="p-1 text-gray-400 hover:text-red-500"
+                      disabled={deletingChecklistId === checklist.id}
+                      className="p-1 text-gray-400 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:text-gray-400"
+                      title="Delete Checklist"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      {deletingChecklistId === checklist.id ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                     </button>
                   </div>
 
