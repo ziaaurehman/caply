@@ -33,6 +33,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { Project } from "@/utils/api/project";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
+
 export default function ProjectsPage() {
   const searchParams = useSearchParams();
   const refresh = searchParams.get("refresh");
