@@ -46,21 +46,21 @@ export function useClient(clientId: string, organizationId: string) {
 
 // ===== MUTATIONS =====
 
-export function useCreateClient() {
+export function useCreateClient(organizationId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (data: CreateClientData & { organizationId: string }) =>
       clientAPI.createClient(data),
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       // Invalidate clients list for the organization
       queryClient.invalidateQueries({
-        queryKey: clientKeys.list(variables.organizationId),
+        queryKey: clientKeys.list(organizationId),
       });
 
       // Add the new client to cache
       queryClient.setQueryData(
-        clientKeys.detail(data.client.id, variables.organizationId),
+        clientKeys.detail(data.client.id, organizationId),
         data
       );
     },

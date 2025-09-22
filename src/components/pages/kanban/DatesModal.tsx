@@ -15,9 +15,9 @@ interface DatesModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentDates: {
-    due_date?: string;
+    due_date?: string | null;
   };
-  onDatesChange: (dates: { due_date?: string }) => void;
+  onDatesChange: (dates: { due_date?: string | null }) => void;
 }
 
 export default function DatesModal({
@@ -73,7 +73,7 @@ export default function DatesModal({
   const handleRemove = async () => {
     setIsSubmitting(true);
     try {
-      await onDatesChange({ due_date: undefined });
+      await onDatesChange({ due_date: null });
       onClose();
     } catch (error) {
       console.error("Error removing dates:", error);
