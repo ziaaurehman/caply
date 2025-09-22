@@ -1808,13 +1808,6 @@ export default function CardDetailModal({
         </div>
       </div>
 
-      {/* Modals */}
-      {console.log("LabelsModal props:", {
-        boardId,
-        organizationId,
-        selectedLabels: editedCard.labels?.map((l) => l.id) || [],
-        labels: editedCard.labels,
-      })}
 
       {renderPreviewModal()}
 

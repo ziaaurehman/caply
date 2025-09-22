@@ -136,7 +136,7 @@ export function useCreateProject(organizationId: string) {
 
   return useMutation({
     mutationFn: (data: CreateProjectData) => projectAPI.createProject(data),
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       // Invalidate projects list for the organization
       const queryKey = projectKeys.list(organizationId, {
         page: 1,
@@ -144,8 +144,13 @@ export function useCreateProject(organizationId: string) {
         search: undefined,
         status: undefined,
       });
+      console.log("queryKey in the create project", queryKey);
       queryClient.invalidateQueries({
         queryKey: queryKey,
+      });
+
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
       });
 
       // Invalidate specific organization project list

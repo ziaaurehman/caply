@@ -31,8 +31,12 @@ import {
 } from "@/lib/hooks/useProjects";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Project } from "@/utils/api/project";
-
+import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 export default function ProjectsPage() {
+  const searchParams = useSearchParams();
+  const refresh = searchParams.get("refresh");
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -98,6 +102,13 @@ export default function ProjectsPage() {
     error: projectsError,
     refetch: refetchProjects,
   } = useProjects(currentOrganization?.id || "", filters);
+
+  useEffect(() => {
+    if (refresh && refresh === "true") {
+      refetchProjects();
+      router.replace("/projects");
+    }
+  }, [refresh, refetchProjects]);
 
   // Extract projects and pagination data
   const projects = useMemo(() => projectsData?.projects || [], [projectsData]);

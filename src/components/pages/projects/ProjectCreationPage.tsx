@@ -113,7 +113,7 @@ export default function ProjectCreationPage() {
   const { data: teamMembersData, isLoading: loadingTeamMembers } =
     useTeamMembers(currentOrganization?.id || "");
   const createProjectMutation = useCreateProject(currentOrganization?.id || "");
-  const createClientMutation = useCreateClient();
+  const createClientMutation = useCreateClient(currentOrganization?.id || "");
 
   // Extract data
   const clients = clientsData?.clients || [];
@@ -309,7 +309,7 @@ export default function ProjectCreationPage() {
           "You can now start managing your project and assign tasks.",
         duration: 5000,
       });
-      router.push("/projects");
+      router.push("/projects?refresh=true");
     } catch (error: any) {
       console.error("Failed to create project:", error);
       const errorMessage =
