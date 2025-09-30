@@ -60,6 +60,7 @@ export const useKanbanProjects = (organizationId: string | undefined) => {
     enabled: !!organizationId, // Only run query when organizationId exists
     staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
     gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+    refetchOnMount: true,
   });
 };
 
@@ -264,6 +265,11 @@ export function useDeleteProject() {
           const [, , orgId] = query.queryKey;
           return orgId === organizationId;
         },
+      });
+
+      // Invalidate kanban projects query
+      queryClient.invalidateQueries({
+        queryKey: ["kanban-projects", organizationId],
       });
 
       // Invalidate capacity projects

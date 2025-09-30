@@ -281,6 +281,92 @@ export default function CardDetailModal({
     }
   };
 
+  const handleDownloadAttachment = async (
+    attachmentId: string,
+    filename: string,
+    mimeTypes?: string
+  ) => {
+    try {
+      const response = await kanbanAPI.getAttachmentDownload(attachmentId);
+
+      const mimeType = response.attachment.mime_type;
+
+      if (response.download_url) {
+        // For images and PDFs, fetch as blob to force download
+        if (mimeType.startsWith("image/") || mimeType.includes("pdf")) {
+          const fileResponse = await fetch(response.download_url);
+          const blob = await fileResponse.blob();
+
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = blobUrl;
+          link.download = filename;
+          link.style.display = "none";
+
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+
+          URL.revokeObjectURL(blobUrl);
+        } else {
+          // For other files, use direct link
+          const link = document.createElement("a");
+          link.href = response.download_url;
+          link.download = filename;
+          link.target = "_blank";
+          link.style.display = "none";
+
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        toast.success("File downloaded successfully!");
+      } else {
+        throw new Error("No download URL available");
+      }
+    } catch (error) {
+      console.error("Error downloading attachment:", error);
+      toast.error("Failed to download file");
+    }
+  };
+
+  const formatDueDate = (dueDate: string) => {
+    const date = new Date(dueDate);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const isOverdue = date < today;
+    const isDueToday = date.toDateString() === today.toDateString();
+    const isDueTomorrow = date.toDateString() === tomorrow.toDateString();
+
+    if (isOverdue)
+      return {
+        text: "Overdue",
+        badgeColor: "bg-red-200 text-red-900",
+        containerColor: "bg-red-100 text-red-800",
+      };
+    if (isDueToday)
+      return {
+        text: "Due today",
+        badgeColor: "bg-red-200 text-red-900",
+        containerColor: "bg-red-100 text-red-800",
+      };
+    if (isDueTomorrow)
+      return {
+        text: "Due tomorrow",
+        badgeColor: "bg-yellow-200 text-yellow-900",
+        containerColor: "bg-yellow-100 text-yellow-800",
+      };
+
+    return {
+      text: "Due soon",
+      badgeColor: "bg-yellow-200 text-yellow-900",
+      containerColor: "bg-yellow-100 text-yellow-800",
+    };
+  };
+
   const handleDeleteComment = async (commentId: string) => {
     try {
       setIsSubmitting(true);
@@ -882,22 +968,12 @@ export default function CardDetailModal({
                 <p className="text-lg font-medium">Preview not available</p>
                 <p className="text-sm">This file type cannot be previewed</p>
                 <button
-                  onClick={async () => {
-                    try {
-                      const response = await kanbanAPI.getAttachmentDownload(
-                        previewAttachment.id
-                      );
-                      const link = document.createElement("a");
-                      link.href = response.download_url;
-                      link.download = original_filename;
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
-                    } catch (error) {
-                      console.error("Error downloading attachment:", error);
-                      toast.error("Failed to download file");
-                    }
-                  }}
+                  onClick={() =>
+                    handleDownloadAttachment(
+                      previewAttachment.id,
+                      original_filename
+                    )
+                  }
                   className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                 >
                   Download File
@@ -914,22 +990,12 @@ export default function CardDetailModal({
             </div>
             <div className="flex gap-2">
               <button
-                onClick={async () => {
-                  try {
-                    const response = await kanbanAPI.getAttachmentDownload(
-                      previewAttachment.id
-                    );
-                    const link = document.createElement("a");
-                    link.href = response.download_url;
-                    link.download = original_filename;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                  } catch (error) {
-                    console.error("Error downloading attachment:", error);
-                    toast.error("Failed to download file");
-                  }
-                }}
+                onClick={() =>
+                  handleDownloadAttachment(
+                    previewAttachment.id,
+                    original_filename
+                  )
+                }
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
               >
                 Download
@@ -1214,13 +1280,17 @@ export default function CardDetailModal({
                       Due date
                     </h3>
                     <div className="flex items-center gap-1">
-                      <div className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-medium">
+                      <div
+                        className={`px-3 py-1 rounded text-sm font-medium ${formatDueDate(editedCard.due_date).containerColor}`}
+                      >
                         {dateUtils.formatForDisplay(
                           editedCard.due_date,
                           "MMM d, yyyy h:mm a"
                         )}
-                        <span className="ml-1 bg-yellow-200 text-yellow-900 px-1.5 py-0.5 rounded text-xs">
-                          Due soon
+                        <span
+                          className={`ml-1 px-1.5 py-0.5 rounded text-xs ${formatDueDate(editedCard.due_date).badgeColor}`}
+                        >
+                          {formatDueDate(editedCard.due_date).text}
                         </span>
                       </div>
                       <button
@@ -1560,28 +1630,12 @@ export default function CardDetailModal({
                             </button>
                           )}
                           <button
-                            onClick={async () => {
-                              try {
-                                const response =
-                                  await kanbanAPI.getAttachmentDownload(
-                                    attachment.id
-                                  );
-                                const link = document.createElement("a");
-                                link.href = response.download_url;
-                                link.download =
-                                  attachment.original_filename ||
-                                  attachment.filename;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                              } catch (error) {
-                                console.error(
-                                  "Error downloading attachment:",
-                                  error
-                                );
-                                toast.error("Failed to download file");
-                              }
-                            }}
+                            onClick={() =>
+                              handleDownloadAttachment(
+                                attachment.id,
+                                attachment.original_filename
+                              )
+                            }
                             className="p-1 text-gray-400 hover:text-blue-500"
                             title="Download"
                           >
@@ -1807,7 +1861,6 @@ export default function CardDetailModal({
           </div>
         </div>
       </div>
-
 
       {renderPreviewModal()}
 
