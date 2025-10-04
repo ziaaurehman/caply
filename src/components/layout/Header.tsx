@@ -18,8 +18,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   CreditCard,
-  Building2,
-  Check,
 } from "lucide-react";
 import { useSession, signOut } from "next-auth/react";
 import { getInitials } from "@/lib/utils";
@@ -29,6 +27,7 @@ import {
   useOrganizationStore,
   useCurrentOrganization,
 } from "@/lib/stores/organizationStore";
+import { performLogout } from "@/utils/logout";
 
 interface HeaderProps {
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
@@ -151,12 +150,8 @@ export default function Header({
 
   const handleLogout = useCallback(async () => {
     setShowProfileMenu(false);
-    clearOrganizationData();
-    await signOut({
-      callbackUrl: "/",
-      redirect: true,
-    });
-  }, [clearOrganizationData]);
+    await performLogout();
+  }, []);
 
   const handleOrganizationSwitch = useCallback(
     async (organizationId: string) => {
