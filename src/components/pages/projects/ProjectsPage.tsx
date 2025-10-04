@@ -155,11 +155,8 @@ export default function ProjectsPage() {
     if (!currentOrganization?.id) return;
 
     // Reset to first page when search term changes
-    if (currentPage !== 1) {
-      setCurrentPage(1);
-      return; // This will trigger the query refetch
-    }
-  }, [searchTerm, currentOrganization?.id, currentPage]);
+    setCurrentPage(1);
+  }, [searchTerm, currentOrganization?.id]);
 
   const handleEdit = (project: Project) => {
     setSelectedProject(project);
@@ -190,7 +187,7 @@ export default function ProjectsPage() {
             id,
             organizationId: currentOrganization.id,
           });
-          toast.success("Project deleted successfully!");
+          // toast.success("Project deleted successfully!");
         } catch (err: any) {
           console.error("Error deleting project:", err);
           toast.error(err.message || "Failed to delete project");

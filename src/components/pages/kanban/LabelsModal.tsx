@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { X, ChevronLeft, Search, Plus, Edit3 } from "lucide-react";
+import { X, ChevronLeft, Search, Plus, Edit3, Trash2 } from "lucide-react";
 import { kanbanAPI } from "@/utils/api/kanban";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -41,6 +41,13 @@ export default function LabelsModal({
   const [newLabelColor, setNewLabelColor] = useState("#3B82F6");
   const [localSelectedLabels, setLocalSelectedLabels] =
     useState<string[]>(selectedLabels);
+
+  // Edit state
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+  const [editLabelName, setEditLabelName] = useState("");
+  const [editLabelColor, setEditLabelColor] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const colors = [
     "#10B981", // green
@@ -95,6 +102,73 @@ export default function LabelsModal({
     }
   };
 
+  const handleEditLabel = (e: React.MouseEvent, label: Label) => {
+    e.stopPropagation(); // Prevent checkbox toggle
+    setEditingLabelId(label.id);
+    setEditLabelName(label.name);
+    setEditLabelColor(label.color);
+    setShowCreateForm(false); // Close create form if open
+  };
+
+  const handleUpdateLabel = async () => {
+    if (!editLabelName.trim() || !editingLabelId) return;
+
+    try {
+      setIsUpdating(true);
+
+      await kanbanAPI.updateLabel(editingLabelId, {
+        name: editLabelName,
+        color: editLabelColor,
+        organizationId,
+      });
+
+      queryClient.invalidateQueries({
+        queryKey: ["board-labels", boardId, organizationId],
+      });
+
+      setEditingLabelId(null);
+      setEditLabelName("");
+      setEditLabelColor("");
+
+      toast.success("Label updated successfully!");
+    } catch (error) {
+      console.error("Error updating label:", error);
+      toast.error("Failed to update label");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDeleteLabel = async (labelId: string) => {
+    try {
+      setIsDeleting(true);
+
+      await kanbanAPI.deleteLabel(labelId);
+
+      queryClient.invalidateQueries({
+        queryKey: ["board-labels", boardId, organizationId],
+      });
+
+      // Remove from local selected labels if it was selected
+      setLocalSelectedLabels((prev) => prev.filter((id) => id !== labelId));
+
+      setEditingLabelId(null);
+
+      toast.success("Label deleted successfully!");
+    } catch (error) {
+      console.error("Error deleting label:", error);
+      toast.error("Failed to delete label");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingLabelId(null);
+    setEditLabelName("");
+    setEditLabelColor("");
+  };
+
   const handleLabelToggle = (labelId: string) => {
     const isSelected = localSelectedLabels.includes(labelId);
     console.log(
@@ -109,12 +183,10 @@ export default function LabelsModal({
       const newSelection = localSelectedLabels.filter((id) => id !== labelId);
       console.log("Removing label, new selection:", newSelection);
       setLocalSelectedLabels(newSelection);
-      // Removed immediate onLabelsChange call
     } else {
       const newSelection = [...localSelectedLabels, labelId];
       console.log("Adding label, new selection:", newSelection);
       setLocalSelectedLabels(newSelection);
-      // Removed immediate onLabelsChange call
     }
   };
 
@@ -135,6 +207,8 @@ export default function LabelsModal({
   // Handle canceling changes
   const handleCancel = () => {
     setLocalSelectedLabels(selectedLabels); // Reset to original state
+    setEditingLabelId(null);
+    setShowCreateForm(false);
     onClose();
   };
 
@@ -190,30 +264,94 @@ export default function LabelsModal({
             </div>
           ) : (
             <div className="space-y-2">
-              {filteredLabels.map((label) => (
-                <div
-                  key={label.id}
-                  className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                  onClick={() => handleLabelToggle(label.id)}
-                >
-                  <input
-                    type="checkbox"
-                    checked={localSelectedLabels.includes(label.id)}
-                    onChange={() => handleLabelToggle(label.id)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
+              {filteredLabels.map((label) =>
+                editingLabelId === label.id ? (
+                  // Edit Form
                   <div
-                    className="w-6 h-3 rounded"
-                    style={{ backgroundColor: label.color }}
-                  />
-                  <span className="text-sm text-gray-900 flex-1">
-                    {label.name}
-                  </span>
-                  <button className="p-1 text-gray-400 hover:text-gray-600">
-                    <Edit3 className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
+                    key={label.id}
+                    className="p-3 border border-gray-300 rounded-lg bg-gray-50"
+                  >
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        placeholder="Label name"
+                        value={editLabelName}
+                        onChange={(e) => setEditLabelName(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      />
+                      <div>
+                        <label className="text-xs font-medium text-gray-700 mb-2 block">
+                          Color
+                        </label>
+                        <div className="grid grid-cols-6 gap-2">
+                          {colors.map((color) => (
+                            <button
+                              key={color}
+                              onClick={() => setEditLabelColor(color)}
+                              className={`w-8 h-8 rounded border-2 ${
+                                editLabelColor === color
+                                  ? "border-gray-900"
+                                  : "border-gray-300"
+                              }`}
+                              style={{ backgroundColor: color }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleUpdateLabel}
+                          disabled={isUpdating || !editLabelName.trim()}
+                          className="flex-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-sm font-medium"
+                        >
+                          {isUpdating ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteLabel(label.id)}
+                          disabled={isDeleting}
+                          className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed text-sm font-medium"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={cancelEdit}
+                          disabled={isUpdating || isDeleting}
+                          className="px-3 py-2 text-gray-600 hover:bg-gray-100 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  // Normal Label Row
+                  <div
+                    key={label.id}
+                    className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    onClick={() => handleLabelToggle(label.id)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={localSelectedLabels.includes(label.id)}
+                      onChange={() => handleLabelToggle(label.id)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div
+                      className="w-6 h-3 rounded"
+                      style={{ backgroundColor: label.color }}
+                    />
+                    <span className="text-sm text-gray-900 flex-1">
+                      {label.name}
+                    </span>
+                    <button
+                      onClick={(e) => handleEditLabel(e, label)}
+                      className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )
+              )}
             </div>
           )}
         </div>
