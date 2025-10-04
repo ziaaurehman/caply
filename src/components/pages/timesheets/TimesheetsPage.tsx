@@ -363,6 +363,8 @@ export default function TimesheetsPage() {
         setError(error.message || "Failed to delete time entry");
       }
     }
+
+    setShowDeleteModal(null);
   };
 
   const calculateTotal = (entry: TimeEntry): number => {
@@ -679,7 +681,6 @@ export default function TimesheetsPage() {
               submitMutation.isPending
             }
             hasUnsavedChanges={hasUnsavedChanges}
-            frontendEntries={frontendEntries}
           />
         ) : (
           <ApproveTimesheetsView
@@ -712,7 +713,10 @@ export default function TimesheetsPage() {
       {showDeleteModal && (
         <DeleteConfirmationModal
           entryName={showDeleteModal.entryName}
-          onConfirm={() => deleteTimeEntry(showDeleteModal.entryId)}
+          onConfirm={() => {
+            deleteTimeEntry(showDeleteModal.entryId);
+            setShowDeleteModal(null);
+          }}
           onCancel={() => setShowDeleteModal(null)}
         />
       )}
@@ -764,7 +768,6 @@ function MyTimesheetView({
   onShowNoteModal,
   loading,
   hasUnsavedChanges,
-  frontendEntries,
 }: {
   selectedWeek: string;
   setSelectedWeek: (week: string) => void;
@@ -780,7 +783,6 @@ function MyTimesheetView({
   onShowNoteModal: (modal: any) => void;
   loading: boolean;
   hasUnsavedChanges: boolean;
-  frontendEntries: TimesheetEntry[];
 }) {
   return (
     <div>
