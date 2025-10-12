@@ -33,6 +33,10 @@ import {
   isManagerOrAbove,
   canManageRoles,
   canViewLeave,
+  canViewCapacity,
+  canViewTeamMembers,
+  canViewTimesheetSubmissions,
+  canViewTimesheets,
 } from "@/utils/clientOrganizationUtils";
 
 interface SidebarProps {
@@ -232,7 +236,9 @@ export default function Sidebar({
   const userIsManagerOrAbove = isManagerOrAbove(organizationContext);
   const userCanManageRoles = canManageRoles(organizationContext);
   const userCanViewLeave = canViewLeave(organizationContext);
-
+  const userCanViewCapacity = canViewCapacity(organizationContext);
+  const userCanViewTimesheets = canViewTimesheets(organizationContext);
+  const userCanViewTeamMembers = canViewTeamMembers(organizationContext);
 
   const isContextLoading = loading && currentOrganization?.id;
 
@@ -254,28 +260,28 @@ export default function Sidebar({
     },
   ];
 
-  const teamMenuItems = [
-    {
-      href: "/teams",
-      icon: <Users size={18} />,
-      label: "Team",
-    },
-    {
-      href: "/capacity",
-      icon: <Calendar size={18} />,
-      label: "Capacity",
-    },
-    {
-      href: "/timesheets",
-      icon: <Clock size={18} />,
-      label: "Timesheets",
-    },
-  ];
-
   const leaveMenuItem = {
     href: "/leave",
     icon: <Palmtree size={18} />,
     label: "Leave",
+  };
+
+  const teamManagementMenuItem = {
+    href: "/teams",
+    icon: <Users size={18} />,
+    label: "Team",
+  };
+
+  const capacityMenuItem = {
+    href: "/capacity",
+    icon: <Calendar size={18} />,
+    label: "Capacity",
+  };
+
+  const timesheetsMenuItem = {
+    href: "/timesheets",
+    icon: <Clock size={18} />,
+    label: "Timesheets",
   };
 
   // Render helper for a skeleton nav item
@@ -386,7 +392,7 @@ export default function Sidebar({
 
             {/* Team Management */}
             <NavSection title="Team" isCollapsed={sidebarCollapsed}>
-              {teamMenuItems.map((item) => (
+              {/* {teamMenuItems.map((item) => (
                 <NavItem
                   key={item.href}
                   href={item.href}
@@ -395,8 +401,37 @@ export default function Sidebar({
                   active={pathname === item.href}
                   isCollapsed={sidebarCollapsed}
                 />
-              ))}
-              
+              ))} */}
+              {userCanViewTeamMembers && (
+                <NavItem
+                  href={teamManagementMenuItem.href}
+                  icon={teamManagementMenuItem.icon}
+                  label={teamManagementMenuItem.label}
+                  active={pathname === teamManagementMenuItem.href}
+                  isCollapsed={sidebarCollapsed}
+                />
+              )}
+
+              {userCanViewCapacity && (
+                <NavItem
+                  href={capacityMenuItem.href}
+                  icon={capacityMenuItem.icon}
+                  label={capacityMenuItem.label}
+                  active={pathname === capacityMenuItem.href}
+                  isCollapsed={sidebarCollapsed}
+                />
+              )}
+
+              {userCanViewTimesheets && (
+                <NavItem
+                  href={timesheetsMenuItem.href}
+                  icon={timesheetsMenuItem.icon}
+                  label={timesheetsMenuItem.label}
+                  active={pathname === timesheetsMenuItem.href}
+                  isCollapsed={sidebarCollapsed}
+                />
+              )}
+
               {/* Leave section with skeleton loading */}
               {isContextLoading ? (
                 <SkeletonNavItem isCollapsed={sidebarCollapsed} />
@@ -533,8 +568,10 @@ export default function Sidebar({
             <div className="space-y-1">
               {[
                 ...coreMenuItems,
-                ...teamMenuItems,
-                ...financeMenuItems,
+                teamManagementMenuItem,
+                capacityMenuItem,
+                timesheetsMenuItem,
+                leaveMenuItem,
                 ...resourceMenuItems,
               ].map((item) => (
                 <NavItem
