@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 
     // Update submission status
     const updateData: any = {
-      status: action,
+      status: action === "approve" ? "approved" : "rejected",
       updated_at: new Date().toISOString(),
     };
 

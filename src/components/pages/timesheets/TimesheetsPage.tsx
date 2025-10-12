@@ -30,7 +30,10 @@ import {
   TimesheetEntry,
   useCapacityProjects,
 } from "@/lib/stores/timesheetsStore";
+import { PermissionChecks } from "@/utils/rbac";
 import WeekPicker from "./WeekPicker";
+import { canViewTimesheetSubmissions } from "@/utils/clientOrganizationUtils";
+import { toast } from "sonner";
 
 // Types
 interface TimeEntry {
@@ -78,9 +81,39 @@ export default function TimesheetsPage() {
   const {
     currentOrganization,
     loading: organizationLoading,
+    organizationContext,
     fetchUserOrganizations,
     userOrganizations,
   } = useOrganizationStore();
+
+  const [submissionFilters, setSubmissionFilters] = useState({
+    status: "submitted" as "submitted" | "approved" | "rejected",
+    userId: "",
+    selectedWeek: "",
+    search: "",
+    page: 1,
+    limit: 10,
+  });
+
+  const [showSubmitModal, setShowSubmitModal] = useState<{
+    totalHours: number;
+    weekStart: string;
+    weekEnd: string;
+  } | null>(null);
+
+  const [showApproveModal, setShowApproveModal] = useState<{
+    submissionId: string;
+    userName: string;
+    weekStart: string;
+    weekEnd: string;
+  } | null>(null);
+
+  const [showRejectModal, setShowRejectModal] = useState<{
+    submissionId: string;
+    userName: string;
+    weekStart: string;
+    weekEnd: string;
+  } | null>(null);
 
   const { currentWeekStart, setWeekStart, activeTab, setActiveTab } =
     useTimesheetsStore();
@@ -90,7 +123,10 @@ export default function TimesheetsPage() {
     isLoading: submissionsLoading,
     error: submissionsError,
     refetch: refetchSubmissions,
-  } = useTimesheetSubmissions(currentOrganization?.id || null);
+  } = useTimesheetSubmissions(
+    currentOrganization?.id || null,
+    submissionFilters
+  );
 
   const {
     data: timesheetData,
@@ -98,6 +134,11 @@ export default function TimesheetsPage() {
     error: timesheetError,
     refetch: refetchTimesheet,
   } = useTimesheetData(currentOrganization?.id || null, currentWeekStart);
+
+  const isTimesheetSubmitted =
+    timesheetData?.submission?.status === "submitted" ||
+    timesheetData?.submission?.status === "approved" ||
+    timesheetData?.submission?.status === "rejected";
 
   const {
     data: capacityProjectsData,
@@ -188,6 +229,8 @@ export default function TimesheetsPage() {
     monday.setDate(diff);
     return monday.toISOString().split("T")[0];
   }
+
+  const canApproveTimesheets = canViewTimesheetSubmissions(organizationContext);
 
   function getWeekDays(weekStart: string): string[] {
     const start = new Date(weekStart);
@@ -455,13 +498,40 @@ export default function TimesheetsPage() {
       return;
     }
 
+    // Show confirmation modal
+    const weekStartDate = new Date(currentWeekStart);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekStartDate.getDate() + 4);
+
+    setShowSubmitModal({
+      totalHours: totalHours,
+      weekStart: currentWeekStart,
+      weekEnd: weekEndDate.toISOString().split("T")[0],
+    });
+  };
+
+  // Add new function to handle confirmed submission
+  const confirmSubmitTimesheet = async () => {
+    if (!currentOrganization?.id || !timesheetData?.submission?.id) return;
+
     try {
       await submitMutation.mutateAsync({
         organizationId: currentOrganization.id,
         submissionId: timesheetData.submission.id,
       });
-      alert("Timesheet submitted successfully!");
+
+      toast.success("Timesheet submitted successfully!", {
+        description: "Your timesheet has been sent for approval.",
+        duration: 5000,
+      });
+
+      setShowSubmitModal(null);
+      refetchTimesheet(); // Refresh the timesheet data
     } catch (error: any) {
+      toast.error("Failed to submit timesheet", {
+        description: error.message || "Please try again.",
+        duration: 5000,
+      });
       setError(error.message || "Failed to submit timesheet");
     }
   };
@@ -475,8 +545,17 @@ export default function TimesheetsPage() {
         submissionId,
         action: "approve",
       });
+      toast.success("Timesheet approved successfully!", {
+        description: "The timesheet has been approved.",
+        duration: 5000,
+      });
+      setShowApproveModal(null);
       refetchSubmissions();
     } catch (error: any) {
+      toast.error("Failed to approve timesheet", {
+        description: error.message || "Please try again.",
+        duration: 5000,
+      });
       setError(error.message || "Failed to approve submission");
     }
   };
@@ -490,10 +569,38 @@ export default function TimesheetsPage() {
         submissionId,
         action: "reject",
       });
+      toast.success("Timesheet rejected successfully!", {
+        description: "The timesheet has been rejected.",
+        duration: 5000,
+      });
       refetchSubmissions();
+      setShowRejectModal(null);
     } catch (error: any) {
+      toast.error("Failed to reject timesheet", {
+        description: error.message || "Please try again.",
+        duration: 5000,
+      });
       setError(error.message || "Failed to reject submission");
     }
+  };
+
+  // Add new functions to show confirmation modals
+  const showApproveConfirmation = (submission: TimesheetSubmission) => {
+    setShowApproveModal({
+      submissionId: submission.id,
+      userName: submission.userName,
+      weekStart: submission.weekStart,
+      weekEnd: submission.weekEnd,
+    });
+  };
+
+  const showRejectConfirmation = (submission: TimesheetSubmission) => {
+    setShowRejectModal({
+      submissionId: submission.id,
+      userName: submission.userName,
+      weekStart: submission.weekStart,
+      weekEnd: submission.weekEnd,
+    });
   };
 
   // Transform database entries to TimeEntry format
@@ -580,7 +687,7 @@ export default function TimesheetsPage() {
     };
   });
 
-  const allTimeEntries = [...databaseTimeEntries, ...newTimeEntries];
+  const allTimeEntries = [...newTimeEntries, ...databaseTimeEntries];
 
   const submissions: TimesheetSubmission[] =
     submissionsData?.submissions?.map((sub: any) => ({
@@ -638,20 +745,22 @@ export default function TimesheetsPage() {
             >
               My Timesheet
             </button>
-            <button
-              onClick={() =>
-                checkUnsavedChanges("switching tabs", () =>
-                  setActiveTab("approve-timesheets")
-                )
-              }
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "approve-timesheets"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              Approve Timesheets
-            </button>
+            {canApproveTimesheets && (
+              <button
+                onClick={() =>
+                  checkUnsavedChanges("switching tabs", () =>
+                    setActiveTab("approve-timesheets")
+                  )
+                }
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === "approve-timesheets"
+                    ? "border-primary-500 text-primary-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+              >
+                Approve Timesheets
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -681,14 +790,24 @@ export default function TimesheetsPage() {
               submitMutation.isPending
             }
             hasUnsavedChanges={hasUnsavedChanges}
+            submissionStatus={timesheetData?.submission?.status}
+            isReadOnly={isTimesheetSubmitted}
           />
         ) : (
           <ApproveTimesheetsView
             submissions={submissions}
-            onApprove={approveSubmission}
-            onReject={rejectSubmission}
+            pagination={submissionsData?.pagination}
+            onApprove={showApproveConfirmation}
+            onReject={showRejectConfirmation}
             onShowDetails={setShowDetailsModal}
             loading={submissionsLoading || resolveMutation.isPending}
+            filters={submissionFilters}
+            onFiltersChange={(newFilters) => {
+              setSubmissionFilters({ ...newFilters, page: 1 });
+            }}
+            onPageChange={(page) => {
+              setSubmissionFilters((prev) => ({ ...prev, page }));
+            }}
           />
         )}
       </div>
@@ -749,6 +868,35 @@ export default function TimesheetsPage() {
           onClose={() => setShowDetailsModal(null)}
         />
       )}
+
+      {/* Approve Confirmation Modal */}
+      {showApproveModal && (
+        <ApproveConfirmationModal
+          submission={showApproveModal}
+          onConfirm={() => approveSubmission(showApproveModal.submissionId)}
+          onCancel={() => setShowApproveModal(null)}
+          loading={resolveMutation.isPending}
+        />
+      )}
+
+      {/* Reject Confirmation Modal */}
+      {showRejectModal && (
+        <RejectConfirmationModal
+          submission={showRejectModal}
+          onConfirm={() => rejectSubmission(showRejectModal.submissionId)}
+          onCancel={() => setShowRejectModal(null)}
+          loading={resolveMutation.isPending}
+        />
+      )}
+
+      {showSubmitModal && (
+        <SubmitConfirmationModal
+          submission={showSubmitModal}
+          onConfirm={confirmSubmitTimesheet}
+          onCancel={() => setShowSubmitModal(null)}
+          loading={submitMutation.isPending}
+        />
+      )}
     </div>
   );
 }
@@ -768,6 +916,8 @@ function MyTimesheetView({
   onShowNoteModal,
   loading,
   hasUnsavedChanges,
+  submissionStatus,
+  isReadOnly = false,
 }: {
   selectedWeek: string;
   setSelectedWeek: (week: string) => void;
@@ -783,6 +933,8 @@ function MyTimesheetView({
   onShowNoteModal: (modal: any) => void;
   loading: boolean;
   hasUnsavedChanges: boolean;
+  submissionStatus?: string;
+  isReadOnly?: boolean;
 }) {
   return (
     <div>
@@ -795,35 +947,63 @@ function MyTimesheetView({
               onChange={setSelectedWeek}
               className="flex items-center space-x-2"
             />
+            {submissionStatus && (
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-600">Status:</span>
+                <span
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    submissionStatus === "approved"
+                      ? "bg-green-100 text-green-800"
+                      : submissionStatus === "submitted"
+                        ? "bg-yellow-100 text-yellow-800"
+                        : submissionStatus === "rejected"
+                          ? "bg-red-100 text-red-800"
+                          : "bg-gray-100 text-gray-800"
+                  }`}
+                >
+                  {submissionStatus === "submitted"
+                    ? "Pending Approval"
+                    : submissionStatus}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center space-x-3">
             <div className="text-sm text-gray-600">
               Total Hours: <span className="font-semibold">{totalHours}</span>
             </div>
-            {hasUnsavedChanges && (
-              <div className="text-sm text-orange-600 font-medium flex items-center">
-                <AlertTriangle className="w-4 h-4 mr-1" />
-                Unsaved changes
+            {isReadOnly ? (
+              <div className="text-sm text-gray-500 italic">
+                This timesheet has been submitted and cannot be edited
               </div>
+            ) : (
+              <>
+                {hasUnsavedChanges && (
+                  <div className="text-sm text-orange-600 font-medium flex items-center">
+                    <AlertTriangle className="w-4 h-4 mr-1" />
+                    Unsaved changes
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={onSave}
+                  disabled={loading || !hasUnsavedChanges}
+                  className={
+                    hasUnsavedChanges
+                      ? "bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100"
+                      : ""
+                  }
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Draft
+                </Button>
+                <Button onClick={onSubmit} disabled={loading}>
+                  <Send className="w-4 h-4 mr-2" />
+                  Submit
+                </Button>
+              </>
             )}
-            <Button
-              variant="outline"
-              onClick={onSave}
-              disabled={loading || !hasUnsavedChanges}
-              className={
-                hasUnsavedChanges
-                  ? "bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100"
-                  : ""
-              }
-            >
-              <Save className="w-4 h-4 mr-2" />
-              Save Draft
-            </Button>
-            <Button onClick={onSubmit} disabled={loading}>
-              <Send className="w-4 h-4 mr-2" />
-              Submit
-            </Button>
           </div>
         </div>
       </div>
@@ -832,11 +1012,20 @@ function MyTimesheetView({
       <div className="bg-white rounded-lg border border-gray-200">
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-gray-900">Time Entries</h3>
-            <Button size="sm" onClick={onAddEntry} disabled={loading}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Entry
-            </Button>
+            <h3 className="text-lg font-medium text-gray-900">
+              Time Entries{" "}
+              {isReadOnly && (
+                <span className="ml-2 text-sm text-gray-500 font-normal">
+                  (Read-only)
+                </span>
+              )}
+            </h3>
+            {!isReadOnly && (
+              <Button size="sm" onClick={onAddEntry} disabled={loading}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Entry
+              </Button>
+            )}
           </div>
         </div>
 
@@ -891,7 +1080,7 @@ function MyTimesheetView({
                             )
                           }
                           className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                          disabled={loading}
+                          disabled={loading || isReadOnly}
                         >
                           <option value="">Select Project</option>
                           {projects.map((project) => (
@@ -912,7 +1101,7 @@ function MyTimesheetView({
                           }
                           className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
                           placeholder="Enter task description"
-                          disabled={loading}
+                          disabled={loading || isReadOnly}
                         />
                       </div>
                     </td>
@@ -946,7 +1135,7 @@ function MyTimesheetView({
                                 )
                               }
                               className="block w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                              disabled={loading}
+                              disabled={loading || isReadOnly}
                             />
                             <button
                               onClick={() =>
@@ -959,7 +1148,7 @@ function MyTimesheetView({
                                 })
                               }
                               className="text-xs text-primary-600 hover:text-primary-800 flex items-center justify-center"
-                              disabled={loading}
+                              disabled={loading || isReadOnly}
                             >
                               <StickyNote className="w-4 h-4" />
                             </button>
@@ -976,7 +1165,7 @@ function MyTimesheetView({
                       <button
                         onClick={() => onDeleteEntry(entry.id)}
                         className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
-                        disabled={loading}
+                        disabled={loading || isReadOnly}
                         title="Delete entry"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1045,7 +1234,7 @@ function DeleteConfirmationModal({
               Cancel
             </Button>
             <Button
-              variant="destructive"
+              variant="default"
               onClick={onConfirm}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
@@ -1113,19 +1302,122 @@ function UnsavedChangesModal({
 
 function ApproveTimesheetsView({
   submissions,
+  pagination,
   onApprove,
   onReject,
   onShowDetails,
   loading,
+  filters,
+  onFiltersChange,
+  onPageChange,
 }: {
   submissions: TimesheetSubmission[];
-  onApprove: (id: string) => void;
-  onReject: (id: string) => void;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+  onApprove: (submission: TimesheetSubmission) => void;
+  onReject: (submission: TimesheetSubmission) => void;
   onShowDetails: (submission: TimesheetSubmission) => void;
   loading: boolean;
+  filters: {
+    status: string;
+    userId: string;
+    selectedWeek: string;
+    search: string;
+  };
+  onFiltersChange: (filters: any) => void;
+  onPageChange: (page: number) => void;
 }) {
+  function getCurrentWeekStart(): string {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Monday
+    const monday = new Date(now);
+    monday.setDate(diff);
+    return monday.toISOString().split("T")[0];
+  }
+
   return (
     <div>
+      {/* Filters Section */}
+      <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Filters</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Status Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Status
+            </label>
+            <select
+              value={filters.status}
+              onChange={(e) =>
+                onFiltersChange({ ...filters, status: e.target.value })
+              }
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+            >
+              <option value="">All Statuses</option>
+              <option value="submitted">Pending Approval</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+
+          {/* Week Filter */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Week
+            </label>
+            <WeekPicker
+              value={filters.selectedWeek || getCurrentWeekStart()}
+              onChange={(weekStart) =>
+                onFiltersChange({ ...filters, selectedWeek: weekStart })
+              }
+              className="w-full"
+            />
+          </div>
+
+          {/* Search Filter */}
+          {/* <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Search Employee
+            </label>
+            <input
+              type="text"
+              value={filters.search}
+              onChange={(e) =>
+                onFiltersChange({ ...filters, search: e.target.value })
+              }
+              placeholder="Search by name or email..."
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+            />
+          </div> */}
+        </div>
+
+        {/* Clear Filters Button */}
+        <div className="mt-4">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onFiltersChange({
+                status: "submitted", // Default to submitted
+                userId: "",
+                selectedWeek: getCurrentWeekStart(),
+                search: "",
+              })
+            }
+          >
+            Clear Filters
+          </Button>
+        </div>
+      </div>
+
+      {/* Submissions Table */}
       <div className="bg-white rounded-lg border border-gray-200">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-medium text-gray-900">
@@ -1160,9 +1452,17 @@ function ApproveTimesheetsView({
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className="flex-shrink-0 h-8 w-8">
-                        <div className="h-8 w-8 rounded-full bg-gray-300 flex items-center justify-center">
-                          <User className="w-4 h-4 text-gray-600" />
-                        </div>
+                        {submission?.userAvatar ? (
+                          <img
+                            className="h-10 w-10 rounded-full"
+                            src={submission.userAvatar}
+                            alt=""
+                          />
+                        ) : (
+                          <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
+                            <User className="h-6 w-6 text-gray-600" />
+                          </div>
+                        )}
                       </div>
                       <div className="ml-4">
                         <div className="text-sm font-medium text-gray-900">
@@ -1220,7 +1520,7 @@ function ApproveTimesheetsView({
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => onApprove(submission.id)}
+                            onClick={() => onApprove(submission)}
                             disabled={loading}
                           >
                             <Check className="w-4 h-4 text-green-600" />
@@ -1228,7 +1528,7 @@ function ApproveTimesheetsView({
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => onReject(submission.id)}
+                            onClick={() => onReject(submission)}
                             disabled={loading}
                           >
                             <X className="w-4 h-4 text-red-600" />
@@ -1242,6 +1542,40 @@ function ApproveTimesheetsView({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        {pagination && pagination.totalPages > 1 && (
+          <div className="px-6 py-4 border-t border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                Showing {(pagination.page - 1) * pagination.limit + 1} to{" "}
+                {Math.min(pagination.page * pagination.limit, pagination.total)}{" "}
+                of {pagination.total} results
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onPageChange(pagination.page - 1)}
+                  disabled={!pagination.hasPrev}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-gray-700">
+                  Page {pagination.page} of {pagination.totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onPageChange(pagination.page + 1)}
+                  disabled={!pagination.hasNext}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Empty State */}
         {submissions.length === 0 && (
@@ -1303,7 +1637,6 @@ function NoteModal({
   );
 }
 
-// Details Modal Component
 function DetailsModal({
   submission,
   onClose,
@@ -1311,23 +1644,141 @@ function DetailsModal({
   submission: TimesheetSubmission;
   onClose: () => void;
 }) {
+  // Helper function to format time entries
+  const formatTimeEntries = (entries: any[]) => {
+    if (!entries || entries.length === 0) {
+      return (
+        <div className="text-center py-8 text-gray-500">
+          <Clock className="mx-auto h-8 w-8 text-gray-400 mb-2" />
+          <p>No time entries found for this week.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {entries.map((entry, index) => (
+          <div
+            key={entry.id || index}
+            className="border rounded-lg p-4 bg-gray-50"
+          >
+            {/* Entry Header */}
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h5 className="font-medium text-gray-900">
+                  {entry.projects?.name || "Unknown Project"}
+                  {entry.projects?.code && (
+                    <span className="text-sm text-gray-500 ml-2">
+                      ({entry.projects.code})
+                    </span>
+                  )}
+                </h5>
+                <p className="text-sm text-gray-600 mt-1">
+                  {entry.task_description || "No description provided"}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-sm font-medium text-gray-900">
+                  Total:{" "}
+                  {(
+                    (entry.monday_hours || 0) +
+                    (entry.tuesday_hours || 0) +
+                    (entry.wednesday_hours || 0) +
+                    (entry.thursday_hours || 0) +
+                    (entry.friday_hours || 0)
+                  ).toFixed(1)}
+                  h
+                </span>
+              </div>
+            </div>
+
+            {/* Daily Breakdown */}
+            <div className="grid grid-cols-5 gap-3 text-sm">
+              {[
+                {
+                  day: "Monday",
+                  hours: entry.monday_hours || 0,
+                  notes: entry.monday_notes,
+                },
+                {
+                  day: "Tuesday",
+                  hours: entry.tuesday_hours || 0,
+                  notes: entry.tuesday_notes,
+                },
+                {
+                  day: "Wednesday",
+                  hours: entry.wednesday_hours || 0,
+                  notes: entry.wednesday_notes,
+                },
+                {
+                  day: "Thursday",
+                  hours: entry.thursday_hours || 0,
+                  notes: entry.thursday_notes,
+                },
+                {
+                  day: "Friday",
+                  hours: entry.friday_hours || 0,
+                  notes: entry.friday_notes,
+                },
+              ].map((dayData, dayIndex) => (
+                <div key={dayIndex} className="text-center">
+                  <div className="font-medium text-gray-700 mb-1">
+                    {dayData.day.slice(0, 3)}
+                  </div>
+                  <div className="text-lg font-semibold text-gray-900 mb-1">
+                    {dayData.hours > 0 ? `${dayData.hours}h` : "-"}
+                  </div>
+                  {dayData.notes && (
+                    <div className="text-xs text-gray-600 bg-white p-1 rounded border">
+                      <div className="flex items-center justify-center mb-1">
+                        <StickyNote className="w-3 h-3" />
+                      </div>
+                      <div className="max-h-16 overflow-y-auto">
+                        {dayData.notes}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Entry Footer */}
+            <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500">
+              <div className="flex justify-between">
+                <span>Entry ID: {entry.id}</span>
+                <span>
+                  Created:{" "}
+                  {entry.created_at
+                    ? new Date(entry.created_at).toLocaleDateString()
+                    : "N/A"}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div className="relative top-10 mx-auto p-5 border w-4/5 max-w-4xl shadow-lg rounded-md bg-white">
+      <div className="relative top-10 mx-auto p-5 border w-4/5 max-w-6xl shadow-lg rounded-md bg-white">
         <div className="mt-3">
-          <div className="flex items-center justify-between mb-4">
+          {/* Modal Header */}
+          <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-medium text-gray-900">
-              Timesheet Details - {submission.userName}
+              Timesheet Details
             </h3>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-gray-400 hover:text-gray-600 transition-colors"
             >
               <X className="w-6 h-6" />
             </button>
           </div>
 
-          <div className="space-y-4">
+          {/* Submission Info */}
+          <div className="mb-6">
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="font-medium">Employee:</span>{" "}
@@ -1347,7 +1798,20 @@ function DetailsModal({
                 {submission.totalHours}
               </div>
               <div>
-                <span className="font-medium">Status:</span> {submission.status}
+                <span className="font-medium">Status:</span>{" "}
+                <span
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    submission.status === "approved"
+                      ? "bg-green-100 text-green-800"
+                      : submission.status === "submitted"
+                        ? "bg-blue-100 text-blue-800"
+                        : submission.status === "rejected"
+                          ? "bg-red-100 text-red-800"
+                          : "bg-gray-100 text-gray-800"
+                  }`}
+                >
+                  {submission.status}
+                </span>
               </div>
               {submission.submittedAt && (
                 <div>
@@ -1355,18 +1819,249 @@ function DetailsModal({
                   {new Date(submission.submittedAt).toLocaleString()}
                 </div>
               )}
-            </div>
-
-            <div className="border-t pt-4">
-              <h4 className="font-medium text-gray-900 mb-2">Time Entries</h4>
-              <p className="text-sm text-gray-600">
-                Detailed time entries would be displayed here...
-              </p>
+              {submission.approvedAt && (
+                <div>
+                  <span className="font-medium">Approved:</span>{" "}
+                  {new Date(submission.approvedAt).toLocaleString()}
+                </div>
+              )}
+              {/* {submission?.rejectionReason && (
+                <div className="col-span-2">
+                  <span className="font-medium">Rejection Reason:</span>{" "}
+                  <span className="text-red-600">
+                    {submission.rejectionReason}
+                  </span>
+                </div>
+              )} */}
             </div>
           </div>
 
-          <div className="flex items-center justify-end mt-6">
-            <Button onClick={onClose}>Close</Button>
+          {/* Time Entries Section */}
+          <div className="border-t pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-medium text-gray-900 flex items-center">
+                <Clock className="w-5 h-5 mr-2" />
+                Time Entries ({submission.entries?.length || 0})
+              </h4>
+              <div className="text-sm text-gray-500">
+                Total: {submission.totalHours} hours
+              </div>
+            </div>
+
+            {/* Time Entries Display */}
+            <div className="max-h-96 overflow-y-auto">
+              {formatTimeEntries(submission.entries || [])}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end mt-6">
+          <Button onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Approve Confirmation Modal
+function ApproveConfirmationModal({
+  submission,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  submission: {
+    submissionId: string;
+    userName: string;
+    weekStart: string;
+    weekEnd: string;
+  };
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div className="mt-3">
+          <div className="flex items-center mb-4">
+            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-green-100">
+              <Check className="h-6 w-6 text-green-600" />
+            </div>
+          </div>
+          <div className="text-center">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              Approve Timesheet
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Are you sure you want to approve the timesheet for{" "}
+              <span className="font-semibold">{submission.userName}</span>?
+            </p>
+            <div className="text-sm text-gray-600 mb-4">
+              <p>
+                <span className="font-medium">Week:</span>{" "}
+                {new Date(submission.weekStart).toLocaleDateString()} -{" "}
+                {new Date(submission.weekEnd).toLocaleDateString()}
+              </p>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              This action cannot be undone.
+            </p>
+          </div>
+          <div className="flex flex-col space-y-2 mt-4">
+            <Button
+              onClick={onConfirm}
+              className="w-full bg-green-600 hover:bg-green-700"
+              disabled={loading}
+            >
+              {loading ? "Approving..." : "Yes, Approve"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={onCancel}
+              className="w-full"
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Reject Confirmation Modal
+function RejectConfirmationModal({
+  submission,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  submission: {
+    submissionId: string;
+    userName: string;
+    weekStart: string;
+    weekEnd: string;
+  };
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div className="mt-3">
+          <div className="flex items-center mb-4">
+            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+              <X className="h-6 w-6 text-red-600" />
+            </div>
+          </div>
+          <div className="text-center">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              Reject Timesheet
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Are you sure you want to reject the timesheet for{" "}
+              <span className="font-semibold">{submission.userName}</span>?
+            </p>
+            <div className="text-sm text-gray-600 mb-4">
+              <p>
+                <span className="font-medium">Week:</span>{" "}
+                {new Date(submission.weekStart).toLocaleDateString()} -{" "}
+                {new Date(submission.weekEnd).toLocaleDateString()}
+              </p>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              This action cannot be undone.
+            </p>
+          </div>
+          <div className="flex flex-col space-y-2 mt-4">
+            <Button
+              onClick={onConfirm}
+              className="w-full bg-red-600 hover:bg-red-700"
+              disabled={loading}
+            >
+              {loading ? "Rejecting..." : "Yes, Reject"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={onCancel}
+              className="w-full"
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Add this modal component at the end of the file
+function SubmitConfirmationModal({
+  submission,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  submission: {
+    totalHours: number;
+    weekStart: string;
+    weekEnd: string;
+  };
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div className="mt-3">
+          <div className="flex items-center mb-4">
+            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100">
+              <Send className="h-6 w-6 text-blue-600" />
+            </div>
+          </div>
+          <div className="text-center">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              Submit Timesheet
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Are you sure you want to submit your timesheet for approval?
+            </p>
+            <div className="text-sm text-gray-600 mb-4">
+              <p>
+                <span className="font-medium">Week:</span>{" "}
+                {new Date(submission.weekStart).toLocaleDateString()} -{" "}
+                {new Date(submission.weekEnd).toLocaleDateString()}
+              </p>
+              <p>
+                <span className="font-medium">Total Hours:</span>{" "}
+                {submission.totalHours}
+              </p>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">
+              Once submitted, you won't be able to edit this timesheet.
+            </p>
+          </div>
+          <div className="flex flex-col space-y-2 mt-4">
+            <Button
+              onClick={onConfirm}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+              disabled={loading}
+            >
+              {loading ? "Submitting..." : "Yes, Submit"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={onCancel}
+              className="w-full"
+              disabled={loading}
+            >
+              Cancel
+            </Button>
           </div>
         </div>
       </div>

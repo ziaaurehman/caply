@@ -28,7 +28,7 @@ export function hasPermission(
   }
 
   return context.membership.role.permissions.some(
-    p => p.resource === resource && p.action === action
+    (p) => p.resource === resource && p.action === action
   );
 }
 
@@ -52,7 +52,7 @@ export function hasAnyRole(
   if (!context?.membership?.role?.name) {
     return false;
   }
-  
+
   return roleNames.includes(context.membership.role.name);
 }
 
@@ -83,18 +83,54 @@ export function isManagerOrAbove(context: OrganizationContext | null): boolean {
  * Check if user can manage roles (client-side)
  */
 export function canManageRoles(context: OrganizationContext | null): boolean {
-  return isAdmin(context) || 
-         hasPermission(context, "roles", "manage") || 
-         hasPermission(context, "roles", "create") ||
-         hasPermission(context, "roles", "update") ||
-         hasPermission(context, "roles", "delete");
+  return (
+    isAdmin(context) ||
+    hasPermission(context, "roles", "manage") ||
+    hasPermission(context, "roles", "create") ||
+    hasPermission(context, "roles", "update") ||
+    hasPermission(context, "roles", "delete")
+  );
 }
 
 /**
  * Check if user can view leave (client-side)
  */
 export function canViewLeave(context: OrganizationContext | null): boolean {
-  return hasPermission(context, "leave_requests", "read") || 
-         hasPermission(context, "leave", "read") ||
-         isManagerOrAbove(context);
+  return (
+    hasPermission(context, "leave_requests", "read") ||
+    hasPermission(context, "leave", "read") ||
+    isManagerOrAbove(context)
+  );
+}
+
+/**
+ * Check if  user can view capacity
+ */
+export function canViewCapacity(context: OrganizationContext | null): boolean {
+  return (
+    hasPermission(context, "capacity", "read") || isManagerOrAbove(context)
+  );
+}
+
+export function canViewTimesheets(
+  context: OrganizationContext | null
+): boolean {
+  return (
+    hasPermission(context, "timesheets", "read") || isManagerOrAbove(context)
+  );
+}
+
+export function canViewTimesheetSubmissions(
+  context: OrganizationContext | null
+): boolean {
+  return (
+    hasPermission(context, "timesheet_submissions", "read") ||
+    isManagerOrAbove(context)
+  );
+}
+
+export function canViewTeamMembers(
+  context: OrganizationContext | null
+): boolean {
+  return hasPermission(context, "users", "read") || isManagerOrAbove(context);
 }

@@ -5,13 +5,7 @@ import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const {
-    organizationId,
-    submissionId,
-    weekStart,
-    entries = [],
-    totalHours = 0,
-  } = body;
+  const { organizationId, weekStart, entries = [], totalHours = 0 } = body;
 
   if (!organizationId || !weekStart) {
     return NextResponse.json(
@@ -42,7 +36,14 @@ export async function POST(req: NextRequest) {
   try {
     let currentSubmission;
 
-    if (submissionId) {
+    const { data: prevSubmission, error: prevSubmissionError } = await supabase
+      .from("timesheet_submissions")
+      .select("id")
+      .eq("user_id", userContext.userId)
+      .eq("week_start_date", weekStart)
+      .single();
+
+    if (prevSubmission) {
       // Update existing submission
       const { data: submission, error: fetchError } = await supabase
         .from("timesheet_submissions")
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
           total_hours: totalHours,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", submissionId)
+        .eq("id", prevSubmission.id)
         .eq("user_id", userContext.userId)
         .eq("status", "draft")
         .select()

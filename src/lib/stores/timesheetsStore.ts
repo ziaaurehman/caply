@@ -270,9 +270,8 @@ export const useTimesheetData = (
       if (!organizationId) throw new Error("Organization ID required");
 
       // Fetch draft timesheet
-      const [timesheetResponse, projectsResponse] = await Promise.all([
+      const [timesheetResponse] = await Promise.all([
         timesheetsAPI.getDraftTimesheet(organizationId, weekStart),
-        timesheetsAPI.getTimesheetProjects(organizationId),
       ]);
 
       // Transform database entries to component format
@@ -294,26 +293,15 @@ export const useTimesheetData = (
         })) || [];
 
       // Transform projects and mark planned ones
-      const projectsWithPlanned = projectsResponse.projects.map(
-        (project: any) => ({
-          id: project.id,
-          name: project.name,
-          code: project.code,
-          isPlanned: !!project.capacity_planning_enabled,
-        })
-      );
+      const projectsWithPlanned = [];
 
       // Sort projects: planned first, then alphabetically
-      const sortedProjects = projectsWithPlanned.sort((a, b) => {
-        if (a.isPlanned && !b.isPlanned) return -1;
-        if (!a.isPlanned && b.isPlanned) return 1;
-        return a.name.localeCompare(b.name);
-      });
+      const sortedProjects = [];
 
       return {
         submission: timesheetResponse.submission,
         entries,
-        projects: sortedProjects,
+        projects: [],
         totalHours: timesheetResponse.submission?.total_hours || 0,
       };
     },
@@ -447,12 +435,42 @@ export const useSubmitTimesheet = () => {
   });
 };
 
-export const useTimesheetSubmissions = (organizationId: string | null) => {
+export const useTimesheetSubmissions = (
+  organizationId: string | null,
+  filters?: {
+    status?: "submitted" | "approved" | "rejected";
+    userId?: string;
+    selectedWeek?: string;
+    page?: number;
+    limit?: number;
+    search?: string;
+  }
+) => {
   return useQuery({
-    queryKey: ["submissions", organizationId],
+    queryKey: ["submissions", organizationId, filters],
     queryFn: async () => {
       if (!organizationId) throw new Error("Organization ID required");
-      return timesheetsAPI.getSubmissionsForApproval(organizationId);
+
+      let apiFilters: { [key: string]: string | number | undefined } = {
+        ...filters,
+      };
+      if (filters?.selectedWeek) {
+        const weekStart = new Date(filters.selectedWeek);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 4); // Friday
+
+        apiFilters = {
+          ...filters,
+          weekStart: weekStart.toISOString().split("T")[0],
+          weekEnd: weekEnd.toISOString().split("T")[0],
+        };
+        delete apiFilters.selectedWeek;
+      }
+
+      return timesheetsAPI.getSubmissionsForApproval(
+        organizationId,
+        apiFilters
+      );
     },
     enabled: !!organizationId,
     staleTime: 60 * 1000, // 1 minute

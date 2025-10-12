@@ -90,6 +90,14 @@ interface TimesheetResponse {
 
 interface SubmissionsResponse {
   submissions: TimesheetSubmission[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
   success: boolean;
 }
 
@@ -174,19 +182,29 @@ export const timesheetsAPI = {
     return await response.json();
   },
 
-  // Get submissions for approval (managers/admins)
   getSubmissionsForApproval: async (
     organizationId: string,
     params?: {
       status?: "submitted" | "approved" | "rejected";
       user_id?: string;
-      start_date?: string;
-      end_date?: string;
+      week_start?: string;
+      week_end?: string;
+      page?: number;
+      limit?: number;
+      search?: string;
     }
   ): Promise<SubmissionsResponse> => {
+    const finalSearchParm: { [key: string]: string | number | undefined } = {};
+    if (params?.status) finalSearchParm["status"] = params.status;
+    if (params?.user_id) finalSearchParm["user_id"] = params.user_id;
+    if (params?.week_start) finalSearchParm["week_start"] = params.week_start;
+    if (params?.week_end) finalSearchParm["week_end"] = params.week_end;
+    if (params?.page) finalSearchParm["page"] = params.page;
+    if (params?.limit) finalSearchParm["limit"] = params.limit;
+    if (params?.search) finalSearchParm["search"] = params.search;
     const searchParams = new URLSearchParams({
       organizationId,
-      ...params,
+      ...finalSearchParm,
     });
 
     const response = await fetch(

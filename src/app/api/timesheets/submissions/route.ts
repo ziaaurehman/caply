@@ -1,4 +1,4 @@
-// Create: src/app/api/timesheets/submissions/route.ts
+// src/app/api/timesheets/submissions/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
@@ -8,6 +8,12 @@ export async function GET(req: NextRequest) {
   const organizationId =
     searchParams.get("organizationId") || req.headers.get("x-organization-id");
   const status = searchParams.get("status");
+  const userId = searchParams.get("user_id");
+  const weekStart = searchParams.get("week_start");
+  const weekEnd = searchParams.get("week_end");
+  const page = parseInt(searchParams.get("page") || "1");
+  const limit = parseInt(searchParams.get("limit") || "10");
+  const search = searchParams.get("search");
 
   if (!organizationId) {
     return NextResponse.json(
@@ -49,6 +55,12 @@ export async function GET(req: NextRequest) {
             code
           )
         ),
+        users!timesheet_submissions_user_id_fkey (
+          id,
+          full_name,
+          email,
+          avatar_url
+        ),
         project_member:project_members!project_member_id (
           id,
           organization_members!inner (
@@ -62,7 +74,8 @@ export async function GET(req: NextRequest) {
             )
           )
         )
-      `
+      `,
+        { count: "exact" }
       )
       .eq("organization_id", organizationId)
       .order("week_start_date", { ascending: false })
@@ -70,6 +83,24 @@ export async function GET(req: NextRequest) {
 
     if (status) {
       query = query.eq("status", status);
+    }
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
+
+    if (weekStart) {
+      query = query.gte("week_start_date", weekStart);
+    }
+
+    if (weekEnd) {
+      query = query.lte("week_end_date", weekEnd);
+    }
+
+    if (search) {
+      query = query.or(
+        `users.full_name.ilike.%${search}%,users.email.ilike.%${search}%`
+      );
     }
 
     // For non-admin users, only show their own submissions
@@ -80,7 +111,11 @@ export async function GET(req: NextRequest) {
       query = query.eq("user_id", userContext.userId);
     }
 
-    const { data: submissions, error } = await query;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+    query = query.range(from, to);
+
+    const { data: submissions, error, count } = await query;
 
     if (error) {
       console.error("Error fetching submissions:", error);
@@ -91,25 +126,36 @@ export async function GET(req: NextRequest) {
     const transformedSubmissions =
       submissions?.map((submission) => ({
         id: submission.id,
-        userId: (submission.project_member as any)?.organization_members
-          ?.user_id,
-        userName: (submission.project_member as any)?.organization_members
-          ?.users?.full_name,
-        userEmail: (submission.project_member as any)?.organization_members
-          ?.users?.email,
+        userId: submission.user_id,
+        userName: submission.users?.full_name || "Unknown User",
+        userEmail: submission.users?.email || "No Email",
+        userAvatar: submission.users?.avatar_url,
         weekStart: submission.week_start_date,
         weekEnd: submission.week_end_date,
-        totalHours: parseInt(submission.total_hours),
+        totalHours: parseFloat(submission.total_hours) || 0,
         status: submission.status,
         data: submission.timesheet_entries || [],
         submittedAt: submission.submitted_at,
         approvedAt: submission.approved_at,
         approvedBy: submission.approved_by,
         rejectionReason: submission.rejection_reason,
+        // Keep project_member data if available
+        projectMember: submission.project_member,
+        // Add created/updated timestamps
+        createdAt: submission.created_at,
+        updatedAt: submission.updated_at,
       })) || [];
 
     return NextResponse.json({
       submissions: transformedSubmissions,
+      pagination: {
+        page,
+        limit,
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit),
+        hasNext: page < Math.ceil((count || 0) / limit),
+        hasPrev: page > 1,
+      },
       success: true,
     });
   } catch (error) {

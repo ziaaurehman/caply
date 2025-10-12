@@ -75,6 +75,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Calculate total hours from entries before updating
+    const totalHours =
+      submission.timesheet_entries?.reduce(
+        (sum: number, entry: any) =>
+          sum +
+          (entry.monday_hours || 0) +
+          (entry.tuesday_hours || 0) +
+          (entry.wednesday_hours || 0) +
+          (entry.thursday_hours || 0) +
+          (entry.friday_hours || 0),
+        0
+      ) || 0;
+
     // Update submission status to submitted
     const { data: updatedSubmission, error: updateError } = await supabase
       .from("timesheet_submissions")
@@ -82,6 +95,7 @@ export async function POST(req: NextRequest) {
         status: "submitted",
         submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        total_hours: totalHours,
       })
       .eq("id", submissionId)
       .eq("user_id", userContext.userId)
