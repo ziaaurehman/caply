@@ -1,12 +1,26 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { ChevronDown, ChevronUp, Plus, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  X,
+  Link2,
+  Unlink,
+  Trash,
+  Pencil,
+} from "lucide-react";
 import {
   CapacityOverview,
   ResourceAllocation,
   capacityAPI,
 } from "@/utils/api/capacity";
+import {
+  useCreateAllocation,
+  useUpdateAllocation,
+  useDeleteAllocation,
+} from "@/lib/hooks/useCapacity";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { toast } from "sonner";
 
@@ -66,10 +80,28 @@ export default function WeeklyCapacityTable({
   >({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingHours, setEditingHours] = useState<string>("");
+  const [editingAllocationHeaderId, setEditingAllocationHeaderId] = useState<
+    string | null
+  >(null);
+  const [editingAllocationHeaderValue, setEditingAllocationHeaderValue] =
+    useState<string>("");
   const [addProjectMemberId, setAddProjectMemberId] = useState<string | null>(
     null
   );
   const [addProjectMemberName, setAddProjectMemberName] = useState<string>("");
+
+  // Per-allocation link/unlink state (true = linked, default)
+  const [allocationLinkState, setAllocationLinkState] = useState<
+    Record<string, boolean>
+  >({});
+
+  // Track which allocation and which week index is being edited
+  const [editingWeekIndex, setEditingWeekIndex] = useState<number | null>(null);
+
+  // React Query mutations for allocations
+  const createAllocationMutation = useCreateAllocation();
+  const updateAllocationMutation = useUpdateAllocation();
+  const deleteAllocationMutation = useDeleteAllocation();
 
   // Local state for optimistic updates
   const [localAllocations, setLocalAllocations] = useState<
@@ -213,6 +245,128 @@ export default function WeeklyCapacityTable({
 
     return weeks;
   }, [viewMode, selectedMonth, selectedYear]);
+
+  const toDateOnly = (d: Date | string) => {
+    const date = typeof d === "string" ? new Date(d) : d;
+    return date.toISOString().slice(0, 10);
+  };
+
+  const addDays = (d: Date, days: number) => {
+    const nd = new Date(d);
+    nd.setDate(nd.getDate() + days);
+    return nd;
+  };
+
+  const weekOverlapsAllocation = (
+    week: WeekData,
+    allocation: ResourceAllocation
+  ) => {
+    const wStart = new Date(week.startDate);
+    const wEnd = new Date(week.endDate);
+    const aStart = new Date(allocation.start_date);
+    const aEnd = allocation.end_date
+      ? new Date(allocation.end_date)
+      : undefined;
+    return (!aEnd || aEnd >= wStart) && aStart <= wEnd;
+  };
+
+  const getOrganizationMemberIdFromAllocation = (
+    allocation: ResourceAllocation
+  ): string | undefined => {
+    return (
+      (allocation as any)?.organization_member_id ||
+      (allocation as any)?.resource_allocations?.organization_member_id ||
+      (allocation as any)?.project_member_id ||
+      undefined
+    );
+  };
+
+  const updateSingleWeekCapacity = async (
+    allocation: ResourceAllocation,
+    week: WeekData,
+    newHoursPerWeek: number,
+    memberId: string
+  ) => {
+    if (!organizationId) return;
+
+    const overlaps = weekOverlapsAllocation(week, allocation);
+    const originalHours = allocation.hours_per_week || 0;
+    const orgMemberId = getOrganizationMemberIdFromAllocation(allocation);
+
+    // If no overlap, just create a new allocation for that week
+    if (!overlaps) {
+      if (!orgMemberId)
+        throw new Error("Missing member id for creating allocation");
+      await createAllocationMutation.mutateAsync({
+        organization_id: organizationId,
+        project_id: allocation.project_id,
+        organization_member_id: String(orgMemberId),
+        hours_per_week: newHoursPerWeek,
+        start_date: toDateOnly(new Date(week.startDate)),
+        end_date: toDateOnly(new Date(week.endDate)),
+      } as any);
+      return;
+    }
+
+    // Split allocation into up to three parts: pre-week, week, post-week
+    const aStart = new Date(allocation.start_date);
+    const aEnd = allocation.end_date
+      ? new Date(allocation.end_date)
+      : undefined;
+    const wStart = new Date(week.startDate);
+    const wEnd = new Date(week.endDate);
+
+    const preStart = aStart;
+    const preEnd = addDays(wStart, -1);
+    const hasPre =
+      preStart <= preEnd &&
+      (!aEnd || preEnd <= (aEnd as Date)) &&
+      preStart <= (aEnd || preEnd);
+
+    const postStart = addDays(wEnd, 1);
+    const postEnd = aEnd;
+    const hasPost =
+      (!aEnd || postStart <= (aEnd as Date)) && postStart >= aStart;
+
+    // 1) Update the existing allocation to be the week segment with new hours
+    await updateAllocationMutation.mutateAsync({
+      id: allocation.id,
+      data: {
+        start_date: toDateOnly(wStart),
+        end_date: toDateOnly(wEnd),
+        hours_per_week: newHoursPerWeek,
+      } as any,
+      organizationId,
+    });
+
+    // 2) Create pre segment if needed (original hours)
+    if (hasPre) {
+      if (!orgMemberId)
+        throw new Error("Missing member id for creating pre segment");
+      await createAllocationMutation.mutateAsync({
+        organization_id: organizationId,
+        project_id: allocation.project_id,
+        organization_member_id: String(orgMemberId),
+        hours_per_week: originalHours,
+        start_date: toDateOnly(preStart),
+        end_date: toDateOnly(preEnd),
+      } as any);
+    }
+
+    // 3) Create post segment if needed (original hours)
+    if (hasPost && postEnd) {
+      if (!orgMemberId)
+        throw new Error("Missing member id for creating post segment");
+      await createAllocationMutation.mutateAsync({
+        organization_id: organizationId,
+        project_id: allocation.project_id,
+        organization_member_id: String(orgMemberId),
+        hours_per_week: originalHours,
+        start_date: toDateOnly(postStart),
+        end_date: toDateOnly(postEnd),
+      } as any);
+    }
+  };
 
   // Optimistically remove allocation from local state
   const removeAllocationOptimistically = (allocationId: string) => {
@@ -446,12 +600,15 @@ export default function WeeklyCapacityTable({
           removeAllocationOptimistically(deletingId);
 
           try {
-            console.log("Calling deleteAllocation API...");
-            await capacityAPI.deleteAllocation(organizationId, deletingId);
-            console.log("Delete API call successful");
+            console.log("Calling deleteAllocation mutation...");
+            await deleteAllocationMutation.mutateAsync({
+              id: deletingId,
+              organizationId: organizationId!,
+            });
+            console.log("Delete mutation successful");
 
             setDeletingId(null);
-            // No need to refresh - UI is already updated optimistically
+            // React Query invalidation will refresh data; local UI already updated optimistically
           } catch (error) {
             console.error("Error deleting allocation:", error);
 
@@ -492,6 +649,9 @@ export default function WeeklyCapacityTable({
                 <div className="text-xs text-gray-400">{week.label}</div>
               </th>
             ))}
+            <th className="text-center px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -561,6 +721,7 @@ export default function WeeklyCapacityTable({
                           ></div>
                         </div>
                       </div>
+                      {/* Toggle moved to each project row */}
                     </div>
                   </td>
                   {weeksData.map((week) => {
@@ -600,6 +761,8 @@ export default function WeeklyCapacityTable({
                       </td>
                     );
                   })}
+                  {/* blank cell for actions column alignment */}
+                  <td className="px-4 py-4" />
                 </tr>
 
                 {/* Project Allocation Rows (when expanded) */}
@@ -608,20 +771,6 @@ export default function WeeklyCapacityTable({
                     <tr key={allocation.id} className="bg-white">
                       <td className="px-6 py-3 pl-16">
                         <div className="flex items-center">
-                          <button
-                            className="text-red-600 hover:text-red-700 mr-2"
-                            title="Remove from project"
-                            onClick={() => {
-                              console.log(
-                                "Delete button clicked for allocation:",
-                                allocation.id,
-                                allocation
-                              );
-                              setDeletingId(allocation.id);
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
                           <button
                             className="text-sm text-gray-700 cursor-pointer hover:underline"
                             onClick={() =>
@@ -636,7 +785,127 @@ export default function WeeklyCapacityTable({
                       </td>
                       <td className="px-4 py-3">
                         <div className="text-sm text-gray-600">
-                          {allocation.hours_per_week}h / week
+                          {editingAllocationHeaderId === allocation.id ? (
+                            <input
+                              type="number"
+                              className="w-24 px-2 py-1 border rounded text-center"
+                              value={editingAllocationHeaderValue}
+                              onChange={(e) =>
+                                setEditingAllocationHeaderValue(e.target.value)
+                              }
+                              step={0.5}
+                              min={0}
+                              max={168}
+                              onKeyDown={async (e) => {
+                                if (e.key === "Enter") {
+                                  const newVal = Number(
+                                    editingAllocationHeaderValue || 0
+                                  );
+                                  try {
+                                    const isLinked =
+                                      allocationLinkState[allocation.id] !==
+                                      false;
+                                    if (isLinked) {
+                                      const orgMemberId =
+                                        getOrganizationMemberIdFromAllocation(
+                                          allocation
+                                        );
+                                      const sameProjectAllocations =
+                                        member.allocations.filter(
+                                          (a) =>
+                                            a.project_id ===
+                                              allocation.project_id &&
+                                            getOrganizationMemberIdFromAllocation(
+                                              a
+                                            ) === orgMemberId
+                                        );
+                                      await Promise.allSettled(
+                                        sameProjectAllocations.map((a) =>
+                                          updateAllocationMutation.mutateAsync({
+                                            id: a.id,
+                                            data: {
+                                              hours_per_week: newVal,
+                                            } as any,
+                                            organizationId: organizationId!,
+                                          })
+                                        )
+                                      );
+                                    } else {
+                                      await updateAllocationMutation.mutateAsync(
+                                        {
+                                          id: allocation.id,
+                                          data: {
+                                            hours_per_week: newVal,
+                                          } as any,
+                                          organizationId: organizationId!,
+                                        }
+                                      );
+                                    }
+                                  } catch (err) {
+                                    toast.error(
+                                      "Failed to update capacity. Please try again."
+                                    );
+                                  } finally {
+                                    setEditingAllocationHeaderId(null);
+                                    onRefresh?.();
+                                  }
+                                } else if (e.key === "Escape") {
+                                  setEditingAllocationHeaderId(null);
+                                }
+                              }}
+                              onBlur={async () => {
+                                const newVal = Number(
+                                  editingAllocationHeaderValue || 0
+                                );
+                                try {
+                                  const isLinked =
+                                    allocationLinkState[allocation.id] !==
+                                    false;
+                                  if (isLinked) {
+                                    const orgMemberId =
+                                      getOrganizationMemberIdFromAllocation(
+                                        allocation
+                                      );
+                                    const sameProjectAllocations =
+                                      member.allocations.filter(
+                                        (a) =>
+                                          a.project_id ===
+                                            allocation.project_id &&
+                                          getOrganizationMemberIdFromAllocation(
+                                            a
+                                          ) === orgMemberId
+                                      );
+                                    await Promise.allSettled(
+                                      sameProjectAllocations.map((a) =>
+                                        updateAllocationMutation.mutateAsync({
+                                          id: a.id,
+                                          data: {
+                                            hours_per_week: newVal,
+                                          } as any,
+                                          organizationId: organizationId!,
+                                        })
+                                      )
+                                    );
+                                  } else {
+                                    await updateAllocationMutation.mutateAsync({
+                                      id: allocation.id,
+                                      data: { hours_per_week: newVal } as any,
+                                      organizationId: organizationId!,
+                                    });
+                                  }
+                                } catch (err) {
+                                  toast.error(
+                                    "Failed to update capacity. Please try again."
+                                  );
+                                } finally {
+                                  setEditingAllocationHeaderId(null);
+                                  onRefresh?.();
+                                }
+                              }}
+                            />
+                          ) : (
+                            <span>{allocation.hours_per_week}h / week</span>
+                          )}
                         </div>
                       </td>
                       {/* Tasks column */}
@@ -646,7 +915,8 @@ export default function WeeklyCapacityTable({
                           key={week.weekNumber}
                           className="px-4 py-3 text-center"
                         >
-                          {editingId === allocation.id && i === 0 ? (
+                          {editingId === allocation.id &&
+                          editingWeekIndex === i ? (
                             <input
                               type="number"
                               className="w-20 px-2 py-1 border rounded text-center"
@@ -658,26 +928,104 @@ export default function WeeklyCapacityTable({
                               onKeyDown={async (e) => {
                                 if (e.key === "Enter") {
                                   const newVal = Number(editingHours || 0);
-                                  await capacityAPI.updateAllocation(
-                                    allocation.id,
-                                    { hours_per_week: newVal } as any,
-                                    organizationId
-                                  );
-                                  setEditingId(null);
-                                  onRefresh?.();
+                                  try {
+                                    const isLinked =
+                                      allocationLinkState[allocation.id] !==
+                                      false; // default linked
+                                    if (isLinked) {
+                                      // Update all allocations for this member & project
+                                      const orgMemberId =
+                                        getOrganizationMemberIdFromAllocation(
+                                          allocation
+                                        );
+                                      const sameProjectAllocations =
+                                        member.allocations.filter(
+                                          (a) =>
+                                            a.project_id ===
+                                              allocation.project_id &&
+                                            getOrganizationMemberIdFromAllocation(
+                                              a
+                                            ) === orgMemberId
+                                        );
+                                      await Promise.allSettled(
+                                        sameProjectAllocations.map((a) =>
+                                          updateAllocationMutation.mutateAsync({
+                                            id: a.id,
+                                            data: {
+                                              hours_per_week: newVal,
+                                            } as any,
+                                            organizationId: organizationId!,
+                                          })
+                                        )
+                                      );
+                                    } else {
+                                      await updateSingleWeekCapacity(
+                                        allocation,
+                                        week,
+                                        newVal,
+                                        memberId
+                                      );
+                                    }
+                                  } catch (err) {
+                                    toast.error(
+                                      "Failed to update capacity. Please try again."
+                                    );
+                                  } finally {
+                                    setEditingId(null);
+                                    setEditingWeekIndex(null);
+                                    onRefresh?.();
+                                  }
                                 } else if (e.key === "Escape") {
                                   setEditingId(null);
+                                  setEditingWeekIndex(null);
                                 }
                               }}
                               onBlur={async () => {
                                 const newVal = Number(editingHours || 0);
-                                await capacityAPI.updateAllocation(
-                                  allocation.id,
-                                  { hours_per_week: newVal } as any,
-                                  organizationId
-                                );
-                                setEditingId(null);
-                                onRefresh?.();
+                                try {
+                                  const isLinked =
+                                    allocationLinkState[allocation.id] !==
+                                    false;
+                                  if (isLinked) {
+                                    const orgMemberId =
+                                      getOrganizationMemberIdFromAllocation(
+                                        allocation
+                                      );
+                                    const sameProjectAllocations =
+                                      member.allocations.filter(
+                                        (a) =>
+                                          a.project_id ===
+                                            allocation.project_id &&
+                                          getOrganizationMemberIdFromAllocation(
+                                            a
+                                          ) === orgMemberId
+                                      );
+                                    await Promise.allSettled(
+                                      sameProjectAllocations.map((a) =>
+                                        capacityAPI.updateAllocation(
+                                          a.id,
+                                          { hours_per_week: newVal } as any,
+                                          organizationId
+                                        )
+                                      )
+                                    );
+                                  } else {
+                                    await updateSingleWeekCapacity(
+                                      allocation,
+                                      week,
+                                      newVal,
+                                      memberId
+                                    );
+                                  }
+                                } catch (err) {
+                                  toast.error(
+                                    "Failed to update capacity. Please try again."
+                                  );
+                                } finally {
+                                  setEditingId(null);
+                                  setEditingWeekIndex(null);
+                                  onRefresh?.();
+                                }
                               }}
                             />
                           ) : (
@@ -686,6 +1034,7 @@ export default function WeeklyCapacityTable({
                               title="Click to edit hours"
                               onClick={() => {
                                 setEditingId(allocation.id);
+                                setEditingWeekIndex(i);
                                 setEditingHours(
                                   String(allocation.hours_per_week)
                                 );
@@ -696,6 +1045,51 @@ export default function WeeklyCapacityTable({
                           )}
                         </td>
                       ))}
+                      {/* Actions column */}
+                      <td className="px-2 py-3 text-center">
+                        <div className="inline-flex items-center gap-2">
+                          <button
+                            className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                            title="Edit hours/week"
+                            onClick={() => {
+                              setEditingAllocationHeaderId(allocation.id);
+                              setEditingAllocationHeaderValue(
+                                String(allocation.hours_per_week)
+                              );
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                            title={
+                              allocationLinkState[allocation.id] === false
+                                ? "Unlinked: edit a single week"
+                                : "Linked: edit updates all weeks"
+                            }
+                            onClick={() =>
+                              setAllocationLinkState((prev) => ({
+                                ...prev,
+                                [allocation.id]:
+                                  prev[allocation.id] === false ? true : false,
+                              }))
+                            }
+                          >
+                            {allocationLinkState[allocation.id] === false ? (
+                              <Unlink className="h-4 w-4" />
+                            ) : (
+                              <Link2 className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            className="p-2 rounded hover:bg-gray-100 text-red-600"
+                            title="Remove from project"
+                            onClick={() => setDeletingId(allocation.id)}
+                          >
+                            <Trash className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
 
