@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { prisma } from "@/lib/prisma";
 
 // Optimized: Simple queries with smart caching
 export async function GET(req: NextRequest) {
@@ -32,47 +33,30 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Simple cache key - main queries get longer cache
-    const isMainQuery = onlyActive && filterUserIds.length === 0;
-    const cacheKey = isMainQuery
-      ? `resources:main:${organizationId}`
-      : `resources:${organizationId}:${onlyActive}:${filterUserIds.join(",") || "all"}`;
-
     const supabase = await createClient();
 
-    // Step 1: Get basic resource allocations (simple query)
-    let resourcesQuery = supabase
-      .from("resource_allocations")
-      .select(
-        `
-        id,
-        organization_member_id,
-        weekly_capacity_hours,
-        hourly_rate,
-        is_active,
-        is_archived,
-        created_at,
-        updated_at
-      `
-      )
-      .eq("organization_id", organizationId);
-
-    if (onlyActive) resourcesQuery = resourcesQuery.eq("is_active", true);
-
-    const { data: resources, error: resourcesError } =
-      await resourcesQuery.order("created_at", { ascending: true });
-
-    if (resourcesError) {
-      console.error("Error fetching resources:", resourcesError);
-      return NextResponse.json(
-        { error: resourcesError.message },
-        { status: 500 }
-      );
-    }
+    const resources = await prisma.resourceAllocation.findMany({
+      where: {
+        organizationId,
+        ...(onlyActive ? { isActive: true } : {}),
+      },
+      select: {
+        id: true,
+        organizationMemberId: true,
+        weeklyCapacityHours: true,
+        hourlyRate: true,
+        isActive: true,
+        isArchived: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
 
     if (!resources || resources.length === 0) {
       const emptyResponse = { resources: [] };
-
       return NextResponse.json(emptyResponse);
     }
 
@@ -99,7 +83,7 @@ export async function GET(req: NextRequest) {
       )
       .in(
         "id",
-        resources.map((r) => r.organization_member_id)
+        resources.map((r) => r.organizationMemberId)
       );
 
     if (membersError) {
@@ -117,7 +101,7 @@ export async function GET(req: NextRequest) {
       ...resource,
       organization_id: organizationId, // Add back for compatibility
       organization_members:
-        memberMap.get(resource.organization_member_id) || null,
+        memberMap.get(resource.organizationMemberId) || null,
     }));
 
     // Filter by user IDs if specified
@@ -140,44 +124,48 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: upsert resource (create or update by organization_member_id)
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const {
-    organizationId,
-    organization_member_id,
-    weekly_capacity_hours,
-    hourly_rate,
-    is_active,
-  } = body || {};
-
-  if (!organizationId || !organization_member_id) {
-    return NextResponse.json(
-      { error: "organizationId and organization_member_id are required" },
-      { status: 400 }
-    );
-  }
-
-  const validation = await validateOrganizationAccessWithId(organizationId, {
-    resource: "capacity",
-    action: "manage",
-  });
-  if (!validation.success) {
-    return NextResponse.json(
-      { error: validation.error },
-      { status: validation.status }
-    );
-  }
-
-  const supabase = await createClient();
-
   try {
+    const body = await req.json();
+    const {
+      organizationId,
+      organization_member_id,
+      weekly_capacity_hours,
+      hourly_rate,
+      is_active,
+      // These fields are sent by the modal but not stored in resource_allocations
+      start_date,
+      end_date,
+      notes,
+    } = body || {};
+
+    if (!organizationId || !organization_member_id) {
+      return NextResponse.json(
+        { error: "organizationId and organization_member_id are required" },
+        { status: 400 }
+      );
+    }
+
+    const validation = await validateOrganizationAccessWithId(organizationId, {
+      resource: "capacity",
+      action: "manage",
+    });
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: validation.status }
+      );
+    }
+
+    const supabase = await createClient();
+
     // Verify the org member belongs to this organization
     const { data: om, error: omErr } = await supabase
       .from("organization_members")
       .select("id, organization_id")
       .eq("id", organization_member_id)
       .single();
+
     if (omErr || !om || (om as any).organization_id !== organizationId) {
       return NextResponse.json(
         { error: "Invalid organization member" },
@@ -185,26 +173,52 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data, error } = await supabase
-      .from("resource_allocations")
-      .upsert(
-        {
-          organization_id: organizationId,
-          organization_member_id,
-          weekly_capacity_hours: weekly_capacity_hours ?? 40,
-          hourly_rate: hourly_rate ?? null,
-          is_active: is_active ?? true,
-          updated_at: new Date().toISOString(),
+    const existing = await prisma.resourceAllocation.findFirst({
+      where: {
+        organizationId,
+        organizationMemberId: organization_member_id,
+      },
+    });
+
+    if (existing) {
+      // Update existing resource allocation
+      const data = await prisma.resourceAllocation.update({
+        where: { id: existing.id },
+        data: {
+          weeklyCapacityHours: weekly_capacity_hours ?? 40,
+          hourlyRate: hourly_rate ?? null,
+          isActive: is_active ?? true,
+          updatedAt: new Date(),
         },
-        { onConflict: "organization_id,organization_member_id" }
-      )
-      .select("*")
-      .single();
+      });
 
-    if (error)
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json(
+        {
+          resource: data,
+          message: "Resource allocation updated successfully",
+        },
+        { status: 200 }
+      );
+    } else {
+      // Create new resource allocation
+      const data = await prisma.resourceAllocation.create({
+        data: {
+          organizationId,
+          organizationMemberId: organization_member_id,
+          weeklyCapacityHours: weekly_capacity_hours ?? 40,
+          hourlyRate: hourly_rate ?? null,
+          isActive: is_active ?? true,
+        },
+      });
 
-    return NextResponse.json({ resource: data });
+      return NextResponse.json(
+        {
+          resource: data,
+          message: "Resource allocation created successfully",
+        },
+        { status: 201 }
+      );
+    }
   } catch (e) {
     console.error("Error upserting capacity resource:", e);
     return NextResponse.json(

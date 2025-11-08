@@ -20,6 +20,9 @@ import {
   useCreateAllocation,
   useUpdateAllocation,
   useDeleteAllocation,
+  useMonthlyCapacity,
+  useUpsertWeeklyPlan,
+  useUpsertDailyOverrides,
 } from "@/lib/hooks/useCapacity";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { toast } from "sonner";
@@ -42,9 +45,10 @@ interface WeeklyCapacityTableProps {
   onRefresh?: () => void;
   onProjectClick?: (projectId: string) => void;
   onAddResource?: () => void;
-  viewMode?: "overview" | "weekly" | "monthly";
+  viewMode?: "weekly" | "monthly";
   selectedMonth?: number;
   selectedYear?: number;
+  selectedWeek?: string;
 }
 
 interface WeekData {
@@ -52,6 +56,12 @@ interface WeekData {
   startDate: string;
   endDate: string;
   label: string;
+}
+
+interface DayData {
+  dayName: string;
+  date: string;
+  dayOfWeek: number; // 0-6 where 0 is Sunday
 }
 
 export default function WeeklyCapacityTable({
@@ -63,9 +73,10 @@ export default function WeeklyCapacityTable({
   onRefresh,
   onProjectClick,
   onAddResource,
-  viewMode = "overview",
+  viewMode = "monthly",
   selectedMonth = new Date().getMonth(),
   selectedYear = new Date().getFullYear(),
+  selectedWeek = "",
 }: WeeklyCapacityTableProps) {
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(
     new Set()
@@ -98,10 +109,37 @@ export default function WeeklyCapacityTable({
   // Track which allocation and which week index is being edited
   const [editingWeekIndex, setEditingWeekIndex] = useState<number | null>(null);
 
+  // Monthly data fetched from server when viewMode === 'monthly'
+  const [monthlyWeeks, setMonthlyWeeks] = useState<string[]>([]);
+
   // React Query mutations for allocations
   const createAllocationMutation = useCreateAllocation();
   const updateAllocationMutation = useUpdateAllocation();
   const deleteAllocationMutation = useDeleteAllocation();
+
+  // New capacity v2 hooks
+  const monthStr = `${String(selectedYear)}-${String(selectedMonth + 1).padStart(2, "0")}`;
+  const { data: monthlyCapacityData, isLoading: monthlyLoading } =
+    useMonthlyCapacity(organizationId || "", monthStr, { only_active: true });
+  const upsertWeeklyPlanMutation = useUpsertWeeklyPlan();
+  const upsertDailyOverridesMutation = useUpsertDailyOverrides();
+
+  // Process monthly capacity data for easy lookup
+  const monthlyByOrgMember = useMemo(() => {
+    if (!monthlyCapacityData?.resources) return {};
+    const lookup: Record<string, any> = {};
+    monthlyCapacityData.resources.forEach((resource: any) => {
+      const weeksMap: Record<string, any> = {};
+      resource.weeks.forEach((week: any) => {
+        weeksMap[week.week_start_date] = week;
+      });
+      lookup[resource.organization_member_id] = {
+        ...resource,
+        weeks: weeksMap,
+      };
+    });
+    return lookup;
+  }, [monthlyCapacityData]);
 
   // Local state for optimistic updates
   const [localAllocations, setLocalAllocations] = useState<
@@ -116,6 +154,50 @@ export default function WeeklyCapacityTable({
     setLocalAllocations(allocations);
     setLocalCapacityOverview(capacityOverview);
   }, [allocations, capacityOverview]);
+
+  // Fetch monthly data when in monthly view
+  React.useEffect(() => {
+    async function loadMonthly() {
+      if (viewMode !== "monthly" || !organizationId) return;
+      const monthStr = `${String(selectedYear)}-${String(selectedMonth + 1).padStart(2, "0")}`;
+      try {
+        const resp = await capacityAPI.getMonthly(organizationId, monthStr, {
+          only_active: true,
+        });
+        const weekKeys = (resp.weeks || []).map((w: any) => w.week_start_date);
+        const map: any = {};
+        (resp.resources || []).forEach((r: any) => {
+          const orgMemberId = r.organization_member_id;
+          const wkMap: any = {};
+          (r.weeks || []).forEach((w: any) => {
+            const pMap: any = {};
+            (w.projects || []).forEach((p: any) => {
+              if (p?.project?.id) {
+                pMap[p.project.id] = {
+                  weekly_hours: Number(p.weekly_hours || 0),
+                  allow_weekends: !!p.allow_weekends,
+                  default_hours_per_day: Number(p.default_hours_per_day || 0),
+                };
+              }
+            });
+            wkMap[w.week_start_date] = {
+              used: Number(w.used || 0),
+              total: Number(w.total || 0),
+              projects: pMap,
+            };
+          });
+          map[String(orgMemberId)] = {
+            weekly_capacity_hours: Number(r.weekly_capacity_hours || 40),
+            weeks: wkMap,
+          };
+        });
+        setMonthlyWeeks(weekKeys);
+      } catch (_e) {
+        // ignore
+      }
+    }
+    loadMonthly();
+  }, [viewMode, organizationId, selectedMonth, selectedYear]);
 
   // Generate weeks data based on view mode and selected month/year
   const weeksData: WeekData[] = useMemo(() => {
@@ -168,83 +250,27 @@ export default function WeeklyCapacityTable({
         weekCount++;
       }
     } else if (viewMode === "weekly") {
-      // For weekly view, show 4 weeks from the start of the selected month
-      const monthStart = new Date(selectedYear, selectedMonth, 1);
+      // For weekly view, show days of the week (SUN-SAT)
+      if (selectedWeek) {
+        const weekStart = new Date(selectedWeek);
+        const dayNames = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
-      for (let i = 0; i < 4; i++) {
-        const weekStart = new Date(monthStart);
-        weekStart.setDate(monthStart.getDate() + i * 7);
+        for (let i = 0; i < 7; i++) {
+          const currentDay = new Date(weekStart);
+          currentDay.setDate(weekStart.getDate() + i);
 
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 6);
-
-        const weekNumber = `W${String(i + 1).padStart(2, "0")}`;
-        const monthNames = [
-          "JAN",
-          "FEB",
-          "MAR",
-          "APR",
-          "MAY",
-          "JUN",
-          "JUL",
-          "AUG",
-          "SEP",
-          "OCT",
-          "NOV",
-          "DEC",
-        ];
-        const startDateStr = `${String(weekStart.getDate()).padStart(2, "0")} ${monthNames[weekStart.getMonth()]}`;
-
-        weeks.push({
-          weekNumber,
-          startDate: weekStart.toISOString(),
-          endDate: weekEnd.toISOString(),
-          label: startDateStr,
-        });
-      }
-    } else {
-      // For overview, show 5 weeks from current week
-      const today = new Date();
-      const currentWeekStart = new Date(today);
-      const dayOfWeek = today.getDay();
-      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      currentWeekStart.setDate(today.getDate() - daysToSubtract);
-
-      for (let i = 0; i < 5; i++) {
-        const weekStart = new Date(currentWeekStart);
-        weekStart.setDate(currentWeekStart.getDate() + i * 7);
-
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 6);
-
-        const weekNumber = `W${String(i + 1).padStart(2, "0")}`;
-        const monthNames = [
-          "JAN",
-          "FEB",
-          "MAR",
-          "APR",
-          "MAY",
-          "JUN",
-          "JUL",
-          "AUG",
-          "SEP",
-          "OCT",
-          "NOV",
-          "DEC",
-        ];
-        const startDateStr = `${String(weekStart.getDate()).padStart(2, "0")} ${monthNames[weekStart.getMonth()]}`;
-
-        weeks.push({
-          weekNumber,
-          startDate: weekStart.toISOString(),
-          endDate: weekEnd.toISOString(),
-          label: startDateStr,
-        });
+          weeks.push({
+            weekNumber: dayNames[i],
+            startDate: currentDay.toISOString(),
+            endDate: currentDay.toISOString(),
+            label: `${String(currentDay.getDate()).padStart(2, "0")}`,
+          });
+        }
       }
     }
 
     return weeks;
-  }, [viewMode, selectedMonth, selectedYear]);
+  }, [viewMode, selectedMonth, selectedYear, selectedWeek]);
 
   const toDateOnly = (d: Date | string) => {
     const date = typeof d === "string" ? new Date(d) : d;
@@ -495,6 +521,22 @@ export default function WeeklyCapacityTable({
 
   // Group members by user
   const groupedMembers = useMemo(() => {
+    // Use monthly capacity data when in monthly view mode
+    if (viewMode === "monthly" && monthlyCapacityData?.resources) {
+      return monthlyCapacityData.resources.map((resource: any) => ({
+        id: resource.user.id,
+        user: resource.user,
+        role: resource.user.job_title || "Member",
+        capacity: resource.weekly_capacity_hours,
+        allocations: [], // We'll get project details from weeks data
+        totalAllocated: 0, // Will be calculated per week
+        entries: 1,
+        orgMemberId: resource.organization_member_id,
+        monthlyResource: resource, // Store the full resource data
+      }));
+    }
+
+    // Fallback to original logic for other view modes
     const groups = new Map<
       string,
       {
@@ -557,12 +599,23 @@ export default function WeeklyCapacityTable({
     });
 
     return Array.from(groups.entries()).map(([id, g]) => ({ id, ...g }));
-  }, [localCapacityOverview, localAllocations]);
+  }, [localCapacityOverview, localAllocations, viewMode, monthlyCapacityData]);
 
   const getAllocationForWeek = (
     memberAllocations: ResourceAllocation[],
-    weekData: WeekData
+    weekData: WeekData,
+    member?: any
   ) => {
+    // Monthly view: use monthly capacity data
+    if (viewMode === "monthly" && member?.monthlyResource) {
+      const weekStartDate = toDateOnly(new Date(weekData.startDate));
+      const weekInfo = member.monthlyResource.weeks.find(
+        (w: any) => w.week_start_date === weekStartDate
+      );
+      return weekInfo ? weekInfo.used : 0;
+    }
+
+    // Fallback to original logic for other view modes
     const start = new Date(weekData.startDate);
     const end = new Date(weekData.endDate);
     const totalAllocated = memberAllocations.reduce((sum, alloc) => {
@@ -574,8 +627,59 @@ export default function WeeklyCapacityTable({
     return totalAllocated;
   };
 
+  // Update a week's value using new weekly plan + daily overrides model (monthly view)
+  const updateWeekCapacityNewModel = async (
+    allocation: ResourceAllocation,
+    week: WeekData,
+    newWeeklyHours: number
+  ) => {
+    if (!organizationId) return;
+    const orgMemberId = getOrganizationMemberIdFromAllocation(allocation) as
+      | string
+      | undefined;
+    const weekStartDate = toDateOnly(new Date(week.startDate));
+    // Determine weekends allowance from monthly snapshot if available, default to false
+    const rec = orgMemberId
+      ? monthlyByOrgMember[String(orgMemberId)]
+      : undefined;
+    const projInfo =
+      rec?.weeks?.[weekStartDate]?.projects?.[allocation.project_id];
+    const allowWeekends = projInfo?.allow_weekends ?? false;
+    const days = allowWeekends ? 7 : 5;
+
+    // 1) Ensure weekly plan exists and get id
+    const up = await capacityAPI.upsertWeeklyPlan(organizationId, {
+      resource_allocation_id: allocation.resource_allocation_id,
+      project_id: allocation.project_id,
+      week_start_date: weekStartDate,
+      default_hours_per_day: newWeeklyHours / days,
+      allow_weekends: allowWeekends,
+      is_linked: false, // we will write explicit daily overrides for this edit
+    });
+
+    const weeklyPlanId = up.weekly_plan_id;
+    // 2) Write daily overrides evenly across days
+    const perDay = newWeeklyHours / days;
+    const overrides = Array.from({ length: days }, (_v, i) => ({
+      day_of_week: i + 1,
+      actual_hours: perDay,
+    }));
+    await capacityAPI.upsertDailyOverrides(organizationId, {
+      weekly_plan_id: weeklyPlanId,
+      overrides,
+      unlink_week: true,
+    });
+  };
+
   return (
     <div className="overflow-x-auto">
+      {/* Loading state for monthly view */}
+      {viewMode === "monthly" && monthlyLoading && (
+        <div className="flex items-center justify-center py-8">
+          <div className="text-gray-500">Loading monthly capacity data...</div>
+        </div>
+      )}
+
       <ConfirmationModal
         isOpen={Boolean(deletingId)}
         onClose={() => setDeletingId(null)}
@@ -640,15 +744,25 @@ export default function WeeklyCapacityTable({
             <th className="text-left px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
               WEEKLY CAPACITY
             </th>
-            {weeksData.map((week) => (
-              <th
-                key={week.weekNumber}
-                className="text-center px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                <div>{week.weekNumber}</div>
-                <div className="text-xs text-gray-400">{week.label}</div>
-              </th>
-            ))}
+            {weeksData.map((week) => {
+              const isWeekend =
+                week.weekNumber === "SUN" || week.weekNumber === "SAT";
+              return (
+                <th
+                  key={week.weekNumber}
+                  className={`text-center px-4 py-4 text-xs font-medium tracking-wider ${
+                    isWeekend ? "text-gray-300" : "text-gray-500 uppercase"
+                  }`}
+                >
+                  <div>{week.weekNumber}</div>
+                  <div
+                    className={`text-xs ${isWeekend ? "text-gray-300" : "text-gray-400"}`}
+                  >
+                    {week.label}
+                  </div>
+                </th>
+              );
+            })}
             <th className="text-center px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
               Actions
             </th>
@@ -725,39 +839,71 @@ export default function WeeklyCapacityTable({
                     </div>
                   </td>
                   {weeksData.map((week) => {
-                    const weekAllocation = getAllocationForWeek(
-                      member.allocations,
-                      week
-                    );
+                    const isWeekend =
+                      week.weekNumber === "SUN" || week.weekNumber === "SAT";
+                    let weekAllocation;
+
+                    if (viewMode === "weekly") {
+                      // Use dummy data for weekly view
+                      weekAllocation = isWeekend ? 0 : 8; // 8 hours for weekdays, 0 for weekends
+                    } else {
+                      weekAllocation = getAllocationForWeek(
+                        member.allocations,
+                        week,
+                        member
+                      );
+                    }
+
                     return (
                       <td
                         key={week.weekNumber}
-                        className="px-4 py-4 text-center relative group cursor-pointer"
-                        onClick={() =>
-                          onWeekCellClick?.({
-                            userId: member.user.id,
-                            week,
-                            member,
-                            allocations: member.allocations,
-                          })
-                        }
+                        className={`px-4 py-4 text-center relative group ${
+                          isWeekend
+                            ? "cursor-not-allowed opacity-50"
+                            : "cursor-pointer"
+                        }`}
+                        onClick={() => {
+                          if (!isWeekend) {
+                            onWeekCellClick?.({
+                              userId: member.user.id,
+                              week,
+                              member,
+                              allocations: member.allocations,
+                            });
+                          }
+                        }}
                       >
-                        <div
-                          className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(weekAllocation, member.capacity)}`}
-                        >
-                          {weekAllocation}h
-                        </div>
-                        {/* Tooltip */}
-                        <div className="invisible  group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                          <div className="font-medium">
-                            Week {week.weekNumber}
-                          </div>
-                          <div>Allocated: {weekAllocation}h</div>
-                          <div>Capacity: {member.capacity}h</div>
-                          <div>
-                            Available: {member.capacity - weekAllocation}h
-                          </div>
-                        </div>
+                        {isWeekend ? (
+                          <div className="text-gray-300 text-sm">-</div>
+                        ) : (
+                          <>
+                            <div
+                              className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(weekAllocation, 8)}`}
+                            >
+                              {weekAllocation}h
+                            </div>
+                            {/* Tooltip */}
+                            <div className="invisible  group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                              <div className="font-medium">
+                                {viewMode === "weekly"
+                                  ? week.weekNumber
+                                  : `Week ${week.weekNumber}`}
+                              </div>
+                              <div>Allocated: {weekAllocation}h</div>
+                              <div>
+                                Capacity:{" "}
+                                {viewMode === "weekly" ? 8 : member.capacity}h
+                              </div>
+                              {viewMode === "weekly" ? (
+                                <div>Available: {8 - weekAllocation}h</div>
+                              ) : (
+                                <div>
+                                  Available: {member.capacity - weekAllocation}h
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </td>
                     );
                   })}
@@ -805,7 +951,7 @@ export default function WeeklyCapacityTable({
                                     const isLinked =
                                       allocationLinkState[allocation.id] !==
                                       false;
-                                    if (isLinked) {
+                                    if (isLinked && viewMode !== "monthly") {
                                       const orgMemberId =
                                         getOrganizationMemberIdFromAllocation(
                                           allocation
@@ -829,6 +975,16 @@ export default function WeeklyCapacityTable({
                                             organizationId: organizationId!,
                                           })
                                         )
+                                      );
+                                    } else if (viewMode !== "monthly") {
+                                      await updateAllocationMutation.mutateAsync(
+                                        {
+                                          id: allocation.id,
+                                          data: {
+                                            hours_per_week: newVal,
+                                          } as any,
+                                          organizationId: organizationId!,
+                                        }
                                       );
                                     } else {
                                       await updateAllocationMutation.mutateAsync(
@@ -861,7 +1017,7 @@ export default function WeeklyCapacityTable({
                                   const isLinked =
                                     allocationLinkState[allocation.id] !==
                                     false;
-                                  if (isLinked) {
+                                  if (isLinked && viewMode !== "monthly") {
                                     const orgMemberId =
                                       getOrganizationMemberIdFromAllocation(
                                         allocation
@@ -1009,12 +1165,18 @@ export default function WeeklyCapacityTable({
                                         )
                                       )
                                     );
-                                  } else {
+                                  } else if (viewMode !== "monthly") {
                                     await updateSingleWeekCapacity(
                                       allocation,
                                       week,
                                       newVal,
                                       memberId
+                                    );
+                                  } else {
+                                    await updateWeekCapacityNewModel(
+                                      allocation,
+                                      week,
+                                      newVal
                                     );
                                   }
                                 } catch (err) {
@@ -1158,7 +1320,8 @@ function AddProjectModal({
   isOpen: boolean;
 }) {
   const [projectId, setProjectId] = useState<string>("");
-  const [hoursPerDay, setHoursPerDay] = useState<number>(2); // convert to week
+  const [hoursPerDay, setHoursPerDay] = useState<number>(8); // Default 8 hours per day
+  const [allowWeekends, setAllowWeekends] = useState<boolean>(false);
   const [startDate, setStartDate] = useState<string>(() =>
     new Date().toISOString().slice(0, 10)
   );
@@ -1204,6 +1367,18 @@ function AddProjectModal({
               onChange={(e) => setHoursPerDay(Number(e.target.value))}
             />
           </div>
+          <div className="flex items-center gap-2">
+            <input
+              id="allow-weekends"
+              type="checkbox"
+              className="h-4 w-4"
+              checked={allowWeekends}
+              onChange={(e) => setAllowWeekends(e.target.checked)}
+            />
+            <label htmlFor="allow-weekends" className="text-sm text-gray-700">
+              Allow weekends
+            </label>
+          </div>
           <div>
             <label className="block text-sm text-gray-700 mb-1">
               Start Date
@@ -1227,12 +1402,19 @@ function AddProjectModal({
               setIsSubmitting(true);
               try {
                 const hoursPerWeek = Math.round(hoursPerDay * 5 * 100) / 100; // default 5 days/week
+                const allowWeekends = (
+                  document.getElementById("allow-weekends") as HTMLInputElement
+                )?.checked;
+                const computedWeek =
+                  Math.round(hoursPerDay * (allowWeekends ? 7 : 5) * 100) / 100;
                 await capacityAPI.createAllocation({
                   organization_id: organizationId,
                   project_id: projectId,
                   organization_member_id: memberId,
-                  hours_per_week: hoursPerWeek,
+                  hours_per_week: computedWeek,
                   start_date: startDate,
+                  default_hours_per_day: hoursPerDay,
+                  allow_weekends: !!allowWeekends,
                 });
                 onCreated();
               } finally {

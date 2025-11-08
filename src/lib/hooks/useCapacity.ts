@@ -11,6 +11,12 @@ import type {
 // Query Keys Factory
 export const capacityKeys = {
   all: ["capacity"] as const,
+  monthly: () => [...capacityKeys.all, "monthly"] as const,
+  monthlyByOrg: (
+    organizationId: string,
+    month: string,
+    params?: { only_active?: boolean }
+  ) => [...capacityKeys.monthly(), organizationId, month, params] as const,
   allocations: () => [...capacityKeys.all, "allocations"] as const,
   allocationsByOrg: (
     organizationId: string,
@@ -104,6 +110,22 @@ export function useCapacityOverview(
   });
 }
 
+// ===== MONTHLY VIEW =====
+export function useMonthlyCapacity(
+  organizationId: string,
+  month: string,
+  params?: { only_active?: boolean }
+) {
+  return useQuery({
+    queryKey: capacityKeys.monthlyByOrg(organizationId, month, params),
+    queryFn: () => capacityAPI.getMonthly(organizationId, month, params),
+    enabled: !!organizationId && !!month,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
 // ===== CAPACITY PROJECTS =====
 
 export function useCapacityProjects(organizationId: string) {
@@ -193,6 +215,8 @@ export function useCreateAllocation() {
       queryClient.invalidateQueries({
         queryKey: capacityKeys.overviewByOrg(variables.organization_id),
       });
+      // Invalidate monthly as well (wildcard)
+      queryClient.invalidateQueries({ queryKey: capacityKeys.monthly() });
     },
     onError: (error) => {
       console.error("Failed to create allocation:", error);
@@ -223,6 +247,7 @@ export function useUpdateAllocation() {
       queryClient.invalidateQueries({
         queryKey: capacityKeys.overviewByOrg(variables.organizationId),
       });
+      queryClient.invalidateQueries({ queryKey: capacityKeys.monthly() });
     },
     onError: (error) => {
       console.error("Failed to update allocation:", error);
@@ -251,6 +276,7 @@ export function useDeleteAllocation() {
       queryClient.invalidateQueries({
         queryKey: capacityKeys.overviewByOrg(variables.organizationId),
       });
+      queryClient.invalidateQueries({ queryKey: capacityKeys.monthly() });
     },
     onError: (error) => {
       console.error("Failed to delete allocation:", error);
@@ -334,4 +360,30 @@ export function useCapacityData(
       overviewQuery.refetch();
     },
   };
+}
+
+// Hook for upserting weekly plans
+export function useUpsertWeeklyPlan() {
+  return useMutation({
+    mutationFn: ({
+      organizationId,
+      data,
+    }: {
+      organizationId: string;
+      data: any;
+    }) => capacityAPI.upsertWeeklyPlan(organizationId, data),
+  });
+}
+
+// Hook for upserting daily overrides
+export function useUpsertDailyOverrides() {
+  return useMutation({
+    mutationFn: ({
+      organizationId,
+      data,
+    }: {
+      organizationId: string;
+      data: any;
+    }) => capacityAPI.upsertDailyOverrides(organizationId, data),
+  });
 }
