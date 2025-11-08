@@ -4,19 +4,72 @@ import React, { useState, useMemo } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash, Pencil } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { capacityStore } from "@/lib/stores/capacityStore";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { useQuery } from "@tanstack/react-query";
+
+interface ResourceAllocation {
+  id: string;
+  organizationMemberId: string;
+  weeklyCapacityHours: number;
+  hourlyRate?: number;
+  isActive: boolean;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+  organization_members: {
+    id: string;
+    user_id: string;
+    status: string;
+    roles?: { id: string; name: string };
+    users: {
+      id: string;
+      full_name: string;
+      email: string;
+      avatar_url?: string;
+      position?: string;
+    };
+  } | null;
+}
+
+interface ProjectAssignment {
+  id: string;
+  projectId: string;
+  projectName: string;
+  resourceAllocationId: string;
+  hoursPerWeek: number;
+  defaultHoursPerDay: number;
+  allowWeekends: boolean;
+  startDate: string;
+  endDate?: string | null;
+  notes?: string | null;
+}
+
+interface ProjectWeeklyPlan {
+  id: string;
+  resourceAllocationId: string;
+  projectId: string;
+  projectAssignmentId: string;
+  weekStartDate: string;
+  hoursSunday: number | null;
+  hoursMonday: number | null;
+  hoursTuesday: number | null;
+  hoursWednesday: number | null;
+  hoursThursday: number | null;
+  hoursFriday: number | null;
+  hoursSaturday: number | null;
+}
 
 interface Member {
   id: string;
   fullName: string;
   jobTitle: string;
   avatarUrl?: string;
-  capacity: number;
+  capacity: number; // Daily capacity
   allocations: Array<{
     projectId: string;
     projectName: string;
     hours: number; // Default weekly hours
-    weeklyHours?: number[]; // per week allocations aligned with weeksData
-    linked?: boolean; // if true, edit one week updates all
+    weeklyHours: number[]; // per week allocations aligned with weeksData
   }>;
 }
 
@@ -33,6 +86,52 @@ interface MonthlyCapacityTableProps {
   onAddResource?: () => void;
 }
 
+const fetchResources = async (
+  organizationId: string
+): Promise<ResourceAllocation[]> => {
+  if (!organizationId) throw new Error("Organization ID is required");
+
+  const response = await fetch(
+    `/api/capacity/resources?organizationId=${organizationId}&only_active=true`
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch resources: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.resources || [];
+};
+
+const fetchProjectAssignments = async (
+  organizationId: string
+): Promise<ProjectAssignment[]> => {
+  if (!organizationId) return [];
+
+  const response = await fetch(
+    `/api/capacity/project-assignments?organizationId=${organizationId}`
+  );
+  if (!response.ok) throw new Error("Failed to fetch project assignments");
+  const data = await response.json();
+  return data.assignments || [];
+};
+
+const fetchWeeklyPlansForMonth = async (
+  organizationId: string,
+  month: number,
+  year: number
+): Promise<ProjectWeeklyPlan[]> => {
+  if (!organizationId) return [];
+
+  // Fetch weekly plans for the month
+  const response = await fetch(
+    `/api/capacity/weekly-plans?organizationId=${organizationId}&month=${month}&year=${year}`
+  );
+  if (!response.ok) return [];
+  const data = await response.json();
+  return data.weeklyPlans || [];
+};
+
 export default function MonthlyCapacityTable({
   selectedMonth = new Date().getMonth(),
   selectedYear = new Date().getFullYear(),
@@ -41,6 +140,7 @@ export default function MonthlyCapacityTable({
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(
     new Set()
   );
+  const { currentOrganization } = useOrganizationStore();
   const [deletingTarget, setDeletingTarget] = useState<{
     memberId: string;
     projectId: string;
@@ -52,54 +152,27 @@ export default function MonthlyCapacityTable({
   const [addModalTarget, setAddModalTarget] = useState<string | null>(null); // memberId
   const [addForm, setAddForm] = useState({ projectName: "", hours: 1 });
 
-  // Dummy data
-  const initialMembers: Member[] = [
-    {
-      id: "1",
-      fullName: "John Doe",
-      jobTitle: "Senior Developer",
-      capacity: 40,
-      allocations: [
-        { projectId: "p1", projectName: "Project Alpha", hours: 20 },
-        { projectId: "p2", projectName: "Project Beta", hours: 15 },
-      ],
-    },
-    {
-      id: "2",
-      fullName: "Jane Smith",
-      jobTitle: "UI Designer",
-      capacity: 40,
-      allocations: [
-        { projectId: "p2", projectName: "Project Beta", hours: 30 },
-        { projectId: "p3", projectName: "Project Gamma", hours: 10 },
-      ],
-    },
-    {
-      id: "3",
-      fullName: "Bob Johnson",
-      jobTitle: "Product Manager",
-      capacity: 40,
-      allocations: [
-        { projectId: "p1", projectName: "Project Alpha", hours: 25 },
-        { projectId: "p3", projectName: "Project Gamma", hours: 15 },
-      ],
-    },
-  ];
-
-  const [members, setMembers] = useState<Member[]>(initialMembers);
-
   // Generate weeks for the selected month
   const weeksData: WeekData[] = useMemo(() => {
     const weeks: WeekData[] = [];
     const monthStart = new Date(selectedYear, selectedMonth, 1);
     const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
 
-    const firstMonday = new Date(monthStart);
-    const dayOfWeek = monthStart.getDay();
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    firstMonday.setDate(monthStart.getDate() - daysToSubtract);
+    const firstSunday = new Date(monthStart);
+    const dayOfWeek = monthStart.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    let daysToSubtract = 0;
+    if (dayOfWeek === 0) {
+      // Already Sunday
+      daysToSubtract = 0;
+    } else {
+      // Go back to the previous Sunday
+      daysToSubtract = dayOfWeek;
+    }
+    firstSunday.setDate(monthStart.getDate() - daysToSubtract);
+    // Set to midnight UTC to match API format
+    firstSunday.setUTCHours(0, 0, 0, 0);
 
-    let currentWeek = new Date(firstMonday);
+    let currentWeek = new Date(firstSunday);
     let weekCount = 0;
 
     while (currentWeek <= monthEnd && weekCount < 6) {
@@ -136,6 +209,122 @@ export default function MonthlyCapacityTable({
 
     return weeks;
   }, [selectedMonth, selectedYear]);
+
+  const {
+    data: resources,
+    isLoading: resourcesLoading,
+    error: resourcesError,
+  } = useQuery({
+    queryKey: ["resources", currentOrganization?.id],
+    queryFn: () => fetchResources(currentOrganization?.id || ""),
+    enabled: !!currentOrganization?.id,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: projectAssignments = [], isLoading: assignmentsLoading } =
+    useQuery({
+      queryKey: ["project-assignments", currentOrganization?.id],
+      queryFn: () => fetchProjectAssignments(currentOrganization?.id || ""),
+      enabled: !!currentOrganization?.id,
+      staleTime: 5 * 60 * 1000,
+    });
+
+  const { data: weeklyPlans = [], isLoading: plansLoading } = useQuery({
+    queryKey: [
+      "weekly-plans",
+      currentOrganization?.id,
+      selectedMonth,
+      selectedYear,
+    ],
+    queryFn: () =>
+      fetchWeeklyPlansForMonth(
+        currentOrganization?.id || "",
+        selectedMonth,
+        selectedYear
+      ),
+    enabled: !!currentOrganization?.id,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const members: Member[] = useMemo(() => {
+    if (!resources) return [];
+
+    return resources.map((resource: ResourceAllocation) => {
+      const memberInfo = resource.organization_members;
+      const userInfo = memberInfo?.users;
+
+      // Get project assignments for this resource
+      const assignments = projectAssignments.filter(
+        (pa: ProjectAssignment) => pa.resourceAllocationId === resource.id
+      );
+
+      // Transform assignments with weekly hours
+      const allocations = assignments.map((assignment: ProjectAssignment) => {
+        // Calculate weekly hours for each week in the month
+        const weeklyHours = weeksData.map((week: WeekData) => {
+          // Normalize dates for comparison
+          console.log("week", week);
+          const weekStartDate = new Date(week.startDate);
+          weekStartDate.setHours(0, 0, 0, 0);
+          console.log("weekStartDate", weekStartDate);
+          console.log("weeklyPlans", weeklyPlans);
+          // Find weekly plan for this week and assignment
+          const weeklyPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
+            // Normalize the weekly plan date
+            const planDate = new Date(wp.weekStartDate);
+            planDate.setUTCHours(0, 0, 0, 0);
+
+            const datesMatch = planDate.getTime() === weekStartDate.getTime();
+
+            const idsMatch =
+              wp.resourceAllocationId === resource.id &&
+              wp.projectAssignmentId === assignment.id;
+
+            return idsMatch && datesMatch;
+          });
+          console.log("weeklyPlan", weeklyPlan);
+
+          if (weeklyPlan) {
+            // Sum all daily hours for this week
+            const totalHours =
+              (weeklyPlan.hoursSunday || 0) +
+              (weeklyPlan.hoursMonday || 0) +
+              (weeklyPlan.hoursTuesday || 0) +
+              (weeklyPlan.hoursWednesday || 0) +
+              (weeklyPlan.hoursThursday || 0) +
+              (weeklyPlan.hoursFriday || 0) +
+              (weeklyPlan.hoursSaturday || 0);
+            return totalHours;
+          }
+
+          // If no weekly plan exists, return 0
+          return 0;
+        });
+
+        // Calculate average hours for display
+        const avgHours =
+          weeklyHours.reduce((sum, h) => sum + h, 0) / weeklyHours.length || 0;
+
+        return {
+          projectId: assignment.projectId,
+          projectName: assignment.projectName,
+          hours: avgHours,
+          weeklyHours,
+        };
+      });
+
+      return {
+        id: resource.id,
+        fullName: userInfo?.full_name || "Unknown User",
+        jobTitle: userInfo?.position || "No Position",
+        avatarUrl: userInfo?.avatar_url,
+        capacity: resource.weeklyCapacityHours / 5, // Daily capacity
+        allocations,
+      };
+    });
+  }, [resources, projectAssignments, weeklyPlans, weeksData]);
+
+  console.log("members", members);
 
   const getUtilizationColor = (allocated: number, capacity: number) => {
     const percentage = (allocated / capacity) * 100;
@@ -233,18 +422,64 @@ export default function MonthlyCapacityTable({
   };
 
   // Calculate total monthly capacity
-  const totalMonthlyCapacity = members.reduce(
-    (sum, m) => sum + m.capacity * 4,
-    0
-  );
-  const totalMonthlyAllocated = members.reduce((sum, m) => {
-    const weeklyAllocated = m.allocations.reduce(
-      (s, a) => s + (a.weeklyHours?.[0] ?? a.hours),
-      0
-    );
-    return sum + weeklyAllocated * 4;
-  }, 0);
+  const totalMonthlyCapacity = useMemo(() => {
+    return members.reduce((sum, member) => {
+      return sum + member.capacity * 5 * weeksData.length; // Daily * 5 days * number of weeks
+    }, 0);
+  }, [members, weeksData.length]);
+
+  const totalMonthlyAllocated = useMemo(() => {
+    return members.reduce((sum, member) => {
+      const memberAllocated = member.allocations.reduce(
+        (allocSum, allocation) => {
+          // Sum all weekly hours
+          const weeklyTotal = allocation.weeklyHours.reduce(
+            (weekSum, hours) => {
+              return weekSum + hours;
+            },
+            0
+          );
+          return allocSum + weeklyTotal;
+        },
+        0
+      );
+      return sum + memberAllocated;
+    }, 0);
+  }, [members]);
+
   const totalMonthlyAvailable = totalMonthlyCapacity - totalMonthlyAllocated;
+
+  if (resourcesLoading || assignmentsLoading || plansLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-lg text-gray-600">Loading capacity data...</div>
+      </div>
+    );
+  }
+
+  if (resourcesError) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-lg text-red-600">
+          Error: {resourcesError.message}
+        </div>
+      </div>
+    );
+  }
+
+  if (members.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <div className="text-lg text-gray-600">No resources allocated yet</div>
+        <button
+          onClick={onAddResource}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        >
+          Add First Resource
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -394,33 +629,38 @@ export default function MonthlyCapacityTable({
                         </div>
                       </div>
                     </td>
-                    {weeksData.map((week, weekIdx) => {
-                      const weekKey = week.startDate;
-                      const weeklyAllocation = member.allocations.reduce(
-                        (s, a) => {
-                          const st = capacityStore
-                            .getState()
-                            .getWeekState(memberId, a.projectId, weekKey);
-                          if (st) {
-                            const sum = st.dailyHours.reduce(
-                              (acc, v) => acc + v,
-                              0
-                            );
-                            return s + sum;
-                          }
-                          return s + (a.weeklyHours?.[weekIdx] ?? a.hours);
+                    {weeksData.map((week, weekIndex) => {
+                      const weekAllocated = member.allocations.reduce(
+                        (sum, allocation) => {
+                          return (
+                            sum + (allocation.weeklyHours?.[weekIndex] || 0)
+                          );
                         },
                         0
                       );
+                      const weekCapacity = member.capacity * 5;
+                      const weekUtilization =
+                        weekCapacity > 0
+                          ? (weekAllocated / weekCapacity) * 100
+                          : 0;
+
                       return (
                         <td
                           key={week.weekNumber}
                           className="px-4 py-4 text-center"
                         >
-                          <div
-                            className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(weeklyAllocation, member.capacity)}`}
-                          >
-                            {weeklyAllocation}h
+                          <div className="flex flex-col items-center gap-1">
+                            <div
+                              className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(
+                                weekAllocated,
+                                weekCapacity
+                              )}`}
+                            >
+                              {weekAllocated.toFixed(1)}h
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {weekUtilization.toFixed(0)}%
+                            </div>
                           </div>
                         </td>
                       );

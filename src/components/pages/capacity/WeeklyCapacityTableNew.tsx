@@ -639,17 +639,19 @@ export default function WeeklyCapacityTableNew({
     const days: DayData[] = [];
     if (selectedWeek) {
       const weekStart = new Date(selectedWeek);
-      const dayNames = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+      const dayNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 
       for (let i = 0; i < 7; i++) {
         const currentDay = new Date(weekStart);
         currentDay.setDate(weekStart.getDate() + i);
 
+        const dayOfWeekIndex = i < 6 ? i + 1 : 0;
+
         days.push({
           dayName: dayNames[i],
           date: currentDay.toISOString(),
           label: `${String(currentDay.getDate()).padStart(2, "0")}`,
-          dayOfWeek: i,
+          dayOfWeek: dayOfWeekIndex,
         });
       }
     }
@@ -1309,9 +1311,6 @@ export default function WeeklyCapacityTableNew({
                         </button>
                         <button
                           onClick={() => {
-                            const resource = resources?.find(
-                              (r: ResourceAllocation) => r.id === memberId
-                            );
                             setDeletingResource({
                               resourceId: memberId,
                               memberName: member.fullName,
