@@ -6,6 +6,13 @@ import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { capacityStore } from "@/lib/stores/capacityStore";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { useQuery } from "@tanstack/react-query";
+import {
+  startOfWeek,
+  startOfDay,
+  isSameDay,
+  parseISO,
+  isValid,
+} from "date-fns";
 
 interface ResourceAllocation {
   id: string;
@@ -152,32 +159,48 @@ export default function MonthlyCapacityTable({
   const [addModalTarget, setAddModalTarget] = useState<string | null>(null); // memberId
   const [addForm, setAddForm] = useState({ projectName: "", hours: 1 });
 
+  const formatDateForDisplay = (date: Date): string => {
+    const monthNames = [
+      "JAN",
+      "FEB",
+      "MAR",
+      "APR",
+      "MAY",
+      "JUN",
+      "JUL",
+      "AUG",
+      "SEP",
+      "OCT",
+      "NOV",
+      "DEC",
+    ];
+    return `${String(date.getDate()).padStart(2, "0")} ${monthNames[date.getMonth()]}`;
+  };
+
+  const formatDateRange = (startDate: Date, endDate: Date): string => {
+    const startStr = formatDateForDisplay(startDate);
+    const endStr = formatDateForDisplay(endDate);
+    return `${startStr} - ${endStr}`;
+  };
+
   // Generate weeks for the selected month
   const weeksData: WeekData[] = useMemo(() => {
     const weeks: WeekData[] = [];
     const monthStart = new Date(selectedYear, selectedMonth, 1);
     const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
 
-    const firstSunday = new Date(monthStart);
-    const dayOfWeek = monthStart.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-    let daysToSubtract = 0;
-    if (dayOfWeek === 0) {
-      // Already Sunday
-      daysToSubtract = 0;
-    } else {
-      // Go back to the previous Sunday
-      daysToSubtract = dayOfWeek;
-    }
-    firstSunday.setDate(monthStart.getDate() - daysToSubtract);
-    // Set to midnight UTC to match API format
-    firstSunday.setUTCHours(0, 0, 0, 0);
-
-    let currentWeek = new Date(firstSunday);
+    let currentWeekStart = new Date(monthStart);
     let weekCount = 0;
+    while (currentWeekStart <= monthEnd && weekCount < 6) {
+      const dayOfWeek = currentWeekStart.getDay();
 
-    while (currentWeek <= monthEnd && weekCount < 6) {
-      const weekEnd = new Date(currentWeek);
-      weekEnd.setDate(currentWeek.getDate() + 6);
+      const mondayBasedDay = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+      const daysUntilSunday = 6 - mondayBasedDay;
+
+      const weekEnd = new Date(currentWeekStart);
+      weekEnd.setDate(currentWeekStart.getDate() + daysUntilSunday);
+      const actualWeekEnd = weekEnd > monthEnd ? monthEnd : weekEnd;
 
       const weekNumber = `W${String(weekCount + 1).padStart(2, "0")}`;
       const monthNames = [
@@ -194,16 +217,25 @@ export default function MonthlyCapacityTable({
         "NOV",
         "DEC",
       ];
-      const startDateStr = `${String(currentWeek.getDate()).padStart(2, "0")} ${monthNames[currentWeek.getMonth()]}`;
+      const startDateStr = `${String(currentWeekStart.getDate()).padStart(2, "0")} ${monthNames[currentWeekStart.getMonth()]}`;
 
       weeks.push({
         weekNumber,
-        startDate: currentWeek.toISOString(),
-        endDate: weekEnd.toISOString(),
+        startDate: currentWeekStart.toISOString(),
+        endDate: actualWeekEnd.toISOString(),
         label: startDateStr,
       });
 
-      currentWeek.setDate(currentWeek.getDate() + 7);
+      // Next week starts on the Monday after this week's Sunday
+      const nextWeekStart = new Date(actualWeekEnd);
+      nextWeekStart.setDate(actualWeekEnd.getDate() + 1);
+
+      // If next week start is beyond month end, break
+      if (nextWeekStart > monthEnd) {
+        break;
+      }
+
+      currentWeekStart = nextWeekStart;
       weekCount++;
     }
 
@@ -263,18 +295,49 @@ export default function MonthlyCapacityTable({
         // Calculate weekly hours for each week in the month
         const weeklyHours = weeksData.map((week: WeekData) => {
           // Normalize dates for comparison
-          console.log("week", week);
-          const weekStartDate = new Date(week.startDate);
-          weekStartDate.setHours(0, 0, 0, 0);
-          console.log("weekStartDate", weekStartDate);
-          console.log("weeklyPlans", weeklyPlans);
-          // Find weekly plan for this week and assignment
-          const weeklyPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
-            // Normalize the weekly plan date
-            const planDate = new Date(wp.weekStartDate);
-            planDate.setUTCHours(0, 0, 0, 0);
+          let weekStartDate: Date;
+          try {
+            weekStartDate = parseISO(week.startDate);
+            if (!isValid(weekStartDate)) {
+              weekStartDate = new Date(week.startDate);
+            }
+          } catch {
+            weekStartDate = new Date(week.startDate);
+          }
+          weekStartDate = startOfDay(weekStartDate);
 
-            const datesMatch = planDate.getTime() === weekStartDate.getTime();
+          const weekMonday = startOfWeek(weekStartDate, { weekStartsOn: 1 }); // 1 = Monday
+
+          console.log("week", week);
+          const weeklyPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
+            let planDate: Date;
+            try {
+              planDate = parseISO(wp.weekStartDate);
+              if (!isValid(planDate)) {
+                planDate = new Date(wp.weekStartDate);
+              }
+            } catch {
+              planDate = new Date(wp.weekStartDate);
+            }
+
+            // Normalize to start of day
+            planDate = startOfDay(planDate);
+
+            const planMonday = startOfWeek(planDate, { weekStartsOn: 1 });
+            console.log("weekMonday", weekMonday, "planMonday", planMonday);
+
+            const datesMatch = isSameDay(weekMonday, planMonday);
+
+            console.log("datesMatch", datesMatch);
+
+            console.log(
+              "wp",
+              wp,
+              "resourceId",
+              resource.id,
+              "assignmentId",
+              assignment.id
+            );
 
             const idsMatch =
               wp.resourceAllocationId === resource.id &&
@@ -287,13 +350,13 @@ export default function MonthlyCapacityTable({
           if (weeklyPlan) {
             // Sum all daily hours for this week
             const totalHours =
-              (weeklyPlan.hoursSunday || 0) +
-              (weeklyPlan.hoursMonday || 0) +
-              (weeklyPlan.hoursTuesday || 0) +
-              (weeklyPlan.hoursWednesday || 0) +
-              (weeklyPlan.hoursThursday || 0) +
-              (weeklyPlan.hoursFriday || 0) +
-              (weeklyPlan.hoursSaturday || 0);
+              (Number(weeklyPlan.hoursSunday) || 0) +
+              (Number(weeklyPlan.hoursMonday) || 0) +
+              (Number(weeklyPlan.hoursTuesday) || 0) +
+              (Number(weeklyPlan.hoursWednesday) || 0) +
+              (Number(weeklyPlan.hoursThursday) || 0) +
+              (Number(weeklyPlan.hoursFriday) || 0) +
+              (Number(weeklyPlan.hoursSaturday) || 0);
             return totalHours;
           }
 
@@ -545,15 +608,25 @@ export default function MonthlyCapacityTable({
               <th className="text-left px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
                 MONTHLY CAPACITY
               </th>
-              {weeksData.map((week) => (
-                <th
-                  key={week.weekNumber}
-                  className="text-center px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  <div>{week.weekNumber}</div>
-                  <div className="text-xs text-gray-400">{week.label}</div>
-                </th>
-              ))}
+              {weeksData.map((week) => {
+                const weekStartDate = new Date(week.startDate);
+                const weekEndDate = new Date(week.endDate);
+                const dateRangeTooltip = formatDateRange(
+                  weekStartDate,
+                  weekEndDate
+                );
+
+                return (
+                  <th
+                    key={week.weekNumber}
+                    className="text-center px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-help"
+                    title={dateRangeTooltip}
+                  >
+                    <div>{week.weekNumber}</div>
+                    <div className="text-xs text-gray-400">{week.label}</div>
+                  </th>
+                );
+              })}
               <th className="text-center px-4 py-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
               </th>
@@ -752,7 +825,7 @@ export default function MonthlyCapacityTable({
                           );
                         })}
                         <td className="px-4 py-3 text-center">
-                          <div className="inline-flex items-center gap-3">
+                          {/*<div className="inline-flex items-center gap-3">
                             <button
                               className={`$${""} text-gray-600 hover:text-gray-800`}
                               title={
@@ -792,7 +865,7 @@ export default function MonthlyCapacityTable({
                             >
                               <Trash className="h-4 w-4" />
                             </button>
-                          </div>
+                          </div>*/}
                         </td>
                       </tr>
                     ))}
@@ -804,7 +877,7 @@ export default function MonthlyCapacityTable({
                         className="px-6 py-3 pl-12"
                         colSpan={weeksData.length + 3}
                       >
-                        <button
+                        {/* <button
                           onClick={() => {
                             setAddModalTarget(memberId);
                             setAddForm({ projectName: "", hours: 1 });
@@ -813,7 +886,7 @@ export default function MonthlyCapacityTable({
                         >
                           <Plus className="h-4 w-4 mr-1" />
                           Add Project
-                        </button>
+                        </button> */}
                       </td>
                     </tr>
                   )}
