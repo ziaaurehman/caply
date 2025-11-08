@@ -1,0 +1,107 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+// =====================================================
+// CAPACITY PLANNING MODELS
+// =====================================================
+
+model ResourceAllocation {
+  id                  String   @id @default(uuid())
+  organizationId      String   @map("organization_id")
+  organizationMemberId String  @map("organization_member_id")
+  weeklyCapacityHours Decimal? @map("weekly_capacity_hours") @db.Decimal(5, 2)
+  hourlyRate          Decimal? @map("hourly_rate") @db.Decimal(10, 2) // Add this if missing
+  isActive            Boolean  @default(true) @map("is_active") // Add this
+  isArchived          Boolean  @default(false) @map("is_archived") // Add this
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  projectAssignments  ProjectAssignment[]
+  weeklyPlans         ProjectWeeklyPlan[]
+
+
+  @@index([organizationId])
+  @@index([organizationMemberId])
+  @@map("resource_allocations")
+}
+
+
+model ProjectAssignment {
+  id                  String   @id @default(uuid())
+  resourceAllocationId String  @map("resource_allocation_id")
+  projectId           String   @map("project_id")
+  hoursPerWeek        Decimal  @map("hours_per_week") @db.Decimal(5, 2)
+  startDate           DateTime  @map("start_date") @db.Date
+  endDate             DateTime? @map("end_date") @db.Date
+  isActive            Boolean  @default(true) @map("is_active")
+  notes               String?
+  defaultHoursPerDay  Decimal  @default(8.00) @map("default_hours_per_day") @db.Decimal(4, 2)
+  allowWeekends       Boolean  @default(false) @map("allow_weekends")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  resourceAllocation  ResourceAllocation @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
+  projectWeeklyPlans  ProjectWeeklyPlan[]
+
+  @@index([resourceAllocationId])
+  @@index([projectId])
+  @@index([isActive])
+  @@map("project_assignments")
+}
+
+
+model ProjectWeeklyPlan {
+  id                  String   @id @default(uuid())
+  organizationId      String   @map("organization_id")
+  resourceAllocationId String  @map("resource_allocation_id")
+  projectId           String   @map("project_id")
+  projectAssignmentId String   @map("project_assignment_id")
+  weekStartDate       DateTime @map("week_start_date") @db.Date
+
+ // Month and year for easy monthly view queries
+  year                Int      // e.g., 2024
+  month               Int      // 1-12
+  weekNumber          Int      @map("week_number") // ISO week number (1-53)
+
+  defaultHoursPerDay  Decimal  @map("default_hours_per_day") @db.Decimal(4, 2)
+  allowWeekends       Boolean  @default(false) @map("allow_weekends")
+  isLinked            Boolean  @default(true) @map("is_linked")
+
+
+  // Day-wise hours allocation (Sunday through Saturday)
+  hoursSunday         Decimal? @map("hours_sunday") @db.Decimal(4, 2)
+  hoursMonday         Decimal? @map("hours_monday") @db.Decimal(4, 2)
+  hoursTuesday        Decimal? @map("hours_tuesday") @db.Decimal(4, 2)
+  hoursWednesday      Decimal? @map("hours_wednesday") @db.Decimal(4, 2)
+  hoursThursday       Decimal? @map("hours_thursday") @db.Decimal(4, 2)
+  hoursFriday         Decimal? @map("hours_friday") @db.Decimal(4, 2)
+  hoursSaturday       Decimal? @map("hours_saturday") @db.Decimal(4, 2)
+
+  notes               String?
+  createdBy           String?  @map("created_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  resourceAllocation  ResourceAllocation @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
+  projectAssignment   ProjectAssignment @relation(fields: [projectAssignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceAllocationId, projectId, weekStartDate])
+  @@index([organizationId, projectId, weekStartDate])
+  @@index([resourceAllocationId, weekStartDate])
+  @@map("project_weekly_plans")
+}
+
+

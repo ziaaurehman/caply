@@ -219,6 +219,8 @@ export async function POST(req: NextRequest) {
     start_date,
     end_date,
     notes,
+    default_hours_per_day,
+    allow_weekends,
   } = allocationData;
 
   // Validate required fields
@@ -279,7 +281,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Create project assignment
+    // Create project assignment (with per-day defaults and weekend flag)
     const { data: assignment, error: createError } = await supabase
       .from("project_assignments")
       .insert([
@@ -290,6 +292,8 @@ export async function POST(req: NextRequest) {
           start_date,
           end_date: end_date || null,
           notes: notes || null,
+          default_hours_per_day: default_hours_per_day ?? 8,
+          allow_weekends: allow_weekends ?? false,
         },
       ])
       .select(

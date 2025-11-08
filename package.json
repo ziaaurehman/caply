@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@next-auth/supabase-adapter": "^0.2.1",
+    "@prisma/client": "^6.19.0",
     "@sendgrid/mail": "^8.1.5",
     "@stripe/stripe-js": "^7.4.0",
     "@supabase/ssr": "^0.6.1",
@@ -24,11 +25,13 @@
     "@types/uuid": "^10.0.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "dotenv": "^17.2.3",
     "ioredis": "^5.7.0",
     "lucide-react": "^0.484.0",
     "next": "15.3.3",
     "next-auth": "^4.24.11",
     "nodemailer": "^6.10.1",
+    "prisma": "^6.19.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-dropzone": "^14.3.8",
@@ -55,4 +58,3 @@
     "typescript": "^5"
   }
 }
-

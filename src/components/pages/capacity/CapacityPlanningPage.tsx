@@ -1,20 +1,15 @@
 "use client";
 import React, { useState, useEffect } from "react";
-import {
-  ChevronDown,
-  Settings,
-  Users,
-  Plus,
-  Download,
-  AlertTriangle,
-} from "lucide-react";
+import { Users, Download, AlertTriangle } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { useCapacityData, useCapacityProjects } from "@/lib/hooks/useCapacity";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 
-import WeeklyCapacityTable from "./WeeklyCapacityTable";
+import MonthlyCapacityTable from "./MonthlyCapacityTable";
+import WeeklyCapacityTableNew from "./WeeklyCapacityTableNew";
 import CapacitySkeleton from "./CapacitySkeleton";
 import AddResourceModal from "./AddResourceModal";
+import WeekPicker from "../timesheets/WeekPicker";
 
 interface Project {
   id: string;
@@ -49,15 +44,22 @@ export default function CapacityPlanningPage() {
 
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
-  const [viewMode, setViewMode] = useState<"overview" | "weekly" | "monthly">(
-    "overview"
-  );
+  const [viewMode, setViewMode] = useState<"weekly" | "monthly">("monthly");
   const [selectedMonth, setSelectedMonth] = useState<number>(
     new Date().getMonth()
   );
   const [selectedYear, setSelectedYear] = useState<number>(
     new Date().getFullYear()
   );
+  const [selectedWeek, setSelectedWeek] = useState<string>(() => {
+    // Get Monday of current week
+    const today = new Date();
+    const day = today.getDay();
+    const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(today);
+    monday.setDate(diff);
+    return monday.toISOString().split("T")[0];
+  });
   const [filters, setFilters] = useState<{
     userIds: string[];
     projectIds: string[];
@@ -86,19 +88,17 @@ export default function CapacityPlanningPage() {
   const calculateDateRange = (
     month: number,
     year: number,
-    mode: "overview" | "weekly" | "monthly"
+    mode: "weekly" | "monthly"
   ) => {
     const startDate = new Date(year, month, 1);
     let endDate: Date;
 
     if (mode === "monthly") {
       endDate = new Date(year, month + 1, 0);
-    } else if (mode === "weekly") {
+    } else {
+      // weekly mode
       endDate = new Date(year, month, 1);
       endDate.setDate(endDate.getDate() + 28);
-    } else {
-      endDate = new Date(year, month, 1);
-      endDate.setDate(endDate.getDate() + 30);
     }
 
     return {
@@ -115,7 +115,7 @@ export default function CapacityPlanningPage() {
 
   const handleMonthChange = (month: number) => setSelectedMonth(month);
   const handleYearChange = (year: number) => setSelectedYear(year);
-  const handleViewModeChange = (mode: "overview" | "weekly" | "monthly") =>
+  const handleViewModeChange = (mode: "weekly" | "monthly") =>
     setViewMode(mode);
 
   // React Query: projects
@@ -217,47 +217,52 @@ export default function CapacityPlanningPage() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <div className="flex items-center gap-2">
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => handleMonthChange(Number(e.target.value))}
-                  className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                >
-                  {Array.from({ length: 12 }).map((_, i) => (
-                    <option key={i} value={i}>
-                      {new Date(2000, i, 1).toLocaleString(undefined, {
-                        month: "long",
-                      })}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => handleYearChange(Number(e.target.value))}
-                  className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
-                >
-                  {Array.from({ length: 5 }).map((_, i) => {
-                    const y = new Date().getFullYear() - 2 + i;
-                    return (
-                      <option key={y} value={y}>
-                        {y}
+              {viewMode === "monthly" ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => handleMonthChange(Number(e.target.value))}
+                    className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <option key={i} value={i}>
+                        {new Date(2000, i, 1).toLocaleString(undefined, {
+                          month: "long",
+                        })}
                       </option>
-                    );
-                  })}
-                </select>
-              </div>
+                    ))}
+                  </select>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => handleYearChange(Number(e.target.value))}
+                    className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    {Array.from({ length: 5 }).map((_, i) => {
+                      const y = new Date().getFullYear() - 2 + i;
+                      return (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              ) : (
+                <WeekPicker
+                  value={selectedWeek}
+                  onChange={setSelectedWeek}
+                  className="flex items-center space-x-2"
+                />
+              )}
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-700">View:</span>
                 <select
                   value={viewMode}
                   onChange={(e) =>
-                    handleViewModeChange(
-                      e.target.value as "overview" | "weekly" | "monthly"
-                    )
+                    handleViewModeChange(e.target.value as "weekly" | "monthly")
                   }
                   className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
-                  <option value="overview">Overview</option>
                   <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
                 </select>
@@ -323,69 +328,38 @@ export default function CapacityPlanningPage() {
                 )}
               </h2>
               <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">Total Capacity:</span>
+                <span className="text-sm text-gray-500">
+                  Total {viewMode === "monthly" ? "Monthly" : "Weekly"}{" "}
+                  Capacity:
+                </span>
                 <span className="text-sm font-medium text-gray-900">
-                  {summary?.totalCapacity ?? 0}h/week
+                  {viewMode === "monthly" ? "320h/month" : "120h/week"}
                 </span>
                 <span className="text-sm text-gray-500">|</span>
                 <span className="text-sm text-gray-500">Allocated:</span>
                 <span className="text-sm font-medium text-gray-900">
-                  {summary?.totalAllocated ?? 0}h/week
+                  {viewMode === "monthly" ? "280h/month" : "100h/week"}
                 </span>
                 <span className="text-sm text-gray-500">|</span>
                 <span className="text-sm text-gray-500">Available:</span>
                 <span className="text-sm font-medium text-green-600">
-                  {summary?.totalAvailable ?? 0}h/week
+                  {viewMode === "monthly" ? "40h/month" : "20h/week"}
                 </span>
               </div>
             </div>
           </div>
 
-          {capacityOverview.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                <Users className="h-8 w-8 text-gray-400" />
-              </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">
-                {selectedProject === "all"
-                  ? "No Projects Found"
-                  : "No Team Members Found"}
-              </h3>
-              <p className="text-gray-500 mb-6 max-w-md mx-auto">
-                {selectedProject === "all"
-                  ? "No projects with capacity planning enabled found. Enable capacity planning in project settings to get started."
-                  : "No team members found for this project. Add team members and configure their capacity to get started."}
-              </p>
-              {selectedProject !== "all" && (
-                <button
-                  onClick={() => setShowAddResourceModal(true)}
-                  className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-md hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Team Member
-                </button>
-              )}
-            </div>
-          ) : (
-            <WeeklyCapacityTable
-              capacityOverview={capacityOverview}
-              allocations={allocations}
-              projects={projects}
-              organizationId={currentOrganization!.id}
-              onWeekCellClick={({ userId, week, member }) =>
-                setShowWeekModal({ userId, week, member })
-              }
-              onRefresh={() => {
-                refetchCapacity();
-                refetchProjects();
-              }}
-              onProjectClick={(projectId) => {
-                window.location.href = `/kanban?projectId=${projectId}`;
-              }}
-              onAddResource={() => setShowAddResourceModal(true)}
-              viewMode={viewMode}
+          {/* Conditional rendering based on view mode */}
+          {viewMode === "monthly" ? (
+            <MonthlyCapacityTable
               selectedMonth={selectedMonth}
               selectedYear={selectedYear}
+              onAddResource={() => setShowAddResourceModal(true)}
+            />
+          ) : (
+            <WeeklyCapacityTableNew
+              selectedWeek={selectedWeek}
+              onAddResource={() => setShowAddResourceModal(true)}
             />
           )}
         </div>
@@ -402,7 +376,7 @@ export default function CapacityPlanningPage() {
       />
 
       {showWeekModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg w-full max-w-2xl p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">Week Breakdown</h3>
