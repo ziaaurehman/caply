@@ -249,3 +249,59 @@ export async function DELETE(req: NextRequest) {
     );
   }
 }
+
+// Add GET method to fetch weekly plans for a month
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const organizationId = searchParams.get("organizationId");
+    const month = searchParams.get("month");
+    const year = searchParams.get("year");
+
+    if (!organizationId) {
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const validation = await validateOrganizationAccessWithId(organizationId, {
+      resource: "capacity",
+      action: "read",
+    });
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: validation.status }
+      );
+    }
+
+    const where: any = {
+      organizationId,
+    };
+
+    if (month && year) {
+      const monthNum = parseInt(month);
+      const dbMonth = monthNum + 1;
+
+      where.month = dbMonth;
+      where.year = parseInt(year);
+    }
+
+    const weeklyPlans = await prisma.projectWeeklyPlan.findMany({
+      where,
+      orderBy: {
+        weekStartDate: "asc",
+      },
+    });
+
+    return NextResponse.json({ weeklyPlans });
+  } catch (e) {
+    console.error("Error fetching weekly plans:", e);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
