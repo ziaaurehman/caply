@@ -10,6 +10,8 @@ import {
   Link as LinkIcon,
   Save,
   Unlink,
+  Edit2,
+  X,
 } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
@@ -51,6 +53,25 @@ interface ResourceAllocation {
       position?: string;
     };
   } | null;
+}
+
+interface Allocation {
+  projectId: string;
+  projectName: string;
+  hours: number;
+  dailyHours: number[];
+  includeWeekends: boolean;
+  linked: boolean;
+  assignmentId: string;
+}
+
+interface Member {
+  id: string;
+  fullName: string;
+  jobTitle: string;
+  avatarUrl?: string;
+  capacity: number; // Daily capacity
+  allocations: Allocation[];
 }
 
 interface ProjectAssignment {
@@ -160,6 +181,19 @@ export default function WeeklyCapacityTableNew({
   const [linkedStatus, setLinkedStatus] = useState<{
     [key: string]: boolean;
   }>({});
+  const [editingResource, setEditingResource] = useState<{
+    resourceId: string;
+    memberId: string;
+  } | null>(null);
+  const [deletingResource, setDeletingResource] = useState<{
+    resourceId: string;
+    memberName: string;
+  } | null>(null);
+  const [editResourceForm, setEditResourceForm] = useState({
+    weeklyCapacityHours: 40,
+    hourlyRate: null as number | null,
+    isActive: true,
+  });
 
   const { currentOrganization } = useOrganizationStore();
 
@@ -274,6 +308,90 @@ export default function WeeklyCapacityTableNew({
       toast.error(error.message || "Failed to delete project assignment");
     },
   });
+
+  const updateResourceMutation = useMutation({
+    mutationFn: async (resourceData: any) => {
+      const response = await fetch("/api/capacity/resources", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(resourceData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to update resource");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      toast.success("Resource updated successfully!");
+      setEditingResource(null);
+    },
+    onError: (error) => {
+      console.error("Update resource error:", error);
+      toast.error(error.message || "Failed to update resource");
+    },
+  });
+
+  const deleteResourceMutation = useMutation({
+    mutationFn: async (resourceId: string) => {
+      const response = await fetch(
+        `/api/capacity/resources?resourceId=${resourceId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to delete resource");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+      toast.success("Resource deleted successfully!");
+      setDeletingResource(null);
+    },
+    onError: (error) => {
+      console.error("Delete resource error:", error);
+      toast.error(error.message || "Failed to delete resource");
+    },
+  });
+
+  const handleStartEditResource = (resourceId: string, member: Member) => {
+    const resource = resources?.find(
+      (r: ResourceAllocation) => r.id === resourceId
+    );
+    if (resource) {
+      setEditResourceForm({
+        weeklyCapacityHours: Number(resource.weeklyCapacityHours) || 40,
+        hourlyRate: resource.hourlyRate ? Number(resource.hourlyRate) : null,
+        isActive: resource.isActive ?? true,
+      });
+      setEditingResource({ resourceId, memberId: member.id });
+    }
+  };
+
+  const handleSaveResource = async () => {
+    if (!editingResource) return;
+
+    try {
+      await updateResourceMutation.mutateAsync({
+        resourceId: editingResource.resourceId,
+        organizationId: currentOrganization?.id,
+        weeklyCapacityHours: editResourceForm.weeklyCapacityHours,
+        hourlyRate: editResourceForm.hourlyRate,
+        isActive: editResourceForm.isActive,
+      });
+    } catch (error) {
+      // Error is handled by mutation
+    }
+  };
 
   const handleAddProject = async () => {
     if (!addModalTarget || !addForm.projectId) {
@@ -650,19 +768,66 @@ export default function WeeklyCapacityTableNew({
         allocations,
       };
     });
-  }, [resources, projectAssignments]);
+  }, [resources, projectAssignments, linkedStatus]);
 
   // Calculate total weekly capacity (5 days * 8 hours per day)
-  const totalWeeklyCapacity = members.length * 40; // 5 days * 8 hours
-  const totalWeeklyAllocated = members.reduce((sum, m) => {
-    const mondayIdx = 1;
-    const dailyAllocated = m.allocations.reduce(
-      (s, a) => s + (a.dailyHours?.[mondayIdx] ?? a.hours),
-      0
-    );
-    return sum + dailyAllocated * 5; // 5 working days
-  }, 0);
-  const totalWeeklyAvailable = totalWeeklyCapacity - totalWeeklyAllocated;
+  const totalWeeklyCapacity = useMemo(() => {
+    return members.reduce((sum, member) => {
+      return sum + member.capacity * 5;
+    }, 0);
+  }, [members]);
+
+  const totalWeeklyAllocated = useMemo(() => {
+    return members.reduce((sum, member) => {
+      const memberAllocated = member.allocations.reduce(
+        (allocSum, allocation) => {
+          const weeklyHours = allocation.dailyHours.reduce((daySum, hours) => {
+            return daySum + hours;
+          }, 0);
+          return allocSum + weeklyHours;
+        },
+        0
+      );
+      return sum + memberAllocated;
+    }, 0);
+  }, [members]);
+
+  const totalWeeklyAvailable = useMemo(() => {
+    return totalWeeklyCapacity - totalWeeklyAllocated;
+  }, [totalWeeklyCapacity, totalWeeklyAllocated]);
+
+  const utilizationPercentage = useMemo(() => {
+    if (totalWeeklyCapacity === 0) return 0;
+    return (totalWeeklyAllocated / totalWeeklyCapacity) * 100;
+  }, [totalWeeklyAllocated, totalWeeklyCapacity]);
+
+  const dailyBreakdown = useMemo(() => {
+    const breakdown: {
+      [day: string]: { capacity: number; allocated: number };
+    } = {};
+
+    daysData.forEach((day, dayIndex) => {
+      const dayCapacity = members.reduce((sum, member) => {
+        return sum + member.capacity;
+      }, 0);
+
+      const dayAllocated = members.reduce((sum, member) => {
+        return (
+          sum +
+          member.allocations.reduce((allocSum, allocation) => {
+            return allocSum + (allocation.dailyHours?.[dayIndex] || 0);
+          }, 0)
+        );
+      }, 0);
+
+      breakdown[day.dayName] = {
+        capacity: dayCapacity,
+        allocated: dayAllocated,
+      };
+    });
+
+    return breakdown;
+  }, [members, daysData]);
 
   useEffect(() => {
     if (!projectAssignments.length) return;
@@ -742,28 +907,99 @@ export default function WeeklyCapacityTableNew({
   return (
     <>
       {/* Capacity Overview */}
-      <div className="px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <h2 className="text-lg font-semibold text-gray-900">
             Weekly Capacity Overview
           </h2>
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-500">
-              Total Weekly Capacity:
-            </span>
-            <span className="text-sm font-medium text-gray-900">
-              {totalWeeklyCapacity}h
-            </span>
-            <span className="text-sm text-gray-500">|</span>
-            <span className="text-sm text-gray-500">Weekly Allocated:</span>
-            <span className="text-sm font-medium text-gray-900">
-              {totalWeeklyAllocated}h
-            </span>
-            <span className="text-sm text-gray-500">|</span>
-            <span className="text-sm text-gray-500">Available:</span>
-            <span className="text-sm font-medium text-green-600">
-              {totalWeeklyAvailable}h
-            </span>
+          <div className="flex items-center space-x-4 flex-wrap">
+            {/* Total Resources */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-500">Resources:</span>
+              <span className="text-sm font-medium text-gray-900">
+                {members.length}
+              </span>
+            </div>
+
+            <span className="text-sm text-gray-300">|</span>
+
+            {/* Total Weekly Capacity */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-500">Total Capacity:</span>
+              <span className="text-sm font-medium text-gray-900">
+                {totalWeeklyCapacity.toFixed(1)}h
+              </span>
+            </div>
+
+            <span className="text-sm text-gray-300">|</span>
+
+            {/* Weekly Allocated */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-500">Allocated:</span>
+              <span
+                className={`text-sm font-medium ${
+                  totalWeeklyAllocated > totalWeeklyCapacity
+                    ? "text-red-600"
+                    : "text-gray-900"
+                }`}
+              >
+                {totalWeeklyAllocated.toFixed(1)}h
+              </span>
+            </div>
+
+            <span className="text-sm text-gray-300">|</span>
+
+            {/* Available */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-500">Available:</span>
+              <span
+                className={`text-sm font-medium ${
+                  totalWeeklyAvailable < 0
+                    ? "text-red-600"
+                    : totalWeeklyAvailable < totalWeeklyCapacity * 0.1
+                      ? "text-yellow-600"
+                      : "text-green-600"
+                }`}
+              >
+                {totalWeeklyAvailable.toFixed(1)}h
+              </span>
+            </div>
+
+            <span className="text-sm text-gray-300">|</span>
+
+            {/* Utilization Percentage */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-500">Utilization:</span>
+              <span
+                className={`text-sm font-medium ${
+                  utilizationPercentage > 100
+                    ? "text-red-600"
+                    : utilizationPercentage >= 90
+                      ? "text-yellow-600"
+                      : "text-green-600"
+                }`}
+              >
+                {utilizationPercentage.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress Bar */}
+        <div className="mt-3">
+          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                utilizationPercentage > 100
+                  ? "bg-red-500"
+                  : utilizationPercentage >= 90
+                    ? "bg-yellow-500"
+                    : "bg-green-500"
+              }`}
+              style={{
+                width: `${Math.min(utilizationPercentage, 100)}%`,
+              }}
+            ></div>
           </div>
         </div>
       </div>
@@ -793,6 +1029,116 @@ export default function WeeklyCapacityTableNew({
               : "Are you sure you want to delete this project assignment? This will permanently delete the assignment and all related weekly plans. This action cannot be undone."
           }
           isLoading={deleteProjectAssignmentMutation.isPending}
+        />
+        {editingResource && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+            <div className="bg-white rounded-lg shadow-lg w-full max-w-md">
+              <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Edit Resource
+                </h3>
+                <button
+                  onClick={() => setEditingResource(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="px-6 py-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Weekly Capacity Hours
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    min={0}
+                    max={168}
+                    step={0.5}
+                    value={editResourceForm.weeklyCapacityHours}
+                    onChange={(e) =>
+                      setEditResourceForm((f) => ({
+                        ...f,
+                        weeklyCapacityHours: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Hourly Rate (Optional)
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    min={0}
+                    step={0.01}
+                    value={editResourceForm.hourlyRate || ""}
+                    onChange={(e) =>
+                      setEditResourceForm((f) => ({
+                        ...f,
+                        hourlyRate: e.target.value
+                          ? Number(e.target.value)
+                          : null,
+                      }))
+                    }
+                    placeholder="Enter hourly rate"
+                  />
+                </div>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={editResourceForm.isActive}
+                    onChange={(e) =>
+                      setEditResourceForm((f) => ({
+                        ...f,
+                        isActive: e.target.checked,
+                      }))
+                    }
+                  />
+                  Active
+                </label>
+              </div>
+              <div className="px-6 py-3 border-t border-gray-200 flex justify-end gap-3">
+                <button
+                  className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900"
+                  onClick={() => setEditingResource(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300"
+                  onClick={handleSaveResource}
+                  disabled={updateResourceMutation.isPending}
+                >
+                  {updateResourceMutation.isPending ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        <ConfirmationModal
+          isOpen={Boolean(deletingResource)}
+          onClose={() => setDeletingResource(null)}
+          onConfirm={async () => {
+            if (!deletingResource) return;
+
+            try {
+              await deleteResourceMutation.mutateAsync(
+                deletingResource.resourceId
+              );
+            } catch (error) {
+              // Error is handled by mutation
+            }
+          }}
+          title="Delete Resource"
+          message={
+            deletingResource
+              ? `Are you sure you want to delete the resource allocation for "${deletingResource.memberName}"? This will permanently delete the resource and all related project assignments and weekly plans. This action cannot be undone.`
+              : ""
+          }
+          isLoading={deleteResourceMutation.isPending}
         />
         <table className="min-w-full">
           <thead>
@@ -831,16 +1177,40 @@ export default function WeeklyCapacityTableNew({
             {members.map((member, idx) => {
               const memberId = member.id;
               const isExpanded = expandedMembers.has(memberId);
-              const mondayIdx = 1;
-              const totalAllocated = member.allocations.reduce(
-                (sum, a) => sum + (a.dailyHours?.[mondayIdx] ?? a.hours),
+
+              const totalAllocated =
+                member.allocations.reduce((sum, allocation) => {
+                  const weeklyHours = allocation.dailyHours.reduce(
+                    (daySum, hours) => {
+                      return daySum + hours;
+                    },
+                    0
+                  );
+                  return sum + weeklyHours;
+                }, 0) / 5;
+
+              const totalAllocatedWeekly = member.allocations.reduce(
+                (sum, allocation) => {
+                  return (
+                    sum +
+                    allocation.dailyHours.reduce(
+                      (daySum, hours) => daySum + hours,
+                      0
+                    )
+                  );
+                },
                 0
               );
+
+              const memberWeeklyCapacity = member.capacity * 5;
               const utilizationPercentage =
-                (totalAllocated / member.capacity) * 100;
+                memberWeeklyCapacity > 0
+                  ? (totalAllocatedWeekly / memberWeeklyCapacity) * 100
+                  : 0;
+
               const statusLabel = getStatusLabel(
-                totalAllocated,
-                member.capacity
+                totalAllocatedWeekly,
+                memberWeeklyCapacity
               );
 
               return (
@@ -926,7 +1296,34 @@ export default function WeeklyCapacityTableNew({
                         </td>
                       );
                     })}
-                    <td className="px-4 py-4 text-center"></td>
+                    <td className="px-4 py-4 text-center">
+                      <div className="inline-flex items-center gap-2">
+                        <button
+                          onClick={() =>
+                            handleStartEditResource(memberId, member)
+                          }
+                          className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors"
+                          title="Edit resource"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            const resource = resources?.find(
+                              (r: ResourceAllocation) => r.id === memberId
+                            );
+                            setDeletingResource({
+                              resourceId: memberId,
+                              memberName: member.fullName,
+                            });
+                          }}
+                          className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-md transition-colors"
+                          title="Delete resource"
+                        >
+                          <Trash className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
 
                   {/* Expanded Project Rows */}

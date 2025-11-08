@@ -5,6 +5,8 @@ import { X, Users, Clock, Calendar, User } from "lucide-react";
 import { capacityAPI } from "@/utils/api/capacity";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { teamAPI } from "@/utils/api/team";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 interface AddResourceModalProps {
   isOpen: boolean;
@@ -40,6 +42,7 @@ export default function AddResourceModal({
   onClose,
   onResourceAdded,
 }: AddResourceModalProps) {
+  const queryClient = useQueryClient();
   const { currentOrganization } = useOrganizationStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +142,15 @@ export default function AddResourceModal({
         const e = await res.json().catch(() => ({}));
         throw new Error(e.error || "Failed to add resource");
       }
+
+      queryClient.invalidateQueries({
+        queryKey: ["resources", currentOrganization.id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["project-assignments"],
+      });
+
+      toast.success("Resource added successfully!");
 
       onResourceAdded();
       onClose();

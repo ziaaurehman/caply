@@ -227,3 +227,129 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// Add PUT method for updating resources
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      resourceId,
+      organizationId,
+      weeklyCapacityHours,
+      hourlyRate,
+      isActive,
+    } = body;
+
+    if (!resourceId || !organizationId) {
+      return NextResponse.json(
+        { error: "resourceId and organizationId are required" },
+        { status: 400 }
+      );
+    }
+
+    const validation = await validateOrganizationAccessWithId(organizationId, {
+      resource: "capacity",
+      action: "manage",
+    });
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: validation.status }
+      );
+    }
+
+    // Verify the resource belongs to this organization
+    const existing = await prisma.resourceAllocation.findUnique({
+      where: { id: resourceId },
+      select: { organizationId: true },
+    });
+
+    if (!existing || existing.organizationId !== organizationId) {
+      return NextResponse.json(
+        { error: "Resource not found or access denied" },
+        { status: 404 }
+      );
+    }
+
+    // Update the resource
+    const updated = await prisma.resourceAllocation.update({
+      where: { id: resourceId },
+      data: {
+        weeklyCapacityHours: weeklyCapacityHours ?? 40,
+        hourlyRate: hourlyRate ?? null,
+        isActive: isActive ?? true,
+        updatedAt: new Date(),
+      },
+    });
+
+    return NextResponse.json({
+      resource: updated,
+      message: "Resource updated successfully",
+    });
+  } catch (e) {
+    console.error("Error updating resource:", e);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+// Add DELETE method for deleting resources
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const resourceId = searchParams.get("resourceId");
+
+    if (!resourceId) {
+      return NextResponse.json(
+        { error: "Resource ID is required" },
+        { status: 400 }
+      );
+    }
+
+    // Get the resource to verify it exists and get organization ID
+    const resource = await prisma.resourceAllocation.findUnique({
+      where: { id: resourceId },
+      select: { organizationId: true },
+    });
+
+    if (!resource) {
+      return NextResponse.json(
+        { error: "Resource not found" },
+        { status: 404 }
+      );
+    }
+
+    const validation = await validateOrganizationAccessWithId(
+      resource.organizationId,
+      {
+        resource: "capacity",
+        action: "manage",
+      }
+    );
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: validation.status }
+      );
+    }
+
+    // Delete the resource (this will cascade delete all project assignments and weekly plans)
+    await prisma.resourceAllocation.delete({
+      where: { id: resourceId },
+    });
+
+    return NextResponse.json({
+      message: "Resource and all related data deleted successfully",
+    });
+  } catch (e) {
+    console.error("Error deleting resource:", e);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
