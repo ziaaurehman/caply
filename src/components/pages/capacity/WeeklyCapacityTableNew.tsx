@@ -315,6 +315,7 @@ export default function WeeklyCapacityTableNew({
     allocation: any
   ) => {
     const key = `${memberId}:${projectId}`;
+
     if (linkedStatus[key] === undefined) {
       setLinkedStatus((prev) => ({
         ...prev,
@@ -459,12 +460,6 @@ export default function WeeklyCapacityTableNew({
   ) => {
     const key = `${memberId}:${projectId}`;
     const isLinked = linkedStatus[key] !== false;
-    // setEditedDailyHours((prev) => {
-    //   const current = prev[key] || [0, 0, 0, 0, 0, 0, 0];
-    //   const updated = [...current];
-    //   updated[dayIndex] = Math.max(0, Number.isFinite(value) ? value : 0);
-    //   return { ...prev, [key]: updated };
-    // });
 
     setEditedDailyHours((prev) => {
       const current = prev[key] || [0, 0, 0, 0, 0, 0, 0];
@@ -480,6 +475,14 @@ export default function WeeklyCapacityTableNew({
         const allowWeekends = allocation?.includeWeekends ?? false;
 
         for (let i = 0; i < 7; i++) {
+          const dayData = daysData[i];
+          const dayIsPast = dayData ? isDayInPast(dayData.date) : false;
+
+          if (dayIsPast) {
+            // Don't update past days - keep their current values
+            continue;
+          }
+
           if (!allowWeekends && (i === 0 || i === 6)) {
             // Don't update weekends if weekends are not allowed
             updated[i] = 0;
@@ -489,7 +492,12 @@ export default function WeeklyCapacityTableNew({
         }
       } else {
         // If unlinked, only update the specific day
-        updated[dayIndex] = sanitized;
+        const dayData = daysData[dayIndex];
+        const dayIsPast = dayData ? isDayInPast(dayData.date) : false;
+
+        if (!dayIsPast) {
+          updated[dayIndex] = sanitized;
+        }
       }
 
       return { ...prev, [key]: updated };
@@ -669,6 +677,28 @@ export default function WeeklyCapacityTableNew({
     setLinkedStatus(initialLinkedStatus);
   }, [projectAssignments]);
 
+  const isDayInPast = (dayDate: string): boolean => {
+    if (!dayDate) return false;
+
+    const day = new Date(dayDate);
+    const today = new Date();
+
+    // Set both dates to start of day for accurate comparison
+    const dayDateOnly = new Date(
+      day.getFullYear(),
+      day.getMonth(),
+      day.getDate()
+    );
+    const todayDateOnly = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+
+    // Check if day is before today
+    return dayDateOnly < todayDateOnly;
+  };
+
   const isEditing = (memberId: string, projectId: string) =>
     editingTarget?.memberId === memberId &&
     editingTarget?.projectId === projectId;
@@ -774,14 +804,21 @@ export default function WeeklyCapacityTableNew({
                 DAILY CAPACITY
               </th>
               {daysData.map((day) => {
-                const isWeekend = day.dayOfWeek === 0 || day.dayOfWeek === 6;
+                const dayIsPast = isDayInPast(day.date);
+
                 return (
                   <th
                     key={day.dayName}
-                    className={`text-center px-4 py-4 text-xs font-medium tracking-wider text-gray-500 uppercase`}
+                    className={`text-center px-4 py-4 text-xs font-medium tracking-wider text-gray-500 uppercase ${
+                      dayIsPast ? "opacity-60" : ""
+                    }`}
                   >
                     <div>{day.dayName}</div>
-                    <div className={`text-xs text-gray-400`}>{day.label}</div>
+                    <div
+                      className={`text-xs ${dayIsPast ? "text-gray-400" : "text-gray-400"}`}
+                    >
+                      {day.label}
+                    </div>
                   </th>
                 );
               })}
@@ -913,28 +950,46 @@ export default function WeeklyCapacityTableNew({
                               {isWeekend && !allocation.includeWeekends ? (
                                 <span className="text-sm text-gray-300">-</span>
                               ) : isEditing(memberId, allocation.projectId) ? (
-                                <input
-                                  type="number"
-                                  className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-gray-700"
-                                  value={
-                                    editedDailyHours[
-                                      `${memberId}:${allocation.projectId}`
-                                    ]?.[day.dayOfWeek] ??
-                                    allocation.dailyHours?.[day.dayOfWeek] ??
-                                    0
-                                  }
-                                  min={0}
-                                  max={24}
-                                  step={0.5}
-                                  onChange={(e) =>
-                                    updateEditedDailyHour(
-                                      memberId,
-                                      allocation.projectId,
-                                      day.dayOfWeek,
-                                      Number(e.target.value)
-                                    )
-                                  }
-                                />
+                                (() => {
+                                  const dayIsPast = isDayInPast(day.date);
+                                  return (
+                                    <input
+                                      type="number"
+                                      className={`w-16 border border-gray-300 rounded px-2 py-1 text-sm text-gray-700 ${
+                                        dayIsPast
+                                          ? "opacity-50 cursor-not-allowed bg-gray-100"
+                                          : ""
+                                      }`}
+                                      value={
+                                        editedDailyHours[
+                                          `${memberId}:${allocation.projectId}`
+                                        ]?.[day.dayOfWeek] ??
+                                        allocation.dailyHours?.[
+                                          day.dayOfWeek
+                                        ] ??
+                                        0
+                                      }
+                                      min={0}
+                                      max={24}
+                                      step={0.5}
+                                      disabled={dayIsPast}
+                                      onChange={(e) => {
+                                        if (dayIsPast) return;
+                                        updateEditedDailyHour(
+                                          memberId,
+                                          allocation.projectId,
+                                          day.dayOfWeek,
+                                          Number(e.target.value)
+                                        );
+                                      }}
+                                      title={
+                                        dayIsPast
+                                          ? "Cannot edit past dates"
+                                          : ""
+                                      }
+                                    />
+                                  );
+                                })()
                               ) : (
                                 <span className="text-sm text-gray-600">
                                   {allocation.dailyHours?.[day.dayOfWeek] ??
@@ -948,10 +1003,10 @@ export default function WeeklyCapacityTableNew({
                         <td className="px-4 py-3 text-center">
                           <div className="inline-flex items-center gap-3">
                             <button
-                              className={` text-gray-600 hover:text-gray-800`}
+                              className="text-gray-600 hover:text-gray-800"
                               title={
                                 isEditing(memberId, allocation.projectId)
-                                  ? "Stop editing"
+                                  ? "Save changes"
                                   : "Edit allocation"
                               }
                               onClick={() => {
@@ -1020,16 +1075,16 @@ export default function WeeklyCapacityTableNew({
                                 linkedStatus[
                                   `${memberId}:${allocation.projectId}`
                                 ] !== false
-                                  ? "Linked (edit one updates all)"
+                                  ? "Linked (edit one updates all future days)"
                                   : "Unlinked (edit days separately)"
                               }
-                              onClick={() =>
+                              onClick={() => {
                                 toggleLinked(
                                   memberId,
                                   allocation.projectId,
                                   allocation
-                                )
-                              }
+                                );
+                              }}
                             >
                               {linkedStatus[
                                 `${memberId}:${allocation.projectId}`
