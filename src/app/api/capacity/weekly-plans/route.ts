@@ -100,6 +100,14 @@ export async function POST(req: NextRequest) {
       weekStartDate,
       defaultHoursPerDay,
       allowWeekends,
+      // Optional: override specific day hours
+      hoursSunday,
+      hoursMonday,
+      hoursTuesday,
+      hoursWednesday,
+      hoursThursday,
+      hoursFriday,
+      hoursSaturday,
     } = body;
 
     if (
@@ -167,13 +175,25 @@ export async function POST(req: NextRequest) {
         defaultHoursPerDay,
         allowWeekends,
         isLinked: true,
-        hoursSunday: allowWeekends ? dailyHours : 0,
-        hoursMonday: weekdayHours,
-        hoursTuesday: weekdayHours,
-        hoursWednesday: weekdayHours,
-        hoursThursday: weekdayHours,
-        hoursFriday: weekdayHours,
-        hoursSaturday: allowWeekends ? dailyHours : 0,
+        hoursSunday:
+          hoursSunday !== undefined
+            ? hoursSunday
+            : allowWeekends
+              ? dailyHours
+              : 0,
+        hoursMonday: hoursMonday !== undefined ? hoursMonday : weekdayHours,
+        hoursTuesday: hoursTuesday !== undefined ? hoursTuesday : weekdayHours,
+        hoursWednesday:
+          hoursWednesday !== undefined ? hoursWednesday : weekdayHours,
+        hoursThursday:
+          hoursThursday !== undefined ? hoursThursday : weekdayHours,
+        hoursFriday: hoursFriday !== undefined ? hoursFriday : weekdayHours,
+        hoursSaturday:
+          hoursSaturday !== undefined
+            ? hoursSaturday
+            : allowWeekends
+              ? dailyHours
+              : 0,
       },
     });
 

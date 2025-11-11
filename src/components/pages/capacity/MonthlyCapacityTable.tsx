@@ -5,14 +5,23 @@ import { ChevronDown, ChevronUp, Plus, Trash, Pencil } from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { capacityStore } from "@/lib/stores/capacityStore";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   startOfWeek,
   startOfDay,
   isSameDay,
   parseISO,
   isValid,
+  eachDayOfInterval,
+  isWeekend,
+  startOfMonth,
+  endOfMonth,
+  isPast,
+  isToday,
+  addDays,
+  getDay,
 } from "date-fns";
+import { toast } from "sonner";
 
 interface ResourceAllocation {
   id: string;
@@ -93,6 +102,22 @@ interface MonthlyCapacityTableProps {
   onAddResource?: () => void;
 }
 
+interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+}
+
+interface AddProjectForm {
+  projectId: string;
+  hours: number;
+  includeWeekends: boolean;
+  startDate: string;
+  endDate?: string;
+  notes?: string;
+}
+
 const fetchResources = async (
   organizationId: string
 ): Promise<ResourceAllocation[]> => {
@@ -139,11 +164,21 @@ const fetchWeeklyPlansForMonth = async (
   return data.weeklyPlans || [];
 };
 
+const fetchProjects = async (organizationId: string): Promise<Project[]> => {
+  const response = await fetch(
+    `/api/projects?organizationId=${organizationId}`
+  );
+  if (!response.ok) throw new Error("Failed to fetch projects");
+  const data = await response.json();
+  return data.projects || [];
+};
+
 export default function MonthlyCapacityTable({
   selectedMonth = new Date().getMonth(),
   selectedYear = new Date().getFullYear(),
   onAddResource,
 }: MonthlyCapacityTableProps) {
+  const queryClient = useQueryClient();
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(
     new Set()
   );
@@ -151,13 +186,26 @@ export default function MonthlyCapacityTable({
   const [deletingTarget, setDeletingTarget] = useState<{
     memberId: string;
     projectId: string;
+    assignmentId?: string; // Add this to store assignment ID
+    projectName?: string; // Add this for better confirmation message
   } | null>(null);
   const [editingTarget, setEditingTarget] = useState<{
     memberId: string;
     projectId: string;
   } | null>(null);
   const [addModalTarget, setAddModalTarget] = useState<string | null>(null); // memberId
-  const [addForm, setAddForm] = useState({ projectName: "", hours: 1 });
+  const [addForm, setAddForm] = useState<AddProjectForm>({
+    projectId: "",
+    hours: 8,
+    includeWeekends: false,
+    startDate: new Date().toISOString().split("T")[0],
+  });
+
+  const { data: projects = [], isLoading: projectsLoading } = useQuery({
+    queryKey: ["projects", currentOrganization?.id],
+    queryFn: () => fetchProjects(currentOrganization?.id || ""),
+    enabled: !!currentOrganization?.id,
+  });
 
   const formatDateForDisplay = (date: Date): string => {
     const monthNames = [
@@ -260,6 +308,242 @@ export default function MonthlyCapacityTable({
       enabled: !!currentOrganization?.id,
       staleTime: 5 * 60 * 1000,
     });
+
+  const addProjectMutation = useMutation({
+    mutationFn: async (projectData: any) => {
+      const response = await fetch("/api/capacity/project-assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(projectData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to add project assignment");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      // Refresh the queries to show the new assignment
+      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+      toast.success("Project assignment added successfully!");
+      setAddForm({
+        projectId: "",
+        hours: 8,
+        includeWeekends: false,
+        startDate: new Date().toISOString().split("T")[0],
+      });
+      setAddModalTarget(null);
+    },
+    onError: (error: Error) => {
+      console.error("Project assignment error:", error);
+      toast.error(error.message || "Failed to add project assignment");
+    },
+  });
+
+  const deleteProjectAssignmentMutation = useMutation({
+    mutationFn: async (assignmentId: string) => {
+      const response = await fetch(
+        `/api/capacity/project-assignments?assignmentId=${assignmentId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.error || "Failed to delete project assignment"
+        );
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      // Refresh both queries to reflect the deletion
+      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+      toast.success("Project assignment deleted successfully!");
+      setDeletingTarget(null);
+    },
+    onError: (error: Error) => {
+      console.error("Delete project assignment error:", error);
+      toast.error(error.message || "Failed to delete project assignment");
+    },
+  });
+
+  // const handleAddProject = async () => {
+  //   if (!addModalTarget || !addForm.projectId) {
+  //     setAddModalTarget(null);
+  //     return;
+  //   }
+
+  //   // Get the first week's start date for the month
+  //   const firstWeekStartDate =
+  //     weeksData.length > 0
+  //       ? weeksData[0].startDate
+  //       : new Date(selectedYear, selectedMonth, 1).toISOString();
+
+  //   try {
+  //     const projectData = {
+  //       organizationId: currentOrganization?.id,
+  //       resourceAllocationId: addModalTarget,
+  //       projectId: addForm.projectId,
+  //       hoursPerWeek: addForm.hours * 5, // Convert daily to weekly
+  //       defaultHoursPerDay: addForm.hours,
+  //       allowWeekends: addForm.includeWeekends,
+  //       startDate: new Date().toISOString(),
+  //       weekStartDate: firstWeekStartDate,
+  //     };
+
+  //     await addProjectMutation.mutateAsync(projectData);
+  //   } catch (error) {
+  //     // Error is handled by mutation
+  //   }
+  // };
+
+  const handleAddProject = async () => {
+    if (!addModalTarget || !addForm.projectId) {
+      setAddModalTarget(null);
+      return;
+    }
+
+    try {
+      // Step 1: Create the project assignment first
+      const projectData = {
+        organizationId: currentOrganization?.id,
+        resourceAllocationId: addModalTarget,
+        projectId: addForm.projectId,
+        hoursPerWeek: addForm.hours * 5, // Convert daily to weekly
+        defaultHoursPerDay: addForm.hours,
+        allowWeekends: addForm.includeWeekends,
+        startDate: new Date().toISOString(),
+        // Don't pass weekStartDate here - we'll create all weekly plans separately
+      };
+
+      const assignmentResponse =
+        await addProjectMutation.mutateAsync(projectData);
+      const projectAssignmentId = assignmentResponse.projectAssignment?.id;
+
+      if (!projectAssignmentId) {
+        throw new Error("Failed to create project assignment");
+      }
+
+      // Step 2: Create weekly plans for ALL weeks in the current month
+      const today = startOfDay(new Date());
+      const dailyHours = addForm.hours;
+      const weekdayHours = dailyHours;
+      const weekendHours = addForm.includeWeekends ? dailyHours : 0;
+
+      // Create weekly plans for each week in the month
+      const weeklyPlanPromises = weeksData.map(async (week) => {
+        const weekStart = startOfDay(parseISO(week.startDate));
+        const weekEnd = startOfDay(parseISO(week.endDate));
+
+        // Calculate hours for each day of the week
+        let hoursSunday = 0;
+        let hoursMonday = 0;
+        let hoursTuesday = 0;
+        let hoursWednesday = 0;
+        let hoursThursday = 0;
+        let hoursFriday = 0;
+        let hoursSaturday = 0;
+
+        // Get all days in this week
+        const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+
+        weekDays.forEach((day) => {
+          const dayOfWeek = getDay(day); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+          const isDayPast = isPast(day) && !isToday(day);
+
+          // If day is in the past, set hours to 0
+          if (isDayPast) {
+            return; // Hours already initialized to 0
+          }
+
+          // If day is today or in the future, set hours based on day type
+          if (dayOfWeek === 0) {
+            // Sunday
+            hoursSunday = weekendHours;
+          } else if (dayOfWeek === 1) {
+            // Monday
+            hoursMonday = weekdayHours;
+          } else if (dayOfWeek === 2) {
+            // Tuesday
+            hoursTuesday = weekdayHours;
+          } else if (dayOfWeek === 3) {
+            // Wednesday
+            hoursWednesday = weekdayHours;
+          } else if (dayOfWeek === 4) {
+            // Thursday
+            hoursThursday = weekdayHours;
+          } else if (dayOfWeek === 5) {
+            // Friday
+            hoursFriday = weekdayHours;
+          } else if (dayOfWeek === 6) {
+            // Saturday
+            hoursSaturday = weekendHours;
+          }
+        });
+
+        // Create weekly plan via API
+        const weeklyPlanResponse = await fetch("/api/capacity/weekly-plans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            organizationId: currentOrganization?.id,
+            resourceAllocationId: addModalTarget,
+            projectId: addForm.projectId,
+            projectAssignmentId: projectAssignmentId,
+            weekStartDate: weekStart.toISOString(),
+            defaultHoursPerDay: dailyHours,
+            allowWeekends: addForm.includeWeekends,
+            // Override daily hours based on past/current/future logic
+            hoursSunday,
+            hoursMonday,
+            hoursTuesday,
+            hoursWednesday,
+            hoursThursday,
+            hoursFriday,
+            hoursSaturday,
+          }),
+        });
+
+        if (!weeklyPlanResponse.ok) {
+          const errorData = await weeklyPlanResponse.json();
+          throw new Error(errorData.error || "Failed to create weekly plan");
+        }
+
+        return weeklyPlanResponse.json();
+      });
+
+      // Wait for all weekly plans to be created
+      await Promise.all(weeklyPlanPromises);
+
+      // Refresh queries
+      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+
+      toast.success(
+        "Project assignment and weekly plans created successfully!"
+      );
+      setAddForm({
+        projectId: "",
+        hours: 8,
+        includeWeekends: false,
+        startDate: new Date().toISOString().split("T")[0],
+      });
+      setAddModalTarget(null);
+    } catch (error: any) {
+      console.error("Add project error:", error);
+      toast.error(error.message || "Failed to add project assignment");
+    }
+  };
 
   const { data: weeklyPlans = [], isLoading: plansLoading } = useQuery({
     queryKey: [
@@ -486,10 +770,16 @@ export default function MonthlyCapacityTable({
 
   // Calculate total monthly capacity
   const totalMonthlyCapacity = useMemo(() => {
+    const monthStart = new Date(selectedYear, selectedMonth, 1);
+    const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
+    const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
+    const workingDays = allDays.filter((day) => !isWeekend(day)).length;
+
     return members.reduce((sum, member) => {
-      return sum + member.capacity * 5 * weeksData.length; // Daily * 5 days * number of weeks
+      // Monthly capacity = daily capacity × working days in month
+      return sum + member.capacity * workingDays;
     }, 0);
-  }, [members, weeksData.length]);
+  }, [members, selectedMonth, selectedYear]);
 
   const totalMonthlyAllocated = useMemo(() => {
     return members.reduce((sum, member) => {
@@ -498,7 +788,7 @@ export default function MonthlyCapacityTable({
           // Sum all weekly hours
           const weeklyTotal = allocation.weeklyHours.reduce(
             (weekSum, hours) => {
-              return weekSum + hours;
+              return weekSum + Number(hours);
             },
             0
           );
@@ -577,27 +867,26 @@ export default function MonthlyCapacityTable({
         <ConfirmationModal
           isOpen={Boolean(deletingTarget)}
           onClose={() => setDeletingTarget(null)}
-          onConfirm={() => {
-            if (!deletingTarget) return;
-            const { memberId, projectId } = deletingTarget;
-            setMembers((prev) =>
-              prev.map((m) =>
-                m.id !== memberId
-                  ? m
-                  : {
-                      ...m,
-                      allocations: m.allocations.filter(
-                        (a) => a.projectId !== projectId
-                      ),
-                    }
-              )
-            );
-            capacityStore.getState().removeProjectAllWeeks(memberId, projectId);
-            setDeletingTarget(null);
+          onConfirm={async () => {
+            if (!deletingTarget || !deletingTarget.assignmentId) return;
+
+            try {
+              // Delete the project assignment (this will cascade delete all weekly plans)
+              await deleteProjectAssignmentMutation.mutateAsync(
+                deletingTarget.assignmentId
+              );
+            } catch (error) {
+              // Error is handled by mutation
+              // Don't close the modal on error so user can retry
+            }
           }}
-          title="Delete Allocation"
-          message="Are you sure you want to delete this allocation?"
-          isLoading={false}
+          title="Delete Project Assignment"
+          message={
+            deletingTarget?.projectName
+              ? `Are you sure you want to delete the project assignment "${deletingTarget.projectName}"? This will permanently delete the assignment and all related weekly plans. This action cannot be undone.`
+              : "Are you sure you want to delete this project assignment? This will permanently delete the assignment and all related weekly plans. This action cannot be undone."
+          }
+          isLoading={deleteProjectAssignmentMutation.isPending}
         />
         <table className="min-w-full">
           <thead>
@@ -636,15 +925,38 @@ export default function MonthlyCapacityTable({
             {members.map((member, idx) => {
               const memberId = member.id;
               const isExpanded = expandedMembers.has(memberId);
+
+              // Calculate monthly capacity: count working days in the month
+              const monthStart = new Date(selectedYear, selectedMonth, 1);
+              const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
+              const allDays = eachDayOfInterval({
+                start: monthStart,
+                end: monthEnd,
+              });
+              const workingDays = allDays.filter(
+                (day) => !isWeekend(day)
+              ).length;
+              const monthlyCapacity = member.capacity * workingDays;
+
               const totalAllocated = member.allocations.reduce(
-                (sum, a) => sum + (a.weeklyHours?.[0] ?? a.hours),
+                (sum, allocation) => {
+                  // Sum all weekly hours for this allocation across all weeks
+                  const allocationTotal = (allocation.weeklyHours || []).reduce(
+                    (weekSum, hours) => weekSum + (Number(hours) || 0),
+                    0
+                  );
+                  return sum + allocationTotal;
+                },
                 0
               );
+
               const utilizationPercentage =
-                (totalAllocated / member.capacity) * 100;
+                monthlyCapacity > 0
+                  ? (totalAllocated / monthlyCapacity) * 100
+                  : 0;
               const statusLabel = getStatusLabel(
                 totalAllocated,
-                member.capacity
+                monthlyCapacity
               );
 
               return (
@@ -675,7 +987,8 @@ export default function MonthlyCapacityTable({
                     </td>
                     <td className="px-4 py-4">
                       <div className="text-xs font-semibold text-gray-500">
-                        {totalAllocated}/{member.capacity} h
+                        {totalAllocated.toFixed(1)}/{monthlyCapacity.toFixed(1)}{" "}
+                        h
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="flex-1 relative">
@@ -706,7 +1019,8 @@ export default function MonthlyCapacityTable({
                       const weekAllocated = member.allocations.reduce(
                         (sum, allocation) => {
                           return (
-                            sum + (allocation.weeklyHours?.[weekIndex] || 0)
+                            sum +
+                            (Number(allocation.weeklyHours?.[weekIndex]) || 0)
                           );
                         },
                         0
@@ -825,7 +1139,7 @@ export default function MonthlyCapacityTable({
                           );
                         })}
                         <td className="px-4 py-3 text-center">
-                          {/*<div className="inline-flex items-center gap-3">
+                          <div className="inline-flex items-center gap-3">
                             <button
                               className={`$${""} text-gray-600 hover:text-gray-800`}
                               title={
@@ -854,18 +1168,32 @@ export default function MonthlyCapacityTable({
                               <Pencil className="h-4 w-4" />
                             </button>
                             <button
-                              onClick={() =>
-                                setDeletingTarget({
-                                  memberId,
-                                  projectId: allocation.projectId,
-                                })
-                              }
+                              onClick={() => {
+                                // Find the project assignment to get the assignment ID
+                                const assignment = projectAssignments.find(
+                                  (pa: ProjectAssignment) =>
+                                    pa.resourceAllocationId === memberId &&
+                                    pa.projectId === allocation.projectId
+                                );
+
+                                if (assignment) {
+                                  // Set up deletion target with assignment ID and project name
+                                  setDeletingTarget({
+                                    memberId,
+                                    projectId: allocation.projectId,
+                                    assignmentId: assignment.id,
+                                    projectName: allocation.projectName,
+                                  });
+                                } else {
+                                  toast.error("Project assignment not found");
+                                }
+                              }}
                               className="text-red-600 hover:text-red-800"
-                              title="Remove allocation"
+                              title="Delete project assignment"
                             >
                               <Trash className="h-4 w-4" />
                             </button>
-                          </div>*/}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -877,7 +1205,7 @@ export default function MonthlyCapacityTable({
                         className="px-6 py-3 pl-12"
                         colSpan={weeksData.length + 3}
                       >
-                        {/* <button
+                        <button
                           onClick={() => {
                             setAddModalTarget(memberId);
                             setAddForm({ projectName: "", hours: 1 });
@@ -886,7 +1214,7 @@ export default function MonthlyCapacityTable({
                         >
                           <Plus className="h-4 w-4 mr-1" />
                           Add Project
-                        </button> */}
+                        </button>
                       </td>
                     </tr>
                   )}
@@ -900,7 +1228,7 @@ export default function MonthlyCapacityTable({
       {addModalTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
           <div className="bg-white rounded-lg shadow-lg w-full max-w-md">
-            <div className="px-6 py-4 border-b border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-lg font-semibold text-gray-900">
                 Add Project
               </h3>
@@ -910,24 +1238,31 @@ export default function MonthlyCapacityTable({
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Project
                 </label>
-                <input
-                  type="text"
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
-                  value={addForm.projectName}
+                <select
+                  value={addForm.projectId}
                   onChange={(e) =>
-                    setAddForm((f) => ({ ...f, projectName: e.target.value }))
+                    setAddForm({ ...addForm, projectId: e.target.value })
                   }
-                  placeholder="Enter project name"
-                />
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                >
+                  <option value="">Select a project</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Hours per week
+                  Hours per workday
                 </label>
                 <input
                   type="number"
                   className="w-32 border border-gray-300 rounded px-3 py-2 text-sm"
                   min={0}
+                  max={24}
+                  step={0.5}
                   value={addForm.hours}
                   onChange={(e) =>
                     setAddForm((f) => ({
@@ -937,48 +1272,42 @@ export default function MonthlyCapacityTable({
                   }
                 />
               </div>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={addForm.includeWeekends}
+                  onChange={(e) =>
+                    setAddForm((f) => ({
+                      ...f,
+                      includeWeekends: e.target.checked,
+                    }))
+                  }
+                />
+                Enable weekends
+              </label>
             </div>
             <div className="px-6 py-3 border-t border-gray-200 flex justify-end gap-3">
               <button
                 className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900"
-                onClick={() => setAddModalTarget(null)}
+                onClick={() => {
+                  setAddModalTarget(null);
+                  setAddForm({
+                    projectId: "",
+                    hours: 8,
+                    includeWeekends: false,
+                    startDate: new Date().toISOString().split("T")[0],
+                  });
+                }}
               >
                 Cancel
               </button>
               <button
-                className="px-4 py-2 text-sm bg-orange-600 text-white rounded hover:bg-orange-700"
-                onClick={() => {
-                  if (!addModalTarget || !addForm.projectName.trim()) {
-                    setAddModalTarget(null);
-                    return;
-                  }
-                  const id = `p-${Date.now()}`;
-                  setMembers((prev) =>
-                    prev.map((m) =>
-                      m.id !== addModalTarget
-                        ? m
-                        : {
-                            ...m,
-                            allocations: [
-                              ...m.allocations,
-                              {
-                                projectId: id,
-                                projectName: addForm.projectName.trim(),
-                                hours: addForm.hours,
-                                weeklyHours: Array.from(
-                                  { length: weeksData.length },
-                                  () => addForm.hours
-                                ),
-                                linked: true,
-                              },
-                            ],
-                          }
-                    )
-                  );
-                  setAddModalTarget(null);
-                }}
+                className="px-4 py-2 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                onClick={handleAddProject}
+                disabled={addProjectMutation.isPending || !addForm.projectId}
               >
-                Add
+                {addProjectMutation.isPending ? "Adding..." : "Add"}
               </button>
             </div>
           </div>
