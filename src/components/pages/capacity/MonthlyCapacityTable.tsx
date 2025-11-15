@@ -1,7 +1,16 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { ChevronDown, ChevronUp, Plus, Trash, Pencil } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  Trash,
+  Pencil,
+  X,
+  Check,
+  AlertTriangle,
+} from "lucide-react";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { capacityStore } from "@/lib/stores/capacityStore";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
@@ -200,6 +209,16 @@ export default function MonthlyCapacityTable({
     includeWeekends: false,
     startDate: new Date().toISOString().split("T")[0],
   });
+  const [savingTarget, setSavingTarget] = useState<{
+    memberId: string;
+    projectId: string;
+    projectName: string;
+  } | null>(null);
+  const [confirmationText, setConfirmationText] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [editedWeeklyHours, setEditedWeeklyHours] = useState<{
+    [key: string]: number[]; // key: "memberId:projectId", value: array of weekly hours
+  }>({});
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ["projects", currentOrganization?.id],
@@ -237,7 +256,11 @@ export default function MonthlyCapacityTable({
     const monthStart = new Date(selectedYear, selectedMonth, 1);
     const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
 
+    const firstDayOfWeek = monthStart.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const daysToMonday = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1; // Days to subtract to get Monday
+
     let currentWeekStart = new Date(monthStart);
+    currentWeekStart.setDate(monthStart.getDate() - daysToMonday);
     let weekCount = 0;
     while (currentWeekStart <= monthEnd && weekCount < 6) {
       const dayOfWeek = currentWeekStart.getDay();
@@ -344,6 +367,42 @@ export default function MonthlyCapacityTable({
     },
   });
 
+  const updateWeeklyPlanMutation = useMutation({
+    mutationFn: async (data: {
+      weeklyPlanId: string;
+      hoursSunday: number;
+      hoursMonday: number;
+      hoursTuesday: number;
+      hoursWednesday: number;
+      hoursThursday: number;
+      hoursFriday: number;
+      hoursSaturday: number;
+      isLinked: boolean;
+    }) => {
+      const response = await fetch("/api/capacity/weekly-plans", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to update weekly plan");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+      queryClient.invalidateQueries({ queryKey: ["resources"] });
+    },
+    onError: (error: Error) => {
+      console.error("Update weekly plan error:", error);
+      toast.error(error.message || "Failed to update weekly plan");
+    },
+  });
+
   const deleteProjectAssignmentMutation = useMutation({
     mutationFn: async (assignmentId: string) => {
       const response = await fetch(
@@ -376,35 +435,46 @@ export default function MonthlyCapacityTable({
     },
   });
 
-  // const handleAddProject = async () => {
-  //   if (!addModalTarget || !addForm.projectId) {
-  //     setAddModalTarget(null);
-  //     return;
-  //   }
+  const createWeeklyPlanMutation = useMutation({
+    mutationFn: async (data: {
+      organizationId: string;
+      resourceAllocationId: string;
+      projectId: string;
+      projectAssignmentId: string;
+      weekStartDate: string;
+      defaultHoursPerDay: number;
+      allowWeekends: boolean;
+      hoursSunday: number;
+      hoursMonday: number;
+      hoursTuesday: number;
+      hoursWednesday: number;
+      hoursThursday: number;
+      hoursFriday: number;
+      hoursSaturday: number;
+    }) => {
+      const response = await fetch("/api/capacity/weekly-plans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
 
-  //   // Get the first week's start date for the month
-  //   const firstWeekStartDate =
-  //     weeksData.length > 0
-  //       ? weeksData[0].startDate
-  //       : new Date(selectedYear, selectedMonth, 1).toISOString();
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to create weekly plan");
+      }
 
-  //   try {
-  //     const projectData = {
-  //       organizationId: currentOrganization?.id,
-  //       resourceAllocationId: addModalTarget,
-  //       projectId: addForm.projectId,
-  //       hoursPerWeek: addForm.hours * 5, // Convert daily to weekly
-  //       defaultHoursPerDay: addForm.hours,
-  //       allowWeekends: addForm.includeWeekends,
-  //       startDate: new Date().toISOString(),
-  //       weekStartDate: firstWeekStartDate,
-  //     };
-
-  //     await addProjectMutation.mutateAsync(projectData);
-  //   } catch (error) {
-  //     // Error is handled by mutation
-  //   }
-  // };
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+      queryClient.invalidateQueries({ queryKey: ["resources"] });
+    },
+    onError: (error: Error) => {
+      console.error("Create weekly plan error:", error);
+      toast.error(error.message || "Failed to create weekly plan");
+    },
+  });
 
   const handleAddProject = async () => {
     if (!addModalTarget || !addForm.projectId) {
@@ -444,6 +514,11 @@ export default function MonthlyCapacityTable({
         const weekStart = startOfDay(parseISO(week.startDate));
         const weekEnd = startOfDay(parseISO(week.endDate));
 
+        const weekMonday = startOfWeek(weekStart, { weekStartsOn: 1 });
+
+        // Calculate the Sunday of this week (6 days after Monday)
+        const weekSunday = addDays(weekMonday, 6);
+
         // Calculate hours for each day of the week
         let hoursSunday = 0;
         let hoursMonday = 0;
@@ -454,7 +529,10 @@ export default function MonthlyCapacityTable({
         let hoursSaturday = 0;
 
         // Get all days in this week
-        const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+        const weekDays = eachDayOfInterval({
+          start: weekMonday,
+          end: weekSunday,
+        });
 
         weekDays.forEach((day) => {
           const dayOfWeek = getDay(day); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
@@ -490,6 +568,8 @@ export default function MonthlyCapacityTable({
           }
         });
 
+        console.log("weekStartDate", weekMonday.toISOString());
+
         // Create weekly plan via API
         const weeklyPlanResponse = await fetch("/api/capacity/weekly-plans", {
           method: "POST",
@@ -499,7 +579,7 @@ export default function MonthlyCapacityTable({
             resourceAllocationId: addModalTarget,
             projectId: addForm.projectId,
             projectAssignmentId: projectAssignmentId,
-            weekStartDate: weekStart.toISOString(),
+            weekStartDate: weekMonday.toISOString(),
             defaultHoursPerDay: dailyHours,
             allowWeekends: addForm.includeWeekends,
             // Override daily hours based on past/current/future logic
@@ -562,116 +642,133 @@ export default function MonthlyCapacityTable({
     staleTime: 5 * 60 * 1000,
   });
 
-  const members: Member[] = useMemo(() => {
-    if (!resources) return [];
+  const handleSaveWeeklyHours = async () => {
+    if (!savingTarget) return;
 
-    return resources.map((resource: ResourceAllocation) => {
-      const memberInfo = resource.organization_members;
-      const userInfo = memberInfo?.users;
+    const { memberId, projectId } = savingTarget;
+    const key = `${memberId}:${projectId}`;
+    const editedHours = editedWeeklyHours[key];
 
-      // Get project assignments for this resource
-      const assignments = projectAssignments.filter(
-        (pa: ProjectAssignment) => pa.resourceAllocationId === resource.id
-      );
+    if (!editedHours || editedHours.length === 0) {
+      toast.error("No weekly hours to save");
+      setSavingTarget(null);
+      setConfirmationText("");
+      return;
+    }
 
-      // Transform assignments with weekly hours
-      const allocations = assignments.map((assignment: ProjectAssignment) => {
-        // Calculate weekly hours for each week in the month
-        const weeklyHours = weeksData.map((week: WeekData) => {
-          // Normalize dates for comparison
-          let weekStartDate: Date;
+    // Find the project assignment
+    const assignment = projectAssignments.find(
+      (pa: ProjectAssignment) =>
+        pa.resourceAllocationId === memberId && pa.projectId === projectId
+    );
+
+    if (!assignment) {
+      toast.error("Project assignment not found");
+      setSavingTarget(null);
+      setConfirmationText("");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      // For each week, update or create weekly plan
+      const updatePromises = weeksData.map(async (week, weekIndex) => {
+        const weeklyHours = editedHours[weekIndex] || 0;
+
+        // Calculate Monday of the week
+        const weekStart = startOfDay(parseISO(week.startDate));
+        const weekMonday = startOfWeek(weekStart, { weekStartsOn: 1 });
+
+        // Find existing weekly plan
+        const existingPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
+          let planDate: Date;
           try {
-            weekStartDate = parseISO(week.startDate);
-            if (!isValid(weekStartDate)) {
-              weekStartDate = new Date(week.startDate);
-            }
-          } catch {
-            weekStartDate = new Date(week.startDate);
-          }
-          weekStartDate = startOfDay(weekStartDate);
-
-          const weekMonday = startOfWeek(weekStartDate, { weekStartsOn: 1 }); // 1 = Monday
-
-          console.log("week", week);
-          const weeklyPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
-            let planDate: Date;
-            try {
-              planDate = parseISO(wp.weekStartDate);
-              if (!isValid(planDate)) {
-                planDate = new Date(wp.weekStartDate);
-              }
-            } catch {
+            planDate = parseISO(wp.weekStartDate);
+            if (!isValid(planDate)) {
               planDate = new Date(wp.weekStartDate);
             }
-
-            // Normalize to start of day
-            planDate = startOfDay(planDate);
-
-            const planMonday = startOfWeek(planDate, { weekStartsOn: 1 });
-            console.log("weekMonday", weekMonday, "planMonday", planMonday);
-
-            const datesMatch = isSameDay(weekMonday, planMonday);
-
-            console.log("datesMatch", datesMatch);
-
-            console.log(
-              "wp",
-              wp,
-              "resourceId",
-              resource.id,
-              "assignmentId",
-              assignment.id
-            );
-
-            const idsMatch =
-              wp.resourceAllocationId === resource.id &&
-              wp.projectAssignmentId === assignment.id;
-
-            return idsMatch && datesMatch;
-          });
-          console.log("weeklyPlan", weeklyPlan);
-
-          if (weeklyPlan) {
-            // Sum all daily hours for this week
-            const totalHours =
-              (Number(weeklyPlan.hoursSunday) || 0) +
-              (Number(weeklyPlan.hoursMonday) || 0) +
-              (Number(weeklyPlan.hoursTuesday) || 0) +
-              (Number(weeklyPlan.hoursWednesday) || 0) +
-              (Number(weeklyPlan.hoursThursday) || 0) +
-              (Number(weeklyPlan.hoursFriday) || 0) +
-              (Number(weeklyPlan.hoursSaturday) || 0);
-            return totalHours;
+          } catch {
+            planDate = new Date(wp.weekStartDate);
           }
+          planDate = startOfDay(planDate);
+          const planMonday = startOfWeek(planDate, { weekStartsOn: 1 });
 
-          // If no weekly plan exists, return 0
-          return 0;
+          return (
+            wp.resourceAllocationId === memberId &&
+            wp.projectAssignmentId === assignment.id &&
+            isSameDay(weekMonday, planMonday)
+          );
         });
 
-        // Calculate average hours for display
-        const avgHours =
-          weeklyHours.reduce((sum, h) => sum + h, 0) / weeklyHours.length || 0;
+        // Calculate hours per day (distribute evenly)
+        // Check if weekends are allowed
+        const allowWeekends = assignment.allowWeekends || false;
+        const daysPerWeek = allowWeekends ? 7 : 5;
+        const hoursPerDay = weeklyHours / daysPerWeek;
 
-        return {
-          projectId: assignment.projectId,
-          projectName: assignment.projectName,
-          hours: avgHours,
-          weeklyHours,
-        };
+        const hoursSunday = allowWeekends ? hoursPerDay : 0;
+        const hoursMonday = hoursPerDay;
+        const hoursTuesday = hoursPerDay;
+        const hoursWednesday = hoursPerDay;
+        const hoursThursday = hoursPerDay;
+        const hoursFriday = hoursPerDay;
+        const hoursSaturday = allowWeekends ? hoursPerDay : 0;
+
+        if (existingPlan) {
+          // Update existing weekly plan
+          await updateWeeklyPlanMutation.mutateAsync({
+            weeklyPlanId: existingPlan.id,
+            hoursSunday,
+            hoursMonday,
+            hoursTuesday,
+            hoursWednesday,
+            hoursThursday,
+            hoursFriday,
+            hoursSaturday,
+            isLinked: false, // Unlink to preserve daily allocations
+          });
+        } else {
+          // Create new weekly plan
+          await createWeeklyPlanMutation.mutateAsync({
+            organizationId: currentOrganization?.id || "",
+            resourceAllocationId: memberId,
+            projectId: projectId,
+            projectAssignmentId: assignment.id,
+            weekStartDate: weekMonday.toISOString(),
+            defaultHoursPerDay: hoursPerDay,
+            allowWeekends: allowWeekends,
+            hoursSunday,
+            hoursMonday,
+            hoursTuesday,
+            hoursWednesday,
+            hoursThursday,
+            hoursFriday,
+            hoursSaturday,
+          });
+        }
       });
 
-      return {
-        id: resource.id,
-        fullName: userInfo?.full_name || "Unknown User",
-        jobTitle: userInfo?.position || "No Position",
-        avatarUrl: userInfo?.avatar_url,
-        capacity: resource.weeklyCapacityHours / 5, // Daily capacity
-        allocations,
-      };
-    });
-  }, [resources, projectAssignments, weeklyPlans, weeksData]);
+      await Promise.all(updatePromises);
 
-  console.log("members", members);
+      toast.success("Weekly hours saved successfully!");
+      setEditingTarget(null);
+      setSavingTarget(null);
+      setConfirmationText("");
+
+      // Clear edited hours after successful save
+      setEditedWeeklyHours((prev) => {
+        const newState = { ...prev };
+        delete newState[key];
+        return newState;
+      });
+    } catch (error: any) {
+      console.error("Save weekly hours error:", error);
+      toast.error(error.message || "Failed to save weekly hours");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const getUtilizationColor = (allocated: number, capacity: number) => {
     const percentage = (allocated / capacity) * 100;
@@ -716,23 +813,25 @@ export default function MonthlyCapacityTable({
     projectId: string,
     weeksCount: number
   ) => {
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id !== memberId) return m;
-        return {
-          ...m,
-          allocations: m.allocations.map((a) => {
-            if (a.projectId !== projectId) return a;
-            const has =
-              Array.isArray(a.weeklyHours) &&
-              a.weeklyHours.length === weeksCount;
-            if (has) return a;
-            const arr = Array.from({ length: weeksCount }, () => a.hours);
-            return { ...a, weeklyHours: arr, linked: true };
-          }),
-        };
-      })
-    );
+    const key = `${memberId}:${projectId}`;
+    const allocation = members
+      .find((m) => m.id === memberId)
+      ?.allocations.find((a) => a.projectId === projectId);
+
+    if (!allocation) return;
+
+    // Initialize edited hours if not already set
+    if (!editedWeeklyHours[key]) {
+      const currentWeeklyHours =
+        allocation.weeklyHours && allocation.weeklyHours.length === weeksCount
+          ? allocation.weeklyHours
+          : Array.from({ length: weeksCount }, () => allocation.hours);
+
+      setEditedWeeklyHours((prev) => ({
+        ...prev,
+        [key]: [...currentWeeklyHours],
+      }));
+    }
   };
 
   const updateAllocationWeeklyHour = (
@@ -742,31 +841,137 @@ export default function MonthlyCapacityTable({
     value: number,
     weeksCount: number
   ) => {
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id !== memberId) return m;
-        return {
-          ...m,
-          allocations: m.allocations.map((a) => {
-            if (a.projectId !== projectId) return a;
-            const next = { ...a } as Required<
-              NonNullable<Member["allocations"][number]>
-            >;
-            const base =
-              next.weeklyHours && next.weeklyHours.length === weeksCount
-                ? next.weeklyHours
-                : Array.from({ length: weeksCount }, () => next.hours);
-            const arr = [...base];
-            const sanitized = Math.max(0, Number.isFinite(value) ? value : 0);
-            // Monthly editing should be independent per week
-            arr[weekIndex] = sanitized;
-            next.weeklyHours = arr;
-            return next;
-          }),
-        };
-      })
-    );
+    const key = `${memberId}:${projectId}`;
+
+    setEditedWeeklyHours((prev) => {
+      const current = prev[key] || [];
+      // Ensure array has correct length
+      const arr =
+        current.length === weeksCount
+          ? [...current]
+          : Array.from({ length: weeksCount }, (_, i) => current[i] ?? 0);
+
+      arr[weekIndex] = Math.max(0, Number.isFinite(value) ? value : 0);
+
+      return {
+        ...prev,
+        [key]: arr,
+      };
+    });
   };
+
+  const members: Member[] = useMemo(() => {
+    if (!resources) return [];
+
+    return resources.map((resource: ResourceAllocation) => {
+      const memberInfo = resource.organization_members;
+      const userInfo = memberInfo?.users;
+
+      // Get project assignments for this resource
+      const assignments = projectAssignments.filter(
+        (pa: ProjectAssignment) => pa.resourceAllocationId === resource.id
+      );
+
+      // Transform assignments with weekly hours
+      const allocations = assignments.map((assignment: ProjectAssignment) => {
+        const key = `${resource.id}:${assignment.projectId}`;
+        const editedHours = editedWeeklyHours[key];
+
+        // Calculate weekly hours for each week in the month
+        const weeklyHours = weeksData.map(
+          (week: WeekData, weekIndex: number) => {
+            // If we have edited hours for this week, use them
+            if (editedHours && editedHours[weekIndex] !== undefined) {
+              return editedHours[weekIndex];
+            }
+
+            // Normalize dates for comparison
+            let weekStartDate: Date;
+            try {
+              weekStartDate = parseISO(week.startDate);
+              if (!isValid(weekStartDate)) {
+                weekStartDate = new Date(week.startDate);
+              }
+            } catch {
+              weekStartDate = new Date(week.startDate);
+            }
+            weekStartDate = startOfDay(weekStartDate);
+
+            const weekMonday = startOfWeek(weekStartDate, { weekStartsOn: 1 }); // 1 = Monday
+
+            const weeklyPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
+              let planDate: Date;
+              try {
+                planDate = parseISO(wp.weekStartDate);
+                if (!isValid(planDate)) {
+                  planDate = new Date(wp.weekStartDate);
+                }
+              } catch {
+                planDate = new Date(wp.weekStartDate);
+              }
+
+              // Normalize to start of day
+              planDate = startOfDay(planDate);
+
+              const planMonday = startOfWeek(planDate, { weekStartsOn: 1 });
+
+              const datesMatch = isSameDay(weekMonday, planMonday);
+
+              const idsMatch =
+                wp.resourceAllocationId === resource.id &&
+                wp.projectAssignmentId === assignment.id;
+
+              return idsMatch && datesMatch;
+            });
+
+            if (weeklyPlan) {
+              // Sum all daily hours for this week
+              const totalHours =
+                (Number(weeklyPlan.hoursSunday) || 0) +
+                (Number(weeklyPlan.hoursMonday) || 0) +
+                (Number(weeklyPlan.hoursTuesday) || 0) +
+                (Number(weeklyPlan.hoursWednesday) || 0) +
+                (Number(weeklyPlan.hoursThursday) || 0) +
+                (Number(weeklyPlan.hoursFriday) || 0) +
+                (Number(weeklyPlan.hoursSaturday) || 0);
+              return totalHours;
+            }
+
+            // If no weekly plan exists, return 0
+            return 0;
+          }
+        );
+
+        // Calculate average hours for display
+        const avgHours =
+          weeklyHours.reduce((sum, h) => sum + h, 0) / weeklyHours.length || 0;
+
+        return {
+          projectId: assignment.projectId,
+          projectName: assignment.projectName,
+          hours: avgHours,
+          weeklyHours,
+        };
+      });
+
+      return {
+        id: resource.id,
+        fullName: userInfo?.full_name || "Unknown User",
+        jobTitle: userInfo?.position || "No Position",
+        avatarUrl: userInfo?.avatar_url,
+        capacity: resource.weeklyCapacityHours / 5, // Daily capacity
+        allocations,
+      };
+    });
+  }, [
+    resources,
+    projectAssignments,
+    weeklyPlans,
+    weeksData,
+    editedWeeklyHours,
+  ]);
+
+  console.log("members", members);
 
   // Calculate total monthly capacity
   const totalMonthlyCapacity = useMemo(() => {
@@ -1140,59 +1345,89 @@ export default function MonthlyCapacityTable({
                         })}
                         <td className="px-4 py-3 text-center">
                           <div className="inline-flex items-center gap-3">
-                            <button
-                              className={`$${""} text-gray-600 hover:text-gray-800`}
-                              title={
-                                isEditing(memberId, allocation.projectId)
-                                  ? "Stop editing"
-                                  : "Edit allocation"
-                              }
-                              onClick={() => {
-                                ensureWeeklyInitialized(
-                                  memberId,
-                                  allocation.projectId,
-                                  weeksData.length
-                                );
-                                setEditingTarget((prev) =>
-                                  prev &&
-                                  prev.memberId === memberId &&
-                                  prev.projectId === allocation.projectId
-                                    ? null
-                                    : {
+                            {isEditing(memberId, allocation.projectId) ? (
+                              <>
+                                <button
+                                  className="text-green-600 hover:text-green-800"
+                                  title="Save changes"
+                                  onClick={() => {
+                                    setSavingTarget({
+                                      memberId,
+                                      projectId: allocation.projectId,
+                                      projectName: allocation.projectName,
+                                    });
+                                    setConfirmationText("");
+                                  }}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </button>
+                                <button
+                                  className="text-gray-600 hover:text-gray-800"
+                                  title="Cancel editing"
+                                  onClick={() => {
+                                    setEditingTarget(null);
+                                    const key = `${memberId}:${allocation.projectId}`;
+                                    setEditedWeeklyHours((prev) => {
+                                      const newState = { ...prev };
+                                      delete newState[key];
+                                      return newState;
+                                    });
+                                    // Reset weekly hours to original values
+                                    queryClient.invalidateQueries({
+                                      queryKey: ["weekly-plans"],
+                                    });
+                                  }}
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="text-gray-600 hover:text-gray-800"
+                                  title="Edit allocation"
+                                  onClick={() => {
+                                    ensureWeeklyInitialized(
+                                      memberId,
+                                      allocation.projectId,
+                                      weeksData.length
+                                    );
+                                    setEditingTarget({
+                                      memberId,
+                                      projectId: allocation.projectId,
+                                    });
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const assignment = projectAssignments.find(
+                                      (pa: ProjectAssignment) =>
+                                        pa.resourceAllocationId === memberId &&
+                                        pa.projectId === allocation.projectId
+                                    );
+
+                                    if (assignment) {
+                                      setDeletingTarget({
                                         memberId,
                                         projectId: allocation.projectId,
-                                      }
-                                );
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                // Find the project assignment to get the assignment ID
-                                const assignment = projectAssignments.find(
-                                  (pa: ProjectAssignment) =>
-                                    pa.resourceAllocationId === memberId &&
-                                    pa.projectId === allocation.projectId
-                                );
-
-                                if (assignment) {
-                                  // Set up deletion target with assignment ID and project name
-                                  setDeletingTarget({
-                                    memberId,
-                                    projectId: allocation.projectId,
-                                    assignmentId: assignment.id,
-                                    projectName: allocation.projectName,
-                                  });
-                                } else {
-                                  toast.error("Project assignment not found");
-                                }
-                              }}
-                              className="text-red-600 hover:text-red-800"
-                              title="Delete project assignment"
-                            >
-                              <Trash className="h-4 w-4" />
-                            </button>
+                                        assignmentId: assignment.id,
+                                        projectName: allocation.projectName,
+                                      });
+                                    } else {
+                                      toast.error(
+                                        "Project assignment not found"
+                                      );
+                                    }
+                                  }}
+                                  className="text-red-600 hover:text-red-800"
+                                  title="Delete project assignment"
+                                >
+                                  <Trash className="h-4 w-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1208,7 +1443,12 @@ export default function MonthlyCapacityTable({
                         <button
                           onClick={() => {
                             setAddModalTarget(memberId);
-                            setAddForm({ projectName: "", hours: 1 });
+                            setAddForm({
+                              hours: 1,
+                              projectId: "",
+                              includeWeekends: false,
+                              startDate: new Date().toISOString().split("T")[0],
+                            });
                           }}
                           className="flex items-center text-orange-600 hover:text-orange-800 text-sm font-medium"
                         >
@@ -1308,6 +1548,83 @@ export default function MonthlyCapacityTable({
                 disabled={addProjectMutation.isPending || !addForm.projectId}
               >
                 {addProjectMutation.isPending ? "Adding..." : "Add"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Confirmation Modal */}
+      {savingTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-red-100">
+                  <AlertTriangle className="h-6 w-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Override Daily Allocations
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    This action will override previously set daily-based
+                    allocations
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                <p className="text-sm font-medium text-red-800 mb-2">
+                  ⚠️ Severe Warning
+                </p>
+                <p className="text-sm text-red-700">
+                  Saving these weekly hours will{" "}
+                  <strong>permanently override</strong> any daily-based time
+                  allocations you have set for{" "}
+                  <strong>{savingTarget.projectName}</strong>. The hours will be
+                  distributed evenly across all days in each week.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Type <strong>"CONFIRM"</strong> to proceed:
+                </label>
+                <input
+                  type="text"
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  value={confirmationText}
+                  onChange={(e) => setConfirmationText(e.target.value)}
+                  placeholder="Type CONFIRM here"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                onClick={() => {
+                  setSavingTarget(null);
+                  setConfirmationText("");
+                }}
+                disabled={isSaving}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                onClick={handleSaveWeeklyHours}
+                disabled={isSaving || confirmationText !== "CONFIRM"}
+              >
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white inline-block mr-2"></div>
+                    Saving...
+                  </>
+                ) : (
+                  "Save & Override"
+                )}
               </button>
             </div>
           </div>
