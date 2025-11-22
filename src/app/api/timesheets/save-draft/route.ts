@@ -5,7 +5,13 @@ import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { organizationId, weekStart, entries = [], totalHours = 0, submissionId } = body;
+  const {
+    organizationId,
+    weekStart,
+    entries = [],
+    totalHours = 0,
+    submissionId,
+  } = body;
 
   if (!organizationId || !weekStart) {
     return NextResponse.json(
@@ -82,13 +88,14 @@ export async function POST(req: NextRequest) {
       currentSubmission = submission;
     } else {
       // Check for existing submission with proper filters
-      const { data: prevSubmission, error: prevSubmissionError } = await supabase
-        .from("timesheet_submissions")
-        .select("id, status")
-        .eq("organization_id", organizationId)
-        .eq("user_id", userContext.userId)
-        .eq("week_start_date", weekStart)
-        .maybeSingle();
+      const { data: prevSubmission, error: prevSubmissionError } =
+        await supabase
+          .from("timesheet_submissions")
+          .select("id, status")
+          .eq("organization_id", organizationId)
+          .eq("user_id", userContext.userId)
+          .eq("week_start_date", weekStart)
+          .maybeSingle();
 
       if (prevSubmissionError && prevSubmissionError.code !== "PGRST116") {
         // PGRST116 is "not found" which is fine, other errors are not
