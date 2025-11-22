@@ -5,7 +5,7 @@ import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { organizationId, weekStart, entries = [], totalHours = 0 } = body;
+  const { organizationId, weekStart, entries = [], totalHours = 0, submissionId } = body;
 
   if (!organizationId || !weekStart) {
     return NextResponse.json(
@@ -36,58 +36,168 @@ export async function POST(req: NextRequest) {
   try {
     let currentSubmission;
 
-    const { data: prevSubmission, error: prevSubmissionError } = await supabase
-      .from("timesheet_submissions")
-      .select("id")
-      .eq("user_id", userContext.userId)
-      .eq("week_start_date", weekStart)
-      .single();
-
-    if (prevSubmission) {
-      // Update existing submission
-      const { data: submission, error: fetchError } = await supabase
+    // If submissionId is provided, use it directly
+    if (submissionId) {
+      const { data: existingSubmission, error: fetchError } = await supabase
         .from("timesheet_submissions")
-        .update({
-          total_hours: totalHours,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", prevSubmission.id)
+        .select("id, status")
+        .eq("id", submissionId)
         .eq("user_id", userContext.userId)
-        .eq("status", "draft")
-        .select()
+        .eq("organization_id", organizationId)
         .single();
 
-      if (fetchError) throw fetchError;
-      currentSubmission = submission;
-    } else {
-      // Create new submission
+      if (fetchError || !existingSubmission) {
+        return NextResponse.json(
+          { error: "Submission not found" },
+          { status: 404 }
+        );
+      }
+
+      // Only allow updates to draft submissions
+      if (existingSubmission.status !== "draft") {
+        return NextResponse.json(
+          { error: "Cannot update a submitted timesheet" },
+          { status: 400 }
+        );
+      }
+
+      // Update existing submission
       const weekStartDate = new Date(weekStart);
       const weekEndDate = new Date(weekStartDate);
       weekEndDate.setDate(weekStartDate.getDate() + 4);
 
-      const { data: projectMember } = await supabase
-        .from("project_members")
-        .select("id")
-        .eq("organization_members.user_id", userContext.userId)
-        .eq("project_members.organization_id", organizationId)
-        .single();
-
-      const { data: submission, error: createError } = await supabase
+      const { data: submission, error: updateError } = await supabase
         .from("timesheet_submissions")
-        .insert({
-          organization_id: organizationId,
-          user_id: userContext.userId,
-          project_member_id: projectMember?.id,
+        .update({
+          total_hours: totalHours,
           week_start_date: weekStart,
           week_end_date: weekEndDate.toISOString().split("T")[0],
-          status: "draft",
-          total_hours: totalHours,
+          updated_at: new Date().toISOString(),
         })
+        .eq("id", submissionId)
         .select()
         .single();
 
-      if (createError) throw createError;
+      if (updateError) throw updateError;
       currentSubmission = submission;
+    } else {
+      // Check for existing submission with proper filters
+      const { data: prevSubmission, error: prevSubmissionError } = await supabase
+        .from("timesheet_submissions")
+        .select("id, status")
+        .eq("organization_id", organizationId)
+        .eq("user_id", userContext.userId)
+        .eq("week_start_date", weekStart)
+        .maybeSingle();
+
+      if (prevSubmissionError && prevSubmissionError.code !== "PGRST116") {
+        // PGRST116 is "not found" which is fine, other errors are not
+        throw prevSubmissionError;
+      }
+
+      if (prevSubmission) {
+        // Only allow updates to draft submissions
+        if (prevSubmission.status !== "draft") {
+          return NextResponse.json(
+            { error: "Cannot update a submitted timesheet" },
+            { status: 400 }
+          );
+        }
+
+        // Update existing submission
+        const weekStartDate = new Date(weekStart);
+        const weekEndDate = new Date(weekStartDate);
+        weekEndDate.setDate(weekStartDate.getDate() + 4);
+
+        const { data: submission, error: updateError } = await supabase
+          .from("timesheet_submissions")
+          .update({
+            total_hours: totalHours,
+            week_end_date: weekEndDate.toISOString().split("T")[0],
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", prevSubmission.id)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+        currentSubmission = submission;
+      } else {
+        // Create new submission using UPSERT to handle race conditions
+        const weekStartDate = new Date(weekStart);
+        const weekEndDate = new Date(weekStartDate);
+        weekEndDate.setDate(weekStartDate.getDate() + 4);
+
+        // Get project member ID
+        const { data: projectMember } = await supabase
+          .from("project_members")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .eq("organization_member_id", userContext.membership.id)
+          .maybeSingle();
+
+        // Use UPSERT to handle the unique constraint
+        const { data: submission, error: upsertError } = await supabase
+          .from("timesheet_submissions")
+          .upsert(
+            {
+              organization_id: organizationId,
+              user_id: userContext.userId,
+              project_member_id: projectMember?.id || null,
+              week_start_date: weekStart,
+              week_end_date: weekEndDate.toISOString().split("T")[0],
+              status: "draft",
+              total_hours: totalHours,
+            },
+            {
+              onConflict: "organization_id,user_id,week_start_date",
+              ignoreDuplicates: false,
+            }
+          )
+          .select()
+          .single();
+
+        if (upsertError) {
+          // If upsert fails, try to fetch the existing one
+          const { data: existing, error: fetchError } = await supabase
+            .from("timesheet_submissions")
+            .select("id, status")
+            .eq("organization_id", organizationId)
+            .eq("user_id", userContext.userId)
+            .eq("week_start_date", weekStart)
+            .single();
+
+          if (fetchError) throw upsertError;
+
+          if (existing.status !== "draft") {
+            return NextResponse.json(
+              { error: "Cannot update a submitted timesheet" },
+              { status: 400 }
+            );
+          }
+
+          // Update the existing one
+          const weekStartDate = new Date(weekStart);
+          const weekEndDate = new Date(weekStartDate);
+          weekEndDate.setDate(weekStartDate.getDate() + 4);
+
+          const { data: updated, error: updateError } = await supabase
+            .from("timesheet_submissions")
+            .update({
+              total_hours: totalHours,
+              week_end_date: weekEndDate.toISOString().split("T")[0],
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existing.id)
+            .select()
+            .single();
+
+          if (updateError) throw updateError;
+          currentSubmission = updated;
+        } else {
+          currentSubmission = submission;
+        }
+      }
     }
 
     // Update or create entries
@@ -102,17 +212,18 @@ export async function POST(req: NextRequest) {
       const entriesToInsert = entries
         .filter(
           (entry: any) =>
-            entry.monday_hours > 0 ||
-            entry.tuesday_hours > 0 ||
-            entry.wednesday_hours > 0 ||
-            entry.thursday_hours > 0 ||
-            entry.friday_hours > 0 ||
-            entry.task_description.trim()
+            entry.project_id &&
+            (entry.monday_hours > 0 ||
+              entry.tuesday_hours > 0 ||
+              entry.wednesday_hours > 0 ||
+              entry.thursday_hours > 0 ||
+              entry.friday_hours > 0 ||
+              (entry.task_description && entry.task_description.trim()))
         )
         .map((entry: any) => ({
           timesheet_submission_id: currentSubmission.id,
           project_id: entry.project_id,
-          task_description: entry.task_description,
+          task_description: entry.task_description || "",
           monday_hours: entry.monday_hours || 0,
           tuesday_hours: entry.tuesday_hours || 0,
           wednesday_hours: entry.wednesday_hours || 0,
@@ -159,11 +270,11 @@ export async function POST(req: NextRequest) {
       submission: updatedSubmission,
       success: true,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error saving timesheet draft:", error);
     return NextResponse.json(
       {
-        error: "Internal server error",
+        error: error.message || "Internal server error",
       },
       { status: 500 }
     );

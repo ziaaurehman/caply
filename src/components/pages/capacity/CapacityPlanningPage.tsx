@@ -190,8 +190,6 @@ export default function CapacityPlanningPage() {
     return <CapacitySkeleton />;
   }
 
-  const projects: Project[] = projectsData?.projects || [];
-
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
@@ -317,38 +315,6 @@ export default function CapacityPlanningPage() {
 
         {/* Capacity Overview */}
         <div className="bg-white rounded-lg border border-gray-200 mb-8 z-10">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Capacity Overview
-                {selectedProject !== "all" && (
-                  <span className="ml-2 text-sm font-normal text-gray-500">
-                    - {projects.find((p) => p.id === selectedProject)?.name}
-                  </span>
-                )}
-              </h2>
-              <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">
-                  Total {viewMode === "monthly" ? "Monthly" : "Weekly"}{" "}
-                  Capacity:
-                </span>
-                <span className="text-sm font-medium text-gray-900">
-                  {viewMode === "monthly" ? "320h/month" : "120h/week"}
-                </span>
-                <span className="text-sm text-gray-500">|</span>
-                <span className="text-sm text-gray-500">Allocated:</span>
-                <span className="text-sm font-medium text-gray-900">
-                  {viewMode === "monthly" ? "280h/month" : "100h/week"}
-                </span>
-                <span className="text-sm text-gray-500">|</span>
-                <span className="text-sm text-gray-500">Available:</span>
-                <span className="text-sm font-medium text-green-600">
-                  {viewMode === "monthly" ? "40h/month" : "20h/week"}
-                </span>
-              </div>
-            </div>
-          </div>
-
           {/* Conditional rendering based on view mode */}
           {viewMode === "monthly" ? (
             <MonthlyCapacityTable

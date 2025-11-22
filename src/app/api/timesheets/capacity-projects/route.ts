@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { prisma } from "@/lib/prisma";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -32,9 +33,60 @@ export async function GET(req: NextRequest) {
 
   const supabase = await createClient();
   const userContext = validation.context!;
+  const organizationMemberId = userContext.membership.id;
 
   try {
-    // Get projects where the current user has capacity assignments
+    // Step 1: Get resource allocations for the current user's organization member
+    const resourceAllocations = await prisma.resourceAllocation.findMany({
+      where: {
+        organizationId,
+        organizationMemberId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (resourceAllocations.length === 0) {
+      return NextResponse.json({
+        projects: [],
+        success: true,
+      });
+    }
+
+    const resourceAllocationIds = resourceAllocations.map((ra) => ra.id);
+
+    // Step 2: Get project assignments for these resource allocations
+    const projectAssignments = await prisma.projectAssignment.findMany({
+      where: {
+        resourceAllocationId: {
+          in: resourceAllocationIds,
+        },
+        isActive: true,
+      },
+      select: {
+        id: true,
+        projectId: true,
+        hoursPerWeek: true,
+        startDate: true,
+        endDate: true,
+        isActive: true,
+      },
+    });
+
+    if (projectAssignments.length === 0) {
+      return NextResponse.json({
+        projects: [],
+        success: true,
+      });
+    }
+
+    // Step 3: Get unique project IDs
+    const projectIds = Array.from(
+      new Set(projectAssignments.map((pa) => pa.projectId))
+    );
+
     const { data: projects, error } = await supabase
       .from("projects")
       .select(
@@ -45,87 +97,135 @@ export async function GET(req: NextRequest) {
         description,
         status,
         created_at,
-        updated_at,
-        project_assignments!inner (
-          id,
-          hours_per_week,
-          start_date,
-          end_date,
-          is_active,
-          resource_allocation_id,
-          resource_allocations!inner (
-            id,
-            organization_member_id,
-            organization_members!inner (
-              id,
-              user_id
-            )
-          )
-        )
+        updated_at
       `
       )
       .eq("organization_id", organizationId)
-      .eq(
-        "project_assignments.resource_allocations.organization_members.user_id",
-        userContext.userId
-      )
-      .eq("project_assignments.is_active", true)
-      .eq("project_assignments.resource_allocations.is_active", true);
+      .in("id", projectIds);
 
     if (error) {
       console.error("Error fetching capacity projects:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Step 5: Transform the data to match the expected format
+    const projectsMap = new Map(
+      (projects || []).map((p) => [
+        p.id,
+        {
+          id: p.id,
+          name: p.name,
+          code: p.code,
+          description: p.description,
+          status: p.status,
+          created_at: p.created_at,
+          updated_at: p.updated_at,
+        },
+      ])
+    );
+
+    const projectsWithAssignments = new Map<
+      string,
+      {
+        project: any;
+        assignments: any[];
+        totalHoursPerWeek: number;
+      }
+    >();
+
+    projectAssignments.forEach((assignment) => {
+      const project = projectsMap.get(assignment.projectId);
+      if (!project) return;
+
+      if (!projectsWithAssignments.has(assignment.projectId)) {
+        projectsWithAssignments.set(assignment.projectId, {
+          project,
+          assignments: [],
+          totalHoursPerWeek: 0,
+        });
+      }
+
+      const projectData = projectsWithAssignments.get(assignment.projectId)!;
+      const hoursPerWeek = Number(assignment.hoursPerWeek) || 0;
+
+      projectData.assignments.push({
+        id: assignment.id,
+        hoursPerWeek,
+        startDate: assignment.startDate.toISOString().split("T")[0],
+        endDate: assignment.endDate
+          ? assignment.endDate.toISOString().split("T")[0]
+          : null,
+        isActive: assignment.isActive,
+      });
+
+      projectData.totalHoursPerWeek += hoursPerWeek;
+    });
+
+    // Step 6: Format the final response
+    const uniqueProjects = Array.from(projectsWithAssignments.values()).map(
+      ({ project, assignments, totalHoursPerWeek }) => ({
+        id: project.id,
+        name: project.name,
+        code: project.code,
+        description: project.description,
+        status: project.status,
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        isPlanned: true, // All projects returned have capacity planning enabled
+        totalHoursPerWeek,
+        assignments,
+      })
+    );
+
     // Transform the data to remove duplicates and format properly
-    const uniqueProjects =
-      projects?.reduce((acc: any[], project: any) => {
-        const existingProject = acc.find((p) => p.id === project.id);
+    // const uniqueProjects =
+    //   projects?.reduce((acc: any[], project: any) => {
+    //     const existingProject = acc.find((p) => p.id === project.id);
 
-        if (!existingProject) {
-          acc.push({
-            id: project.id,
-            name: project.name,
-            code: project.code,
-            description: project.description,
-            status: project.status,
-            created_at: project.created_at,
-            updated_at: project.updated_at,
-            isPlanned: true, // All projects returned have capacity planning enabled
-            totalHoursPerWeek: project.project_assignments.reduce(
-              (sum: number, assignment: any) =>
-                sum + (assignment.hours_per_week || 0),
-              0
-            ),
-            assignments: project.project_assignments.map((assignment: any) => ({
-              id: assignment.id,
-              hoursPerWeek: assignment.hours_per_week,
-              startDate: assignment.start_date,
-              endDate: assignment.end_date,
-              isActive: assignment.is_active,
-            })),
-          });
-        } else {
-          // Add hours from additional assignments
-          existingProject.totalHoursPerWeek +=
-            project.project_assignments.reduce(
-              (sum: number, assignment: any) =>
-                sum + (assignment.hours_per_week || 0),
-              0
-            );
-          existingProject.assignments.push(
-            ...project.project_assignments.map((assignment: any) => ({
-              id: assignment.id,
-              hoursPerWeek: assignment.hours_per_week,
-              startDate: assignment.start_date,
-              endDate: assignment.end_date,
-              isActive: assignment.is_active,
-            }))
-          );
-        }
+    //     if (!existingProject) {
+    //       acc.push({
+    //         id: project.id,
+    //         name: project.name,
+    //         code: project.code,
+    //         description: project.description,
+    //         status: project.status,
+    //         created_at: project.created_at,
+    //         updated_at: project.updated_at,
+    //         isPlanned: true, // All projects returned have capacity planning enabled
+    //         totalHoursPerWeek: project.project_assignments.reduce(
+    //           (sum: number, assignment: any) =>
+    //             sum + (assignment.hours_per_week || 0),
+    //           0
+    //         ),
+    //         assignments: project.project_assignments.map((assignment: any) => ({
+    //           id: assignment.id,
+    //           hoursPerWeek: assignment.hours_per_week,
+    //           startDate: assignment.start_date,
+    //           endDate: assignment.end_date,
+    //           isActive: assignment.is_active,
+    //         })),
+    //       });
+    //     } else {
+    //       // Add hours from additional assignments
+    //       existingProject.totalHoursPerWeek +=
+    //         project.project_assignments.reduce(
+    //           (sum: number, assignment: any) =>
+    //             sum + (assignment.hours_per_week || 0),
+    //           0
+    //         );
+    //       existingProject.assignments.push(
+    //         ...project.project_assignments.map((assignment: any) => ({
+    //           id: assignment.id,
+    //           hoursPerWeek: assignment.hours_per_week,
+    //           startDate: assignment.start_date,
+    //           endDate: assignment.end_date,
+    //           isActive: assignment.is_active,
+    //         }))
+    //       );
+    //     }
 
-        return acc;
-      }, []) || [];
+    //     return acc;
+    //   }, []) || [];
 
     // Sort projects: active first, then by name
     const sortedProjects = uniqueProjects.sort((a, b) => {
