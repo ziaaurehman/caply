@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 // PUT /api/capacity/daily-overrides
@@ -30,38 +30,48 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
-    // Optional: unlink the weekly plan so days are not linked to default
-    if (unlink_week) {
-      await supabase
-        .from("project_weekly_plans")
-        .update({ is_linked: false, updated_at: new Date().toISOString() })
-        .eq("id", weekly_plan_id)
-        .eq("organization_id", organizationId);
-    }
-
-    // Upsert overrides
-    for (const o of overrides) {
-      if (!o || typeof o.day_of_week !== "number") continue;
-      const day = o.day_of_week;
-      const hrs = o.actual_hours;
-      const { error: upErr } = await supabase
-        .from("project_daily_overrides")
-        .upsert(
-          {
-            organization_id: organizationId,
-            weekly_plan_id,
-            day_of_week: day,
-            actual_hours: hrs,
-            updated_at: new Date().toISOString(),
+    // Use a transaction to ensure atomicity
+    await prisma.$transaction(async (tx) => {
+      // Optional: unlink the weekly plan so days are not linked to default
+      if (unlink_week) {
+        await tx.projectWeeklyPlan.update({
+          where: {
+            id: weekly_plan_id,
+            organizationId,
           },
-          { onConflict: "weekly_plan_id,day_of_week" }
-        );
-      if (upErr) {
-        return NextResponse.json({ error: upErr.message }, { status: 500 });
+          data: {
+            isLinked: false,
+            updatedAt: new Date(),
+          },
+        });
       }
-    }
+
+      // Upsert overrides
+      for (const o of overrides) {
+        if (!o || typeof o.day_of_week !== "number") continue;
+        const day = o.day_of_week;
+        const hrs = o.actual_hours;
+
+        await tx.projectDailyOverride.upsert({
+          where: {
+            weeklyPlanId_dayOfWeek: {
+              weeklyPlanId: weekly_plan_id,
+              dayOfWeek: day,
+            },
+          },
+          create: {
+            organizationId,
+            weeklyPlanId: weekly_plan_id,
+            dayOfWeek: day,
+            actualHours: hrs,
+          },
+          update: {
+            actualHours: hrs,
+            updatedAt: new Date(),
+          },
+        });
+      }
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

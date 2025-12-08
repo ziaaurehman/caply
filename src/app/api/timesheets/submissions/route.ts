@@ -1,15 +1,15 @@
 // src/app/api/timesheets/submissions/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-// COMMENTED OUT: Import no longer needed after commenting out verification
-// import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const organizationId =
     searchParams.get("organizationId") || req.headers.get("x-organization-id");
   const status = searchParams.get("status");
-  const userId = searchParams.get("user_id");
+  const filterUserId = searchParams.get("user_id");
   const weekStart = searchParams.get("week_start");
   const weekEnd = searchParams.get("week_end");
   const page = parseInt(searchParams.get("page") || "1");
@@ -25,39 +25,27 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // COMMENTED OUT: Verification that was causing 403 errors
-  // const validation = await validateOrganizationAccessWithId(organizationId, {
-  //   resource: "timesheets",
-  //   action: "read",
-  // });
-
-  // if (!validation.success) {
-  //   return NextResponse.json(
-  //     {
-  //       error: validation.error,
-  //     },
-  //     { status: validation.status }
-  //   );
-  // }
-
-  const supabase = await createClient();
-
-  // Get user ID from session directly (bypassing verification)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  // Get user ID from session
+  const session = await getServerSession(authConfig);
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get organization membership directly
-  const { data: membership } = await supabase
-    .from("organization_members")
-    .select("id, user_id, organization_id, role_id, roles!inner(name)")
-    .eq("user_id", user.id)
-    .eq("organization_id", organizationId)
-    .eq("status", "active")
-    .maybeSingle();
+  // Get organization membership
+  const membership = await prisma.organizationMember.findFirst({
+    where: {
+      userId: session.user.id,
+      organizationId,
+      status: "active",
+    },
+    include: {
+      role: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  });
 
   if (!membership) {
     return NextResponse.json(
@@ -66,130 +54,164 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Create a userContext object for compatibility
-  const userContext = {
-    userId: user.id,
-    membership: {
-      id: membership.id,
-      role: {
-        name: (membership as any).roles?.name || "member",
-      },
-    },
-  };
+  const userId = session.user.id;
+  const roleName = membership.role?.name || "member";
 
   try {
-    let query = supabase
-      .from("timesheet_submissions")
-      .select(
-        `
-        *,
-        timesheet_entries (
-          *,
-          projects (
-            id,
-            name,
-            code
-          )
-        ),
-        users!timesheet_submissions_user_id_fkey (
-          id,
-          full_name,
-          email,
-          avatar_url
-        ),
-        project_member:project_members!project_member_id (
-          id,
-          organization_members!inner (
-            id,
-            user_id,
-            users!organization_members_user_id_fkey (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
-          )
-        )
-      `,
-        { count: "exact" }
-      )
-      .eq("organization_id", organizationId)
-      .order("week_start_date", { ascending: false })
-      .order("created_at", { ascending: false });
+    // Build where clause
+    const where: any = {
+      organizationId,
+    };
 
     if (status) {
-      query = query.eq("status", status);
+      where.status = status;
     }
 
-    if (userId) {
-      query = query.eq("user_id", userId);
+    if (filterUserId) {
+      where.userId = filterUserId;
     }
 
     if (weekStart) {
-      query = query.gte("week_start_date", weekStart);
+      where.weekStartDate = {
+        gte: new Date(weekStart),
+      };
     }
 
     if (weekEnd) {
-      query = query.lte("week_end_date", weekEnd);
-    }
-
-    if (search) {
-      query = query.or(
-        `users.full_name.ilike.%${search}%,users.email.ilike.%${search}%`
-      );
+      where.weekEndDate = {
+        lte: new Date(weekEnd),
+      };
     }
 
     // For non-admin users, only show their own submissions
-    if (
-      userContext.membership.role.name !== "admin" &&
-      userContext.membership.role.name !== "manager"
-    ) {
-      query = query.eq("user_id", userContext.userId);
+    if (roleName !== "admin" && roleName !== "manager") {
+      where.userId = userId;
     }
 
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-    query = query.range(from, to);
-
-    const { data: submissions, error, count } = await query;
-
-    if (error) {
-      console.error("Error fetching submissions:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // Handle search - filter by user name or email
+    if (search) {
+      where.user = {
+        OR: [
+          { fullName: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+        ],
+      };
     }
+
+    // Get submissions with pagination
+    const [submissions, total] = await Promise.all([
+      prisma.timesheetSubmission.findMany({
+        where,
+        include: {
+          entries: {
+            include: {
+              project: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                },
+              },
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              avatarUrl: true,
+            },
+          },
+          projectMember: {
+            include: {
+              organizationMember: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      fullName: true,
+                      email: true,
+                      avatarUrl: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ weekStartDate: "desc" }, { createdAt: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.timesheetSubmission.count({ where }),
+    ]);
 
     // Transform the data
-    const transformedSubmissions =
-      submissions?.map((submission) => ({
-        id: submission.id,
-        userId: submission.user_id,
-        userName: submission.users?.full_name || "Unknown User",
-        userEmail: submission.users?.email || "No Email",
-        userAvatar: submission.users?.avatar_url,
-        weekStart: submission.week_start_date,
-        weekEnd: submission.week_end_date,
-        totalHours: parseFloat(submission.total_hours) || 0,
-        status: submission.status,
-        data: submission.timesheet_entries || [],
-        submittedAt: submission.submitted_at,
-        approvedAt: submission.approved_at,
-        approvedBy: submission.approved_by,
-        rejectionReason: submission.rejection_reason,
-        // Keep project_member data if available
-        projectMember: submission.project_member,
-        // Add created/updated timestamps
-        createdAt: submission.created_at,
-        updatedAt: submission.updated_at,
-      })) || [];
+    const transformedSubmissions = submissions.map((submission) => ({
+      id: submission.id,
+      userId: submission.userId,
+      userName: submission.user?.fullName || "Unknown User",
+      userEmail: submission.user?.email || "No Email",
+      userAvatar: submission.user?.avatarUrl,
+      weekStart: submission.weekStartDate,
+      weekEnd: submission.weekEndDate,
+      totalHours: Number(submission.totalHours) || 0,
+      status: submission.status,
+      data: submission.entries.map((entry: any) => ({
+        id: entry.id,
+        timesheet_submission_id: entry.timesheetSubmissionId,
+        project_id: entry.projectId,
+        task_description: entry.taskDescription,
+        monday_hours: entry.mondayHours,
+        tuesday_hours: entry.tuesdayHours,
+        wednesday_hours: entry.wednesdayHours,
+        thursday_hours: entry.thursdayHours,
+        friday_hours: entry.fridayHours,
+        created_at: entry.createdAt,
+        updated_at: entry.updatedAt,
+        projects: entry.project
+          ? {
+              id: entry.project.id,
+              name: entry.project.name,
+              code: entry.project.code,
+            }
+          : null,
+      })),
+      submittedAt: submission.submittedAt,
+      approvedAt: submission.approvedAt,
+      approvedBy: submission.approvedBy,
+      rejectionReason: submission.rejectionReason,
+      projectMember: submission.projectMember
+        ? {
+            id: submission.projectMember.id,
+            organization_members: {
+              id: submission.projectMember.organizationMember.id,
+              user_id: submission.projectMember.organizationMember.userId,
+              users: {
+                id: submission.projectMember.organizationMember.user.id,
+                full_name:
+                  submission.projectMember.organizationMember.user.fullName,
+                email: submission.projectMember.organizationMember.user.email,
+                avatar_url:
+                  submission.projectMember.organizationMember.user.avatarUrl,
+              },
+            },
+          }
+        : null,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt,
+    }));
+
+    const totalPages = Math.ceil(total / limit);
 
     return NextResponse.json({
       submissions: transformedSubmissions,
       pagination: {
         page,
         limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
-        hasNext: page < Math.ceil((count || 0) / limit),
+        total,
+        totalPages,
+        hasNext: page < totalPages,
         hasPrev: page > 1,
       },
       success: true,

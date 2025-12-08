@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(
@@ -29,48 +29,104 @@ export async function GET(
   }
 
   try {
-    const supabase = await createClient();
+    const allocation = await prisma.projectAssignment.findFirst({
+      where: {
+        id: allocationId,
+        resourceAllocation: {
+          organizationId,
+        },
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
+        resourceAllocation: {
+          include: {
+            organizationMember: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    fullName: true,
+                    email: true,
+                    avatarUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    const { data: allocation, error } = await supabase
-      .from("project_assignments")
-      .select(
-        `
-        *,
-        projects (
-          id,
-          name,
-          code,
-          status
-        ),
-        resource_allocations (
-          id,
-          organization_id,
-          organization_member_id,
-          organization_members:organization_member_id (
-            id,
-            user_id,
-            users!user_id (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
-          )
-        )
-      `
-      )
-      .eq("id", allocationId)
-      .eq("resource_allocations.organization_id", organizationId)
-      .single();
-
-    if (error || !allocation) {
+    if (!allocation) {
       return NextResponse.json(
         { error: "Resource allocation not found" },
         { status: 404 }
       );
     }
 
-    const response = { allocation };
+    // Transform to match expected format
+    const transformedAllocation = {
+      id: allocation.id,
+      project_id: allocation.projectId,
+      hours_per_week: Number(allocation.hoursPerWeek),
+      start_date: allocation.startDate,
+      end_date: allocation.endDate,
+      notes: allocation.notes,
+      default_hours_per_day: Number(allocation.defaultHoursPerDay),
+      allow_weekends: allocation.allowWeekends,
+      is_active: allocation.isActive,
+      resource_allocation_id: allocation.resourceAllocationId,
+      created_at: allocation.createdAt,
+      updated_at: allocation.updatedAt,
+      projects: allocation.project
+        ? {
+            id: allocation.project.id,
+            name: allocation.project.name,
+            code: allocation.project.code,
+            status: allocation.project.status,
+          }
+        : null,
+      resource_allocations: allocation.resourceAllocation
+        ? {
+            id: allocation.resourceAllocation.id,
+            organization_id: allocation.resourceAllocation.organizationId,
+            organization_member_id:
+              allocation.resourceAllocation.organizationMemberId,
+            organization_members: allocation.resourceAllocation
+              .organizationMember
+              ? {
+                  id: allocation.resourceAllocation.organizationMember.id,
+                  user_id:
+                    allocation.resourceAllocation.organizationMember.userId,
+                  users: allocation.resourceAllocation.organizationMember.user
+                    ? {
+                        id: allocation.resourceAllocation.organizationMember
+                          .user.id,
+                        full_name:
+                          allocation.resourceAllocation.organizationMember.user
+                            .fullName,
+                        email:
+                          allocation.resourceAllocation.organizationMember.user
+                            .email,
+                        avatar_url:
+                          allocation.resourceAllocation.organizationMember.user
+                            .avatarUrl,
+                      }
+                    : null,
+                }
+              : null,
+          }
+        : null,
+    };
+
+    const response = { allocation: transformedAllocation };
 
     return NextResponse.json(response);
   } catch (error) {
@@ -95,82 +151,141 @@ export async function PUT(
     );
   }
 
-  const supabase = await createClient();
-
   try {
     const body = await req.json();
     const { hours_per_week, start_date, end_date, notes, is_active } = body;
 
-    // Verify assignment belongs to same organization via join
-    const { data: currentAllocation, error: currentError } = await supabase
-      .from("project_assignments")
-      .select(`id, hours_per_week, resource_allocations ( organization_id )`)
-      .eq("id", allocationId)
-      .single();
+    // Verify assignment belongs to same organization
+    const currentAllocation = await prisma.projectAssignment.findFirst({
+      where: {
+        id: allocationId,
+        resourceAllocation: {
+          organizationId,
+        },
+      },
+      include: {
+        resourceAllocation: {
+          select: {
+            organizationId: true,
+          },
+        },
+      },
+    });
 
-    if (currentError || !currentAllocation) {
+    if (!currentAllocation) {
       return NextResponse.json(
         { error: "Resource allocation not found" },
         { status: 404 }
       );
     }
-    if (
-      (currentAllocation as any)?.resource_allocations?.organization_id !==
-      organizationId
-    ) {
-      return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
-      );
-    }
 
     // Prepare update data
-    const updateData: any = { updated_at: new Date().toISOString() };
+    const updateData: any = {};
     if (hours_per_week !== undefined)
-      updateData.hours_per_week = Number(hours_per_week);
+      updateData.hoursPerWeek = Number(hours_per_week);
     if (start_date !== undefined) {
-      updateData.start_date = start_date;
+      updateData.startDate = new Date(start_date);
     }
     if (end_date !== undefined) {
-      updateData.end_date = end_date;
+      updateData.endDate = end_date ? new Date(end_date) : null;
     }
     if (notes !== undefined) {
       updateData.notes = notes;
     }
     if (is_active !== undefined) {
-      updateData.is_active = is_active;
+      updateData.isActive = is_active;
     }
+    updateData.updatedAt = new Date();
 
     // Update the assignment
-    const { data: allocation, error } = await supabase
-      .from("project_assignments")
-      .update(updateData)
-      .eq("id", allocationId)
-      .select(
-        `
-        *,
-        projects ( id, name, code, status ),
-        resource_allocations (
-          id,
-          organization_member_id,
-          organization_members:organization_member_id (
-            id,
-            users!user_id ( id, full_name, email, avatar_url )
-          )
-        )
-      `
-      )
-      .single();
+    const allocation = await prisma.projectAssignment.update({
+      where: { id: allocationId },
+      data: updateData,
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
+        resourceAllocation: {
+          include: {
+            organizationMember: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    fullName: true,
+                    email: true,
+                    avatarUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    // Transform to match expected format
+    const transformedAllocation = {
+      id: allocation.id,
+      project_id: allocation.projectId,
+      hours_per_week: Number(allocation.hoursPerWeek),
+      start_date: allocation.startDate,
+      end_date: allocation.endDate,
+      notes: allocation.notes,
+      default_hours_per_day: Number(allocation.defaultHoursPerDay),
+      allow_weekends: allocation.allowWeekends,
+      is_active: allocation.isActive,
+      resource_allocation_id: allocation.resourceAllocationId,
+      created_at: allocation.createdAt,
+      updated_at: allocation.updatedAt,
+      projects: allocation.project
+        ? {
+            id: allocation.project.id,
+            name: allocation.project.name,
+            code: allocation.project.code,
+            status: allocation.project.status,
+          }
+        : null,
+      resource_allocations: allocation.resourceAllocation
+        ? {
+            id: allocation.resourceAllocation.id,
+            organization_member_id:
+              allocation.resourceAllocation.organizationMemberId,
+            organization_members: allocation.resourceAllocation
+              .organizationMember
+              ? {
+                  id: allocation.resourceAllocation.organizationMember.id,
+                  users: allocation.resourceAllocation.organizationMember.user
+                    ? {
+                        id: allocation.resourceAllocation.organizationMember
+                          .user.id,
+                        full_name:
+                          allocation.resourceAllocation.organizationMember.user
+                            .fullName,
+                        email:
+                          allocation.resourceAllocation.organizationMember.user
+                            .email,
+                        avatar_url:
+                          allocation.resourceAllocation.organizationMember.user
+                            .avatarUrl,
+                      }
+                    : null,
+                }
+              : null,
+          }
+        : null,
+    };
 
-    return NextResponse.json({ allocation });
-  } catch (error) {
+    return NextResponse.json({ allocation: transformedAllocation });
+  } catch (error: any) {
     console.error("Error updating resource allocation:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: error.message || "Internal server error" },
       { status: 500 }
     );
   }
@@ -197,89 +312,65 @@ export async function DELETE(
     );
   }
 
-  const supabase = await createClient();
-
   try {
     // Verify assignment exists and belongs to user's organization
-    const { data: allocation, error: verifyError } = await supabase
-      .from("project_assignments")
-      .select(
-        `
-        id, 
-        hours_per_week, 
-        is_active, 
-        project_id,
-        resource_allocations ( 
-          id,
-          organization_id,
-          organization_member_id 
-        )
-      `
-      )
-      .eq("id", allocationId)
-      .single();
+    const allocation = await prisma.projectAssignment.findFirst({
+      where: {
+        id: allocationId,
+        resourceAllocation: {
+          organizationId,
+        },
+      },
+      include: {
+        resourceAllocation: {
+          select: {
+            id: true,
+            organizationId: true,
+            organizationMemberId: true,
+          },
+        },
+      },
+    });
 
-    console.log("Found allocation:", allocation, "error:", verifyError);
+    console.log("Found allocation:", allocation);
 
-    if (verifyError || !allocation) {
-      console.log("Allocation not found or error:", verifyError);
+    if (!allocation) {
+      console.log("Allocation not found");
       return NextResponse.json(
         { error: "Project assignment not found" },
-        { status: 404 }
-      );
-    }
-    if (
-      (allocation as any)?.resource_allocations?.organization_id !==
-      organizationId
-    ) {
-      console.log(
-        "Organization mismatch:",
-        (allocation as any)?.resource_allocations?.organization_id,
-        "vs",
-        organizationId
-      );
-      return NextResponse.json(
-        { error: "Organization not found" },
         { status: 404 }
       );
     }
 
     console.log("Performing hard delete for allocation:", allocationId);
 
-    // Check if there are any related records that might prevent deletion
-    console.log("Allocation details:", allocation);
+    try {
+      // Hard delete the project assignment record
+      await prisma.projectAssignment.delete({
+        where: { id: allocationId },
+      });
 
-    // Hard delete the project assignment record
-    const { error } = await supabase
-      .from("project_assignments")
-      .delete()
-      .eq("id", allocationId);
-
-    console.log("Hard delete result:", { error });
-
-    if (error) {
-      console.error("Delete failed:", error);
+      console.log("Hard delete successful for allocation:", allocationId);
+      return NextResponse.json({
+        message: "Resource allocation deleted successfully",
+      });
+    } catch (deleteError: any) {
+      console.error("Delete failed:", deleteError);
 
       // If deletion fails due to foreign key constraints, try soft delete as fallback
       if (
-        error.message.includes("foreign key") ||
-        error.message.includes("constraint")
+        deleteError.message?.includes("foreign key") ||
+        deleteError.message?.includes("constraint")
       ) {
         console.log("Trying soft delete as fallback...");
 
-        const { error: softDeleteError } = await supabase
-          .from("project_assignments")
-          .update({ is_active: false, updated_at: new Date().toISOString() })
-          .eq("id", allocationId);
-
-        if (softDeleteError) {
-          return NextResponse.json(
-            {
-              error: `Delete failed: ${error.message}. Soft delete also failed: ${softDeleteError.message}`,
-            },
-            { status: 500 }
-          );
-        }
+        await prisma.projectAssignment.update({
+          where: { id: allocationId },
+          data: {
+            isActive: false,
+            updatedAt: new Date(),
+          },
+        });
 
         console.log("Soft delete successful as fallback");
         return NextResponse.json({
@@ -287,17 +378,12 @@ export async function DELETE(
         });
       }
 
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      throw deleteError;
     }
-
-    console.log("Hard delete successful for allocation:", allocationId);
-    return NextResponse.json({
-      message: "Resource allocation deleted successfully",
-    });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error deleting resource allocation:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: error.message || "Internal server error" },
       { status: 500 }
     );
   }

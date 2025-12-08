@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { prisma } from "@/lib/prisma";
-import { getWeek, getMonth, getYear } from "date-fns";
+import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 // PUT /api/capacity/weekly-plans
 // Body: { organizationId, resource_allocation_id, project_id, week_start_date, default_hours_per_day?, allow_weekends?, is_linked? }
@@ -60,14 +58,7 @@ export async function PUT(req: NextRequest) {
 
     const updateData: any = {};
 
-    if (hoursSunday !== undefined) updateData.hoursSunday = hoursSunday;
-    if (hoursMonday !== undefined) updateData.hoursMonday = hoursMonday;
-    if (hoursTuesday !== undefined) updateData.hoursTuesday = hoursTuesday;
-    if (hoursWednesday !== undefined)
-      updateData.hoursWednesday = hoursWednesday;
-    if (hoursThursday !== undefined) updateData.hoursThursday = hoursThursday;
-    if (hoursFriday !== undefined) updateData.hoursFriday = hoursFriday;
-    if (hoursSaturday !== undefined) updateData.hoursSaturday = hoursSaturday;
+    // Update isLinked if provided
     if (isLinked !== undefined) updateData.isLinked = isLinked;
 
     // Update the weekly plan
@@ -76,8 +67,64 @@ export async function PUT(req: NextRequest) {
       data: updateData,
     });
 
+    // Handle individual day hours - store them in ProjectDailyOverride records
+    // Day of week: 0 = Sunday, 1 = Monday, 2 = Tuesday, 3 = Wednesday, 4 = Thursday, 5 = Friday, 6 = Saturday
+    const dayHoursMap = [
+      { day: 0, hours: hoursSunday },
+      { day: 1, hours: hoursMonday },
+      { day: 2, hours: hoursTuesday },
+      { day: 3, hours: hoursWednesday },
+      { day: 4, hours: hoursThursday },
+      { day: 5, hours: hoursFriday },
+      { day: 6, hours: hoursSaturday },
+    ];
+
+    // Filter out undefined values and process each day
+    const daysToUpdate = dayHoursMap.filter((d) => d.hours !== undefined);
+
+    console.log("Updating daily overrides:", {
+      weeklyPlanId,
+      daysToUpdate: daysToUpdate.map((d) => ({
+        day: d.day,
+        hours: d.hours,
+      })),
+    });
+
+    // Upsert each day override (create or update)
+    for (const { day, hours } of daysToUpdate) {
+      await prisma.projectDailyOverride.upsert({
+        where: {
+          weeklyPlanId_dayOfWeek: {
+            weeklyPlanId: weeklyPlanId,
+            dayOfWeek: day,
+          },
+        },
+        update: {
+          actualHours: hours,
+        },
+        create: {
+          organizationId: existingPlan.organizationId,
+          weeklyPlanId: weeklyPlanId,
+          dayOfWeek: day,
+          actualHours: hours,
+        },
+      });
+    }
+
+    // Fetch the updated plan with daily overrides for the response
+    const planWithOverrides = await prisma.projectWeeklyPlan.findUnique({
+      where: { id: weeklyPlanId },
+      include: {
+        dailyOverrides: {
+          orderBy: {
+            dayOfWeek: "asc",
+          },
+        },
+      },
+    });
+
     return NextResponse.json({
-      weeklyPlan: updatedPlan,
+      weeklyPlan: planWithOverrides,
       message: "Weekly plan updated successfully",
     });
   } catch (e) {
@@ -136,21 +183,13 @@ export async function POST(req: NextRequest) {
     }
 
     const weekStart = new Date(weekStartDate);
-    const year = getYear(weekStart);
-    const month = getMonth(weekStart) + 1;
-    const weekNumber = getWeek(weekStart);
-
-    const dailyHours = allowWeekends ? defaultHoursPerDay : 0;
-    const weekdayHours = defaultHoursPerDay;
 
     // Check if weekly plan already exists
-    const existing = await prisma.projectWeeklyPlan.findUnique({
+    const existing = await prisma.projectWeeklyPlan.findFirst({
       where: {
-        resourceAllocationId_projectId_weekStartDate: {
-          resourceAllocationId,
-          projectId,
-          weekStartDate: weekStart,
-        },
+        resourceAllocationId,
+        projectId,
+        weekStartDate: weekStart,
       },
     });
 
@@ -169,33 +208,45 @@ export async function POST(req: NextRequest) {
         projectId,
         projectAssignmentId,
         weekStartDate: weekStart,
-        year,
-        month,
-        weekNumber,
-        defaultHoursPerDay,
-        allowWeekends,
+        defaultHoursPerDay: defaultHoursPerDay || 8,
+        allowWeekends: allowWeekends || false,
         isLinked: true,
-        hoursSunday:
-          hoursSunday !== undefined
-            ? hoursSunday
-            : allowWeekends
-              ? dailyHours
-              : 0,
-        hoursMonday: hoursMonday !== undefined ? hoursMonday : weekdayHours,
-        hoursTuesday: hoursTuesday !== undefined ? hoursTuesday : weekdayHours,
-        hoursWednesday:
-          hoursWednesday !== undefined ? hoursWednesday : weekdayHours,
-        hoursThursday:
-          hoursThursday !== undefined ? hoursThursday : weekdayHours,
-        hoursFriday: hoursFriday !== undefined ? hoursFriday : weekdayHours,
-        hoursSaturday:
-          hoursSaturday !== undefined
-            ? hoursSaturday
-            : allowWeekends
-              ? dailyHours
-              : 0,
       },
     });
+
+    // If individual day hours are provided, create ProjectDailyOverride records
+    // Day of week: 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    if (
+      hoursSunday !== undefined ||
+      hoursMonday !== undefined ||
+      hoursTuesday !== undefined ||
+      hoursWednesday !== undefined ||
+      hoursThursday !== undefined ||
+      hoursFriday !== undefined ||
+      hoursSaturday !== undefined
+    ) {
+      const dayOverrides = [
+        { day: 0, hours: hoursSunday },
+        { day: 1, hours: hoursMonday },
+        { day: 2, hours: hoursTuesday },
+        { day: 3, hours: hoursWednesday },
+        { day: 4, hours: hoursThursday },
+        { day: 5, hours: hoursFriday },
+        { day: 6, hours: hoursSaturday },
+      ].filter((d) => d.hours !== undefined);
+
+      if (dayOverrides.length > 0) {
+        await prisma.projectDailyOverride.createMany({
+          data: dayOverrides.map(({ day, hours }) => ({
+            organizationId,
+            weeklyPlanId: weeklyPlan.id,
+            dayOfWeek: day,
+            actualHours: hours,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
 
     return NextResponse.json({
       weeklyPlan,
@@ -301,16 +352,30 @@ export async function GET(req: NextRequest) {
       organizationId,
     };
 
+    // Filter by weekStartDate instead of month/year since those fields don't exist
     if (month && year) {
       const monthNum = parseInt(month);
-      const dbMonth = monthNum + 1;
+      const yearNum = parseInt(year);
 
-      where.month = dbMonth;
-      where.year = parseInt(year);
+      // Create date range for the month
+      const startOfMonth = new Date(yearNum, monthNum - 1, 1);
+      const endOfMonth = new Date(yearNum, monthNum, 0, 23, 59, 59, 999);
+
+      where.weekStartDate = {
+        gte: startOfMonth,
+        lte: endOfMonth,
+      };
     }
 
     const weeklyPlans = await prisma.projectWeeklyPlan.findMany({
       where,
+      include: {
+        dailyOverrides: {
+          orderBy: {
+            dayOfWeek: "asc",
+          },
+        },
+      },
       orderBy: {
         weekStartDate: "asc",
       },

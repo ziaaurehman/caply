@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(
   req: NextRequest,
@@ -9,53 +9,90 @@ export async function GET(
   try {
     const { id: boardId } = await params;
     const { searchParams } = new URL(req.url);
-    const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
+    const organizationId =
+      searchParams.get("organizationId") ||
+      req.headers.get("x-organization-id");
 
     if (!organizationId) {
-      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
     }
 
     // Validate organization access and permissions
-    const validation = await validateOrganizationAccessWithId(
-      organizationId,
-      { resource: 'projects', action: 'read' }
-    );
+    const validation = await validateOrganizationAccessWithId(organizationId, {
+      resource: "projects",
+      action: "read",
+    });
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status });
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
-
-    const supabase = await createClient();
 
     // Check if user has access to the board
-    const { data: board, error } = await supabase
-      .from('boards')
-      .select(`
-        *,
-        projects!inner (
-          id,
-          organization_id,
-          kanban_enabled
-        )
-      `)
-      .eq('id', boardId)
-      .eq('projects.organization_id', organizationId)
-      .single();
+    const board = await prisma.board.findFirst({
+      where: {
+        id: boardId,
+        project: {
+          organizationId,
+        },
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            organizationId: true,
+            kanbanEnabled: true,
+          },
+        },
+      },
+    });
 
-    if (error || !board) {
-      return NextResponse.json({ error: 'Board not found' }, { status: 404 });
+    if (!board) {
+      return NextResponse.json({ error: "Board not found" }, { status: 404 });
     }
 
-    if (!board.projects.kanban_enabled) {
-      return NextResponse.json({ error: 'Kanban is not enabled for this project' }, { status: 403 });
+    if (!board.project.kanbanEnabled) {
+      return NextResponse.json(
+        { error: "Kanban is not enabled for this project" },
+        { status: 403 }
+      );
     }
 
-    return NextResponse.json({ board });
+    // Transform to match expected format
+    const transformedBoard = {
+      id: board.id,
+      project_id: board.projectId,
+      name: board.name,
+      description: board.description,
+      background_color: board.backgroundColor,
+      background_image: board.backgroundImage,
+      is_closed: board.isClosed,
+      visibility: board.visibility,
+      position: board.position,
+      created_by: board.createdBy,
+      created_at: board.createdAt,
+      updated_at: board.updatedAt,
+      projects: {
+        id: board.project.id,
+        organization_id: board.project.organizationId,
+        kanban_enabled: board.project.kanbanEnabled,
+      },
+    };
+
+    return NextResponse.json({ board: transformedBoard });
   } catch (error) {
-    console.error('Error fetching board:', error);
-    return NextResponse.json({ error: 'Failed to fetch board' }, { status: 500 });
+    console.error("Error fetching board:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch board" },
+      { status: 500 }
+    );
   }
 }
 
@@ -66,82 +103,121 @@ export async function PATCH(
   try {
     const { id: boardId } = await params;
     const body = await req.json();
-    const { name, description, background_color, background_image, visibility, is_closed } = body;
-    const organizationId = body.organizationId || body.organization_id || req.headers.get('x-organization-id');
+    const {
+      name,
+      description,
+      background_color,
+      background_image,
+      visibility,
+      is_closed,
+    } = body;
+    const organizationId =
+      body.organizationId ||
+      body.organization_id ||
+      req.headers.get("x-organization-id");
 
     if (!organizationId) {
-      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
     }
 
     // Validate organization access and permissions
-    const validation = await validateOrganizationAccessWithId(
-      organizationId,
-      { resource: 'projects', action: 'update' }
-    );
+    const validation = await validateOrganizationAccessWithId(organizationId, {
+      resource: "projects",
+      action: "update",
+    });
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status });
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
 
     // Check if user has access to the board
-    const { data: existingBoard, error: boardError } = await supabase
-      .from('boards')
-      .select(`
-        *,
-        projects!inner (
-          id,
-          organization_id,
-          kanban_enabled
-        )
-      `)
-      .eq('id', boardId)
-      .eq('projects.organization_id', organizationId)
-      .single();
+    const existingBoard = await prisma.board.findFirst({
+      where: {
+        id: boardId,
+        project: {
+          organizationId,
+        },
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            organizationId: true,
+            kanbanEnabled: true,
+          },
+        },
+      },
+    });
 
-    if (boardError || !existingBoard) {
-      return NextResponse.json({ error: 'Board not found' }, { status: 404 });
+    if (!existingBoard) {
+      return NextResponse.json({ error: "Board not found" }, { status: 404 });
     }
 
-    // Update board
-    const { data: board, error } = await supabase
-      .from('boards')
-      .update({
-        name,
-        description,
-        background_color,
-        background_image,
-        visibility,
-        is_closed
-      })
-      .eq('id', boardId)
-      .select()
-      .single();
+    // Update board and create activity log in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update board
+      const board = await tx.board.update({
+        where: { id: boardId },
+        data: {
+          name: name !== undefined ? name : undefined,
+          description: description !== undefined ? description : undefined,
+          backgroundColor:
+            background_color !== undefined ? background_color : undefined,
+          backgroundImage:
+            background_image !== undefined ? background_image : undefined,
+          visibility: visibility !== undefined ? visibility : undefined,
+          isClosed: is_closed !== undefined ? is_closed : undefined,
+        },
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: userContext!.userId,
+          boardId: boardId,
+          actionType: "update",
+          entityType: "board",
+          entityId: boardId,
+          details: { changes: body },
+        },
+      });
 
-    // Create activity log
-    await supabase
-      .from('activities')
-      .insert([{
-        user_id: userContext!.userId,
-        board_id: boardId,
-        action_type: 'update',
-        entity_type: 'board',
-        entity_id: boardId,
-        details: { changes: body }
-      }]);
+      return board;
+    });
 
-    return NextResponse.json({ board });
+    // Transform to match expected format
+    const transformedBoard = {
+      id: result.id,
+      project_id: result.projectId,
+      name: result.name,
+      description: result.description,
+      background_color: result.backgroundColor,
+      background_image: result.backgroundImage,
+      is_closed: result.isClosed,
+      visibility: result.visibility,
+      position: result.position,
+      created_by: result.createdBy,
+      created_at: result.createdAt,
+      updated_at: result.updatedAt,
+    };
+
+    return NextResponse.json({ board: transformedBoard });
   } catch (error) {
-    console.error('Error updating board:', error);
-    return NextResponse.json({ error: 'Failed to update board' }, { status: 500 });
+    console.error("Error updating board:", error);
+    return NextResponse.json(
+      { error: "Failed to update board" },
+      { status: 500 }
+    );
   }
 }
 
@@ -152,70 +228,77 @@ export async function DELETE(
   try {
     const { id: boardId } = await params;
     const { searchParams } = new URL(req.url);
-    const organizationId = searchParams.get('organizationId') || req.headers.get('x-organization-id');
+    const organizationId =
+      searchParams.get("organizationId") ||
+      req.headers.get("x-organization-id");
 
     if (!organizationId) {
-      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
     }
 
     // Validate organization access and permissions
-    const validation = await validateOrganizationAccessWithId(
-      organizationId,
-      { resource: 'projects', action: 'delete' }
-    );
+    const validation = await validateOrganizationAccessWithId(organizationId, {
+      resource: "projects",
+      action: "delete",
+    });
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status });
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
 
     // Check if user has access to the board
-    const { data: existingBoard, error: boardError } = await supabase
-      .from('boards')
-      .select(`
-        *,
-        projects!inner (
-          id,
-          organization_id,
-          kanban_enabled
-        )
-      `)
-      .eq('id', boardId)
-      .eq('projects.organization_id', organizationId)
-      .single();
+    const existingBoard = await prisma.board.findFirst({
+      where: {
+        id: boardId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    if (boardError || !existingBoard) {
-      return NextResponse.json({ error: 'Board not found' }, { status: 404 });
+    if (!existingBoard) {
+      return NextResponse.json({ error: "Board not found" }, { status: 404 });
     }
 
-    // Delete board (CASCADE will handle related data)
-    const { error } = await supabase
-      .from('boards')
-      .delete()
-      .eq('id', boardId);
+    // Delete board and create activity log in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Delete board (CASCADE will handle related data)
+      await tx.board.delete({
+        where: { id: boardId },
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Create activity log
-    await supabase
-      .from('activities')
-      .insert([{
-        user_id: userContext!.userId,
-        action_type: 'delete',
-        entity_type: 'board',
-        entity_id: boardId,
-        details: { board_name: existingBoard.name }
-      }]);
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: userContext!.userId,
+          actionType: "delete",
+          entityType: "board",
+          entityId: boardId,
+          details: { board_name: existingBoard.name },
+        },
+      });
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error deleting board:', error);
-    return NextResponse.json({ error: 'Failed to delete board' }, { status: 500 });
+    console.error("Error deleting board:", error);
+    return NextResponse.json(
+      { error: "Failed to delete board" },
+      { status: 500 }
+    );
   }
 }

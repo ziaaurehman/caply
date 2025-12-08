@@ -1,5 +1,7 @@
-import CapacityPlanningPage from "@/components/pages/capacity/CapacityPlanningPage"
+import CapacityPlanningPage from "@/components/pages/capacity/CapacityPlanningPage";
 
 export default function Capacity() {
-  return <CapacityPlanningPage />
+  // NOTE: Fetch data based on the url params ot queires
+
+  return <CapacityPlanningPage />;
 }

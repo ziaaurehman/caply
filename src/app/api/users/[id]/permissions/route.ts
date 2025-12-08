@@ -1,38 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient();
-
-    // Check if user is authenticated
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-
-    if (sessionError || !session) {
+    const session = await getServerSession(authConfig);
+    if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Unauthorized - Please login" },
         { status: 401 }
       );
     }
 
-    const userId = params.id;
+    const { id: userId } = await params;
     const currentUserId = session.user.id;
 
     // Check if user is requesting their own data or has permission to view other users
     if (userId !== currentUserId) {
       // Check if current user has permission to view other users
-      const { data: hasPermission } = await supabase.rpc(
-        "user_has_permission",
-        {
-          user_id: currentUserId,
-          permission_name: "users.read",
-        }
+      // Get current user's role and check for users.read permission
+      const currentUserMember = await prisma.organizationMember.findFirst({
+        where: {
+          userId: currentUserId,
+          status: "active",
+        },
+        include: {
+          role: {
+            include: {
+              rolePermissions: {
+                include: {
+                  permission: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const hasPermission = currentUserMember?.role.rolePermissions.some(
+        (rp) => rp.permission.name === "users.read"
       );
 
       if (!hasPermission) {
@@ -44,27 +54,25 @@ export async function GET(
     }
 
     // Get user's role and permissions
-    const { data: userRoleData, error: roleError } = await supabase
-      .from("organization_members")
-      .select(
-        `
-        role_id,
-        organization_id,
-        status,
-        roles (
-          id,
-          name,
-          display_name,
-          description,
-          is_system_role
-        )
-      `
-      )
-      .eq("user_id", userId)
-      .eq("status", "active")
-      .single();
+    const userRoleData = await prisma.organizationMember.findFirst({
+      where: {
+        userId,
+        status: "active",
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+            isSystemRole: true,
+          },
+        },
+      },
+    });
 
-    if (roleError || !userRoleData) {
+    if (!userRoleData) {
       return NextResponse.json(
         { error: "User role not found" },
         { status: 404 }
@@ -72,52 +80,47 @@ export async function GET(
     }
 
     // Get all permissions for the user's role
-    const { data: permissions, error: permissionsError } = await supabase
-      .from("role_permissions")
-      .select(
-        `
-        permissions (
-          id,
-          name,
-          display_name,
-          description,
-          module,
-          action
-        )
-      `
-      )
-      .eq("role_id", userRoleData.role_id);
-
-    if (permissionsError) {
-      return NextResponse.json(
-        { error: "Failed to fetch permissions" },
-        { status: 500 }
-      );
-    }
+    const rolePermissions = await prisma.rolePermission.findMany({
+      where: {
+        roleId: userRoleData.roleId,
+      },
+      include: {
+        permission: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+            module: true,
+            action: true,
+          },
+        },
+      },
+    });
 
     // Check if user is super admin
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("is_super_admin")
-      .eq("id", userId)
-      .single();
+    const userData = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isSuperAdmin: true },
+    });
 
-    if (userError) {
+    if (!userData) {
       return NextResponse.json(
         { error: "Failed to fetch user data" },
         { status: 500 }
       );
     }
 
-    const userPermissions =
-      permissions?.map((p: any) => p.permissions).filter(Boolean) || [];
+    const userPermissions = rolePermissions
+      .map((rp) => rp.permission)
+      .filter(Boolean);
 
     return NextResponse.json({
       userId,
-      organizationId: userRoleData.organization_id,
-      role: userRoleData.roles,
+      organizationId: userRoleData.organizationId,
+      role: userRoleData.role,
       permissions: userPermissions,
-      isSuperAdmin: userData.is_super_admin || false,
+      isSuperAdmin: userData.isSuperAdmin || false,
       status: userRoleData.status,
     });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { hashPassword } from "@/lib/password";
 import {
   createOrganizationWithRoles,
   addUserAsAdmin,
@@ -42,81 +43,59 @@ export async function POST(
       );
     }
 
-    const supabase = await createClient();
-
-    // 1. Create user with Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name,
-        },
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/login`,
-      },
-    });
-
-    if (authError) {
-      // Check for common Supabase auth errors and provide user-friendly messages
-      if (authError.message.includes("User already registered")) {
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              "A user with this email address already exists. Please try logging in instead.",
-          },
-          { status: 400 }
-        );
-      }
-
-      if (authError.message.includes("Invalid email")) {
-        return NextResponse.json(
-          { success: false, error: "Please enter a valid email address." },
-          { status: 400 }
-        );
-      }
-
-      if (authError.message.includes("Password should be at least")) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Password must be at least 6 characters long.",
-          },
-          { status: 400 }
-        );
-      }
-
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { success: false, error: `Authentication error: ${authError.message}` },
+        { success: false, error: "Please enter a valid email address." },
         { status: 400 }
       );
     }
 
-    if (!authData.user) {
+    // Validate password length
+    if (password.length < 6) {
       return NextResponse.json(
-        { success: false, error: "Failed to create user" },
-        { status: 500 }
+        {
+          success: false,
+          error: "Password must be at least 6 characters long.",
+        },
+        { status: 400 }
       );
     }
 
-    const userId = authData.user.id;
+    // 1. Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+    });
 
-    // 2. Create user profile in users table
-    const { error: userProfileError } = await supabase.from("users").insert([
-      {
-        id: userId,
-        email,
-        full_name,
-        email_verified: authData.user.email_confirmed_at !== null,
-      },
-    ]);
+    if (existingUser) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "A user with this email address already exists. Please try logging in instead.",
+        },
+        { status: 400 }
+      );
+    }
 
-    if (userProfileError) {
-      // Check if it's a duplicate email error
-      if (
-        userProfileError.code === "23505" &&
-        userProfileError.message.includes("users_email_key")
-      ) {
+    // 2. Hash the password
+    const hashedPassword = await hashPassword(password);
+
+    // 3. Create user in database
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+          fullName: full_name,
+          emailVerified: false, // Email verification can be implemented later
+        },
+      });
+    } catch (error: any) {
+      // Handle duplicate email error (shouldn't happen due to check above, but just in case)
+      if (error.code === "P2002" && error.meta?.target?.includes("email")) {
         return NextResponse.json(
           {
             success: false,
@@ -127,14 +106,17 @@ export async function POST(
         );
       }
 
+      console.error("Error creating user:", error);
       return NextResponse.json(
         {
           success: false,
-          error: `Failed to create user profile: ${userProfileError.message}`,
+          error: `Failed to create user: ${error.message}`,
         },
         { status: 500 }
       );
     }
+
+    const userId = user.id;
 
     // 3. Create organization with default roles
     const orgName = organization_name || `${full_name}'s Organization`;
@@ -160,35 +142,61 @@ export async function POST(
     );
 
     if (adminResult.error) {
+      console.error("Failed to add user as admin:", adminResult.error);
       return NextResponse.json(
         { success: false, error: adminResult.error },
         { status: 500 }
       );
     }
 
-    // 5. Fetch complete user data with organization info
-    const { data: userData, error: userFetchError } = await supabase
-      .from("users")
-      .select(
-        `
-        *,
-        organization_memberships:organization_members(
-          *,
-          organization:organizations(*),
-          role:roles(*)
-        )
-      `
-      )
-      .eq("id", userId)
-      .single();
+    // Verify membership was created
+    const membership = await prisma.organizationMember.findFirst({
+      where: {
+        userId,
+        organizationId: organizationResult.organization.id,
+      },
+      include: {
+        role: true,
+        organization: true,
+      },
+    });
 
-    if (userFetchError) {
-      console.warn("Failed to fetch complete user data:", userFetchError);
+    if (!membership) {
+      console.error("Membership was not created after addUserAsAdmin call");
+      return NextResponse.json(
+        { success: false, error: "Failed to create organization membership" },
+        { status: 500 }
+      );
     }
+
+    console.log("✅ Organization membership created successfully:", {
+      userId,
+      organizationId: organizationResult.organization.id,
+      roleId: membership.roleId,
+      roleName: membership.role.name,
+    });
+
+    // 5. Fetch complete user data with organization info
+    const userData = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        organizationMembers: {
+          include: {
+            organization: true,
+            role: true,
+          },
+        },
+      },
+    });
 
     return NextResponse.json({
       success: true,
-      user: userData || authData.user,
+      user: {
+        id: userData?.id,
+        email: userData?.email,
+        full_name: userData?.fullName,
+        email_verified: userData?.emailVerified,
+      },
       organization: organizationResult.organization,
     });
   } catch (error: any) {

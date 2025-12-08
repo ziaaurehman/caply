@@ -57,20 +57,32 @@ export default function Header({
     warmCaches,
     refreshUserOrganizations,
     handleInvitationAccepted,
+    cachedUserId,
   } = useOrganizationStore();
 
-  // Initialize data with progressive loading
+  // Effect 1: Sync session state and fetch initial data
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      // Clear organization data if user is not logged in
+      clearOrganizationData();
+      return;
+    }
 
     const initializeData = async () => {
-      // First, fetch organizations (lightweight)
-      await fetchUserOrganizations();
-
+      // Check if cached data belongs to a different user and clear it
+      const { cachedUserId } = useOrganizationStore.getState();
+      if (cachedUserId && cachedUserId !== session.user.id) {
+        console.log("User changed, clearing organization cache");
+        clearOrganizationData();
+      }
+      
+      // First, fetch organizations (lightweight) - pass userId to ensure cache belongs to this user
+      await fetchUserOrganizations(session.user.id);
+      
       // Warm caches for likely organizations in background
       warmCaches();
-
-      // Then, if we have a current organization, fetch its context
+      
+      // Fetch context for selected organization if it exists in localStorage
       const selectedOrgId =
         typeof window !== "undefined"
           ? localStorage.getItem("selectedOrganizationId")
@@ -78,9 +90,6 @@ export default function Header({
 
       if (selectedOrgId) {
         await fetchOrganizationContext(selectedOrgId);
-      } else if (userOrganizations.length > 0 && !currentOrganization) {
-        // Auto-select first organization and fetch its context
-        await switchOrganization(userOrganizations[0].id);
       }
     };
 
@@ -89,10 +98,24 @@ export default function Header({
     session?.user?.id,
     fetchUserOrganizations,
     fetchOrganizationContext,
-    switchOrganization,
     warmCaches,
+    clearOrganizationData,
+  ]);
+
+  // Effect 2: Auto-select organization if none selected
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    if (userOrganizations.length > 0 && !currentOrganization && !loading) {
+      // Auto-select first organization and fetch its context
+      switchOrganization(userOrganizations[0].id);
+    }
+  }, [
+    session?.user?.id,
     userOrganizations,
     currentOrganization,
+    loading,
+    switchOrganization,
   ]);
 
   // Listen for invitation acceptance events and refresh organization data

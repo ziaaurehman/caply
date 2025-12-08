@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(request: NextRequest) {
@@ -37,8 +37,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     const userId = searchParams.get("user_id");
     const status = searchParams.get("status");
     const leaveType = searchParams.get("leave_type");
@@ -47,71 +45,102 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "50");
 
-    let query = supabase
-      .from("leave_requests")
-      .select(
-        `
-        id,
-        organization_id,
-        user_id,
-        type,
-        start_date,
-        end_date,
-        days_requested,
-        reason,
-        status,
-        approved_by,
-        approved_at,
-        rejection_reason,
-        created_at,
-        updated_at,
-        users:user_id ( id, full_name, email, avatar_url ),
-        approver:approved_by ( id, full_name, email )
-      `,
-        { count: "exact" }
-      )
-      .eq("organization_id", organizationId)
-      .order("created_at", { ascending: false });
+    // Build where clause
+    const where: any = {
+      organizationId,
+    };
 
     if (userId) {
-      query = query.eq("user_id", userId);
+      where.userId = userId;
     }
     if (status) {
-      query = query.eq("status", status);
+      where.status = status;
     }
     if (leaveType) {
-      query = query.eq("type", leaveType);
+      where.type = leaveType;
     }
     if (startDate) {
-      query = query.gte("start_date", startDate);
+      where.startDate = {
+        gte: new Date(startDate),
+      };
     }
     if (endDate) {
-      query = query.lte("end_date", endDate);
+      where.endDate = {
+        lte: new Date(endDate),
+      };
     }
 
     console.log("🔍 [LEAVE API] Executing database query...");
-    const {
-      data: leaveRequests,
-      error,
-      count,
-    } = await query.range((page - 1) * limit, page * limit - 1);
+    const [leaveRequests, count] = await Promise.all([
+      prisma.leaveRequest.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              avatarUrl: true,
+            },
+          },
+          approver: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.leaveRequest.count({ where }),
+    ]);
 
-    if (error) {
-      console.error("❌ [LEAVE API] Database error:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch leave requests" },
-        { status: 500 }
-      );
-    }
+    const totalPages = Math.ceil(count / limit);
 
-    const totalPages = Math.ceil((count || 0) / limit);
+    // Transform to match expected format
+    const transformedRequests = leaveRequests.map((request) => ({
+      id: request.id,
+      organization_id: request.organizationId,
+      user_id: request.userId,
+      type: request.type,
+      start_date: request.startDate,
+      end_date: request.endDate,
+      days_requested: request.daysRequested,
+      reason: request.reason,
+      status: request.status,
+      approved_by: request.approvedBy,
+      approved_at: request.approvedAt,
+      rejection_reason: request.rejectionReason,
+      created_at: request.createdAt,
+      updated_at: request.updatedAt,
+      users: request.user
+        ? {
+            id: request.user.id,
+            full_name: request.user.fullName,
+            email: request.user.email,
+            avatar_url: request.user.avatarUrl,
+          }
+        : null,
+      approver: request.approver
+        ? {
+            id: request.approver.id,
+            full_name: request.approver.fullName,
+            email: request.approver.email,
+          }
+        : null,
+    }));
 
     return NextResponse.json({
-      leave_requests: leaveRequests || [],
+      leave_requests: transformedRequests,
       pagination: {
         page,
         limit,
-        total: count || 0,
+        total: count,
         total_pages: totalPages,
         has_next: page < totalPages,
         has_prev: page > 1,
@@ -162,8 +191,6 @@ export async function POST(request: NextRequest) {
 
     const { context: userContext } = validation;
 
-    const supabase = await createClient();
-
     const body = await request.json();
 
     const { leave_type, start_date, end_date, reason } = body;
@@ -190,21 +217,32 @@ export async function POST(request: NextRequest) {
 
     // Check for overlapping requests
     console.log("🔍 [LEAVE API] Checking for overlapping requests...");
-    const { data: overlappingRequests, error: overlapError } = await supabase
-      .from("leave_requests")
-      .select("id")
-      .eq("user_id", userContext!.userId)
-      .eq("organization_id", organizationId)
-      .in("status", ["pending", "approved"])
-      .or(`and(start_date.lte.${end_date},end_date.gte.${start_date})`);
-
-    console.log("🔍 [LEAVE API] Overlap check result:", {
-      hasOverlapError: !!overlapError,
-      overlapError: overlapError?.message,
-      overlappingCount: overlappingRequests?.length || 0,
+    const overlappingRequests = await prisma.leaveRequest.findMany({
+      where: {
+        userId: userContext!.userId,
+        organizationId,
+        status: {
+          in: ["pending", "approved"],
+        },
+        OR: [
+          {
+            AND: [
+              { startDate: { lte: new Date(end_date) } },
+              { endDate: { gte: new Date(start_date) } },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+      },
     });
 
-    if (overlappingRequests && overlappingRequests.length > 0) {
+    console.log("🔍 [LEAVE API] Overlap check result:", {
+      overlappingCount: overlappingRequests.length,
+    });
+
+    if (overlappingRequests.length > 0) {
       console.log(
         "❌ [LEAVE API] Overlapping requests found:",
         overlappingRequests
@@ -215,60 +253,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: leaveRequest, error } = await supabase
-      .from("leave_requests")
-      .insert({
-        organization_id: organizationId,
-        user_id: userContext!.userId,
+    const leaveRequest = await prisma.leaveRequest.create({
+      data: {
+        organizationId,
+        userId: userContext!.userId,
         type: leave_type,
-        start_date,
-        end_date,
-        days_requested: totalDays,
+        startDate: new Date(start_date),
+        endDate: new Date(end_date),
+        daysRequested: totalDays,
         status: "pending",
-        reason,
-      })
-      .select(
-        `
-        id,
-        organization_id,
-        user_id,
-        type,
-        start_date,
-        end_date,
-        days_requested,
-        reason,
-        status,
-        approved_by,
-        approved_at,
-        rejection_reason,
-        created_at,
-        updated_at,
-        users:user_id ( id, full_name, email, avatar_url )
-      `
-      )
-      .single();
-
-    console.log("🔍 [LEAVE API] Database insert result:", {
-      hasData: !!leaveRequest,
-      hasError: !!error,
-      error: error?.message,
-      errorCode: error?.code,
-      errorDetails: error?.details,
+        reason: reason || null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
     });
-
-    if (error) {
-      console.error("❌ [LEAVE API] Error creating leave request:", error);
-      return NextResponse.json(
-        { error: "Failed to create leave request" },
-        { status: 500 }
-      );
-    }
 
     console.log(
       "✅ [LEAVE API] Successfully created leave request:",
-      leaveRequest?.id
+      leaveRequest.id
     );
-    return NextResponse.json({ leave_request: leaveRequest });
+
+    // Transform to match expected format
+    const transformedRequest = {
+      id: leaveRequest.id,
+      organization_id: leaveRequest.organizationId,
+      user_id: leaveRequest.userId,
+      type: leaveRequest.type,
+      start_date: leaveRequest.startDate,
+      end_date: leaveRequest.endDate,
+      days_requested: leaveRequest.daysRequested,
+      reason: leaveRequest.reason,
+      status: leaveRequest.status,
+      approved_by: leaveRequest.approvedBy,
+      approved_at: leaveRequest.approvedAt,
+      rejection_reason: leaveRequest.rejectionReason,
+      created_at: leaveRequest.createdAt,
+      updated_at: leaveRequest.updatedAt,
+      users: leaveRequest.user
+        ? {
+            id: leaveRequest.user.id,
+            full_name: leaveRequest.user.fullName,
+            email: leaveRequest.user.email,
+            avatar_url: leaveRequest.user.avatarUrl,
+          }
+        : null,
+    };
+
+    return NextResponse.json({ leave_request: transformedRequest });
   } catch (error) {
     console.error("Leave request POST error:", error);
     return NextResponse.json(

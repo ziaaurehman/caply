@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 
@@ -21,39 +21,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Get the invitation
-    const { data: invitation, error: inviteError } = await supabase
-      .from("organization_invitations")
-      .select(
-        `
-        id,
-        organization_id,
-        email,
-        role_id,
-        status,
-        expires_at,
-        user_id,
-        invited_by,
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        ),
-        organizations:organization_id (
-          id,
-          name,
-          logo_url
-        )
-      `
-      )
-      .eq("token", token)
-      .eq("status", "pending")
-      .single();
+    const invitation = await prisma.organizationInvitation.findFirst({
+      where: {
+        token,
+        status: "pending",
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+          },
+        },
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+          },
+        },
+      },
+    });
 
-    if (inviteError || !invitation) {
+    if (!invitation) {
       return NextResponse.json(
         { error: "Invalid or expired invitation" },
         { status: 404 }
@@ -61,7 +54,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if invitation has expired
-    if (new Date(invitation.expires_at) < new Date()) {
+    if (invitation.expiresAt < new Date()) {
       return NextResponse.json(
         { error: "Invitation has expired" },
         { status: 400 }
@@ -74,12 +67,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user is already a member of this organization
-    const { data: existingMember } = await supabase
-      .from("organization_members")
-      .select("id")
-      .eq("organization_id", invitation.organization_id)
-      .eq("user_id", session.user.id)
-      .single();
+    const existingMember = await prisma.organizationMember.findFirst({
+      where: {
+        organizationId: invitation.organizationId,
+        userId: session.user.id,
+      },
+    });
 
     if (existingMember) {
       return NextResponse.json(
@@ -88,66 +81,80 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Add user to organization
-    const { data: newMember, error: memberError } = await supabase
-      .from("organization_members")
-      .insert({
-        organization_id: invitation.organization_id,
-        user_id: session.user.id,
-        role_id: invitation.role_id,
-        status: "active",
-        invited_by: invitation.invited_by,
-        joined_at: new Date().toISOString(),
-      })
-      .select(
-        `
-        id,
-        user_id,
-        role_id,
-        status,
-        joined_at,
-        users:user_id (
-          id,
-          email,
-          full_name,
-          avatar_url,
-          position
-        ),
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        )
-      `
-      )
-      .single();
+    // Add user to organization and update invitation in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Add user to organization
+      const newMember = await tx.organizationMember.create({
+        data: {
+          organizationId: invitation.organizationId,
+          userId: session.user.id,
+          roleId: invitation.roleId,
+          status: "active",
+          joinedAt: new Date(),
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              avatarUrl: true,
+              position: true,
+            },
+          },
+          role: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+              description: true,
+            },
+          },
+        },
+      });
 
-    if (memberError) {
-      return NextResponse.json(
-        { error: "Failed to join organization" },
-        { status: 500 }
-      );
-    }
+      // Update invitation status to accepted
+      await tx.organizationInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: "accepted",
+          acceptedAt: new Date(),
+        },
+      });
 
-    // Update invitation status to accepted
-    const { error: updateError } = await supabase
-      .from("organization_invitations")
-      .update({
-        status: "accepted",
-        accepted_at: new Date().toISOString(),
-      })
-      .eq("id", invitation.id);
+      return newMember;
+    });
 
-    if (updateError) {
-      console.error("Error updating invitation:", updateError);
-      // Don't fail the request if invitation update fails
-    }
+    // Transform to match expected format
+    const transformedMember = {
+      id: result.id,
+      user_id: result.userId,
+      role_id: result.roleId,
+      status: result.status,
+      joined_at: result.joinedAt,
+      users: {
+        id: result.user.id,
+        email: result.user.email,
+        full_name: result.user.fullName,
+        avatar_url: result.user.avatarUrl,
+        position: result.user.position,
+      },
+      roles: {
+        id: result.role.id,
+        name: result.role.name,
+        display_name: result.role.displayName,
+        description: result.role.description,
+      },
+    };
 
     return NextResponse.json({
       success: true,
-      member: newMember,
-      organization: invitation.organizations,
+      member: transformedMember,
+      organization: {
+        id: invitation.organization.id,
+        name: invitation.organization.name,
+        logo_url: invitation.organization.logoUrl,
+      },
       message: "Successfully joined organization",
     });
   } catch (error) {
@@ -172,37 +179,32 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Get the invitation details
-    const { data: invitation, error: inviteError } = await supabase
-      .from("organization_invitations")
-      .select(
-        `
-        id,
-        organization_id,
-        email,
-        role_id,
-        status,
-        expires_at,
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        ),
-        organizations:organization_id (
-          id,
-          name,
-          logo_url
-        )
-      `
-      )
-      .eq("token", token)
-      .eq("status", "pending")
-      .single();
+    const invitation = await prisma.organizationInvitation.findFirst({
+      where: {
+        token,
+        status: "pending",
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+          },
+        },
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+          },
+        },
+      },
+    });
 
-    if (inviteError || !invitation) {
+    if (!invitation) {
       return NextResponse.json(
         { error: "Invalid or expired invitation" },
         { status: 404 }
@@ -210,7 +212,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if invitation has expired
-    if (new Date(invitation.expires_at) < new Date()) {
+    if (invitation.expiresAt < new Date()) {
       return NextResponse.json(
         { error: "Invitation has expired" },
         { status: 400 }
@@ -221,9 +223,18 @@ export async function GET(request: NextRequest) {
       invitation: {
         id: invitation.id,
         email: invitation.email,
-        role: invitation.roles,
-        organization: invitation.organizations,
-        expires_at: invitation.expires_at,
+        role: {
+          id: invitation.role.id,
+          name: invitation.role.name,
+          display_name: invitation.role.displayName,
+          description: invitation.role.description,
+        },
+        organization: {
+          id: invitation.organization.id,
+          name: invitation.organization.name,
+          logo_url: invitation.organization.logoUrl,
+        },
+        expires_at: invitation.expiresAt,
       },
     });
   } catch (error) {

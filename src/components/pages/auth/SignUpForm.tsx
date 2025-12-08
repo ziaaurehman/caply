@@ -1,50 +1,48 @@
-"use client"
-import { useState } from "react"
-import type React from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import Button from "../../ui/Button"
-import { Eye, EyeOff } from "lucide-react"
-import { createClient } from "@/utils/supabase/client"
-import { signIn } from "next-auth/react"
+"use client";
+import { useState } from "react";
+import type React from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import Button from "../../ui/Button";
+import { Eye, EyeOff } from "lucide-react";
+import { signIn } from "next-auth/react";
 
 export default function SignUpForm() {
-  const router = useRouter()
+  const router = useRouter();
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
     password: "",
     confirmPassword: "",
-  })
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
-  const supabase = createClient()
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setError("")
-    setSuccess("")
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
+    setSuccess("");
 
     // Password validation
     if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match")
-      setIsLoading(false)
-      return
+      setError("Passwords do not match");
+      setIsLoading(false);
+      return;
     }
 
     if (formData.password.length < 6) {
-      setError("Password must be at least 6 characters")
-      setIsLoading(false)
-      return
+      setError("Password must be at least 6 characters");
+      setIsLoading(false);
+      return;
     }
 
     try {
-      console.log("Attempting to register user:", formData.email)
-      
+      console.log("Attempting to register user:", formData.email);
+
       // Use our new signup API that handles everything
       const response = await fetch("/api/auth/signup", {
         method: "POST",
@@ -56,85 +54,85 @@ export default function SignUpForm() {
           password: formData.password,
           full_name: formData.fullName,
         }),
-      })
+      });
 
-      const result = await response.json()
+      const result = await response.json();
 
       if (!response.ok || !result.success) {
-        console.error("Signup API error:", result.error)
-        
+        console.error("Signup API error:", result.error);
+
         // Check if it's a duplicate email error and provide helpful message
-        if (result.error && result.error.includes('already exists')) {
-          setError(`${result.error} You can sign in using the link below.`)
+        if (result.error && result.error.includes("already exists")) {
+          setError(`${result.error} You can sign in using the link below.`);
         } else {
-          setError(result.error || "Registration failed")
+          setError(result.error || "Registration failed");
         }
-        
-        setIsLoading(false)
-        return
+
+        setIsLoading(false);
+        return;
       }
 
-      console.log("User registration successful:", result)
-      
-      // Check if email confirmation is required
-      if (result.user && !result.user.email_verified) {
-        // Redirect to email verification page with email parameter
-        router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`)
-        return
-      }
+      console.log("User registration successful:", result);
 
-      // If email is verified or doesn't require verification, sign in with NextAuth
-      console.log("Proceeding to NextAuth login")
-      
+      // Sign in with NextAuth after successful registration
+      console.log("Proceeding to NextAuth login");
+
       const signInResult = await signIn("credentials", {
         redirect: false,
         email: formData.email,
         password: formData.password,
-      })
+      });
 
       if (signInResult?.error) {
-        console.error("NextAuth sign in error:", signInResult.error)
-        setError(`Registration successful, but couldn't log in automatically. Please try logging in.`)
-        setIsLoading(false)
-        return
+        console.error("NextAuth sign in error:", signInResult.error);
+        setError(
+          `Registration successful, but couldn't log in automatically. Please try logging in.`
+        );
+        setIsLoading(false);
+        return;
       }
 
       // Use window.location instead of router.push for a clean page reload
-      window.location.href = "/dashboard"
-      
+      window.location.href = "/dashboard";
     } catch (error: any) {
-      console.error("Registration error:", error)
-      setError(error.message || "Something went wrong during registration. Please try again.")
-      setIsLoading(false)
+      console.error("Registration error:", error);
+      setError(
+        error.message ||
+          "Something went wrong during registration. Please try again."
+      );
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value,
-    })
-  }
+    });
+  };
 
   const handleGoogleSignUp = async () => {
-    setIsLoading(true)
+    setIsLoading(true);
     try {
-      await signIn("google", { callbackUrl: "/workspace" })
+      await signIn("google", { callbackUrl: "/workspace" });
     } catch (error) {
-      console.error("Google sign up error:", error)
-      setError("Failed to sign up with Google")
-      setIsLoading(false)
+      console.error("Google sign up error:", error);
+      setError("Failed to sign up with Google");
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
           {error}
-          {error.includes('already exists') && (
+          {error.includes("already exists") && (
             <div className="mt-2">
-              <Link href="/login" className="font-medium text-red-700 hover:text-red-800 underline">
+              <Link
+                href="/login"
+                className="font-medium text-red-700 hover:text-red-800 underline"
+              >
                 Sign in to your account →
               </Link>
             </div>
@@ -147,7 +145,10 @@ export default function SignUpForm() {
         </div>
       )}
       <div>
-        <label htmlFor="fullName" className="block text-sm font-medium text-gray-700">
+        <label
+          htmlFor="fullName"
+          className="block text-sm font-medium text-gray-700"
+        >
           Full Name
         </label>
         <div className="mt-1">
@@ -165,7 +166,10 @@ export default function SignUpForm() {
         </div>
       </div>
       <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+        <label
+          htmlFor="email"
+          className="block text-sm font-medium text-gray-700"
+        >
           Email address
         </label>
         <div className="mt-1">
@@ -183,7 +187,10 @@ export default function SignUpForm() {
         </div>
       </div>
       <div>
-        <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+        <label
+          htmlFor="password"
+          className="block text-sm font-medium text-gray-700"
+        >
           Password
         </label>
         <div className="mt-1 relative">
@@ -203,12 +210,19 @@ export default function SignUpForm() {
             className="absolute inset-y-0 right-0 pr-3 flex items-center"
             onClick={() => setShowPassword(!showPassword)}
           >
-            {showPassword ? <EyeOff className="h-4 w-4 text-gray-400" /> : <Eye className="h-4 w-4 text-gray-400" />}
+            {showPassword ? (
+              <EyeOff className="h-4 w-4 text-gray-400" />
+            ) : (
+              <Eye className="h-4 w-4 text-gray-400" />
+            )}
           </button>
         </div>
       </div>
       <div>
-        <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
+        <label
+          htmlFor="confirmPassword"
+          className="block text-sm font-medium text-gray-700"
+        >
           Confirm Password
         </label>
         <div className="mt-1 relative">
@@ -237,7 +251,12 @@ export default function SignUpForm() {
         </div>
       </div>
       <div>
-        <Button type="submit" size="lg" isLoading={isLoading} className="w-full">
+        <Button
+          type="submit"
+          size="lg"
+          isLoading={isLoading}
+          className="w-full"
+        >
           {isLoading ? "Creating account..." : "Create Account"}
         </Button>
       </div>
@@ -281,15 +300,18 @@ export default function SignUpForm() {
           Sign up with Google
         </Button>
       </div>
-      
+
       <div className="text-center">
         <p className="text-sm text-gray-600">
-          Already have an account?{' '}
-          <Link href="/login" className="font-medium text-primary-600 hover:text-primary-500">
+          Already have an account?{" "}
+          <Link
+            href="/login"
+            className="font-medium text-primary-600 hover:text-primary-500"
+          >
             Sign in
           </Link>
         </p>
       </div>
     </form>
-  )
+  );
 }

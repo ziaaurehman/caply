@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(req: NextRequest) {
@@ -42,83 +42,89 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
-    // Build query based on parameters
-    let query = supabase.from("activities").select(`
-        *,
-        users (
-          id,
-          full_name,
-          email,
-          avatar_url
-        )
-      `);
+    // Build where clause based on parameters
+    const where: any = {};
 
     if (boardId) {
       // Verify board exists and user has access through project organization
-      const { data: board, error: boardError } = await supabase
-        .from("boards")
-        .select(
-          `
-          id,
-          projects!inner (
-            id,
-            organization_id
-          )
-        `
-        )
-        .eq("id", boardId)
-        .eq("projects.organization_id", organizationId)
-        .single();
+      const board = await prisma.board.findFirst({
+        where: {
+          id: boardId,
+          project: {
+            organizationId,
+          },
+        },
+      });
 
-      if (boardError || !board) {
+      if (!board) {
         return NextResponse.json({ error: "Board not found" }, { status: 404 });
       }
 
-      query = query.eq("board_id", boardId);
+      where.boardId = boardId;
     }
 
     if (cardId) {
       // Verify card exists and user has access through project organization
-      const { data: card, error: cardError } = await supabase
-        .from("cards")
-        .select(
-          `
-          id,
-          lists!inner (
-            id,
-            boards!inner (
-              id,
-              projects!inner (
-                id,
-                organization_id
-              )
-            )
-          )
-        `
-        )
-        .eq("id", cardId)
-        .eq("lists.boards.projects.organization_id", organizationId)
-        .single();
+      const card = await prisma.card.findFirst({
+        where: {
+          id: cardId,
+          list: {
+            board: {
+              project: {
+                organizationId,
+              },
+            },
+          },
+        },
+      });
 
-      if (cardError || !card) {
+      if (!card) {
         return NextResponse.json({ error: "Card not found" }, { status: 404 });
       }
 
-      query = query.eq("card_id", cardId);
+      where.cardId = cardId;
     }
 
     // Execute query with pagination
-    const { data: activities, error } = await query
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1);
+    const activities = await prisma.activity.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      skip: offset,
+      take: limit,
+    });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    // Transform to match expected format
+    const transformedActivities = activities.map((activity) => ({
+      id: activity.id,
+      user_id: activity.userId,
+      board_id: activity.boardId,
+      card_id: activity.cardId,
+      action_type: activity.actionType,
+      entity_type: activity.entityType,
+      entity_id: activity.entityId,
+      details: activity.details,
+      created_at: activity.createdAt,
+      users: {
+        id: activity.user.id,
+        full_name: activity.user.fullName,
+        email: activity.user.email,
+        avatar_url: activity.user.avatarUrl,
+      },
+    }));
 
-    const result = { activities: activities || [] };
+    const result = { activities: transformedActivities };
     return NextResponse.json(result);
   } catch (error) {
     console.error("Error in GET /api/kanban/activities:", error);

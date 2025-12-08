@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import {
   validateOrganizationAccess,
   validateOrganizationAccessWithId,
@@ -46,104 +46,60 @@ export async function GET(request: NextRequest) {
     console.log("User organization:", organizationId);
 
     // Calculate offset for pagination
-    const offset = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-    const supabase = await createClient();
-
-    // First, get total count for pagination
-    let countQuery = supabase
-      .from("roles")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", organizationId)
-      .eq("is_system_role", false);
-
-    // Add search filter to count query if search term provided
-    if (search) {
-      countQuery = countQuery.or(
-        `name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`
-      );
-    }
-
-    const { count: totalCount, error: countError } = await countQuery;
-
-    if (countError) {
-      console.error("Error counting roles:", countError);
-      return NextResponse.json(
-        { error: "Failed to count roles" },
-        { status: 500 }
-      );
-    }
-
-    // Build main query for data
-    let query = supabase
-      .from("roles")
-      .select(
-        `
-        id,
-        name,
-        display_name,
-        description,
-        is_system_role,
-        organization_id,
-        created_at,
-        updated_at,
-        role_permissions:role_permissions(
-          permissions:permission_id(
-            id,
-            name,
-            display_name,
-            description,
-            module,
-            action
-          )
-        )
-      `
-      )
-      .eq("organization_id", organizationId)
-      .eq("is_system_role", false);
+    // Build where clause
+    const where: any = {
+      organizationId,
+      isSystemRole: false,
+    };
 
     // Add search filter if search term provided
     if (search) {
-      query = query.or(
-        `name.ilike.%${search}%,display_name.ilike.%${search}%,description.ilike.%${search}%`
-      );
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { displayName: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+      ];
     }
 
-    // Add pagination and ordering
-    const { data: roles, error } = await query
-      .order("name")
-      .range(offset, offset + limit - 1);
-
-    if (error) {
-      console.error("Error fetching roles:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch roles" },
-        { status: 500 }
-      );
-    }
+    // Get total count and roles in parallel
+    const [totalCount, roles] = await Promise.all([
+      prisma.role.count({ where }),
+      prisma.role.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { name: "asc" },
+        include: {
+          rolePermissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      }),
+    ]);
 
     console.log(
       `Found ${roles?.length || 0} roles for organization ${organizationId}`
     );
 
     // Transform the data to flatten permissions
-    const transformedRoles =
-      roles?.map((role: any) => ({
-        id: role.id,
-        name: role.name,
-        display_name: role.display_name,
-        description: role.description,
-        is_system_role: role.is_system_role,
-        organization_id: role.organization_id,
-        created_at: role.created_at,
-        updated_at: role.updated_at,
-        permissions:
-          role.role_permissions
-            ?.map((rp: any) => rp.permissions)
-            .filter(Boolean) || [],
-      })) || [];
+    const transformedRoles = roles.map((role) => ({
+      id: role.id,
+      name: role.name,
+      display_name: role.displayName,
+      description: role.description,
+      is_system_role: role.isSystemRole,
+      organization_id: role.organizationId,
+      created_at: role.createdAt,
+      updated_at: role.updatedAt,
+      permissions:
+        role.rolePermissions?.map((rp) => rp.permission).filter(Boolean) || [],
+    }));
 
-    const totalPages = Math.ceil((totalCount || 0) / limit);
+    const totalPages = Math.ceil(totalCount / limit);
 
     const result = {
       roles: transformedRoles,
@@ -151,7 +107,7 @@ export async function GET(request: NextRequest) {
       pagination: {
         page,
         limit,
-        total: totalCount || 0,
+        total: totalCount,
         totalPages,
         hasNext: page < totalPages,
         hasPrev: page > 1,
@@ -203,7 +159,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
     const finalOrganizationId = validation.context!.organizationId;
     const userId = validation.context!.userId;
 
@@ -230,20 +185,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if role name already exists in this organization
-    const { data: existingRole, error: checkError } = await supabase
-      .from("roles")
-      .select("id")
-      .eq("name", name)
-      .eq("organization_id", finalOrganizationId)
-      .single();
-
-    if (checkError && checkError.code !== "PGRST116") {
-      console.error("Error checking existing role:", checkError);
-      return NextResponse.json(
-        { error: "Failed to validate role name" },
-        { status: 500 }
-      );
-    }
+    const existingRole = await prisma.role.findFirst({
+      where: {
+        name,
+        organizationId: finalOrganizationId,
+      },
+    });
 
     if (existingRole) {
       return NextResponse.json(
@@ -254,52 +201,43 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create the role
-    const { data: newRole, error: roleError } = await supabase
-      .from("roles")
-      .insert({
-        name: name,
-        display_name: display_name,
-        description: description || null,
-        organization_id: finalOrganizationId,
-        is_system_role: false,
-      })
-      .select()
-      .single();
+    // Create the role and permissions in a transaction
+    const newRole = await prisma.$transaction(async (tx) => {
+      // Create the role
+      const role = await tx.role.create({
+        data: {
+          name,
+          displayName: display_name,
+          description: description || null,
+          organizationId: finalOrganizationId,
+          isSystemRole: false,
+        },
+      });
 
-    if (roleError) {
-      console.error("Error creating role:", roleError);
-      return NextResponse.json(
-        { error: "Failed to create role" },
-        { status: 500 }
-      );
-    }
-
-    console.log("Role created:", newRole);
-
-    // Create role-permission relationships
-    if (permission_ids.length > 0) {
-      const rolePermissions = permission_ids.map((permissionId: string) => ({
-        role_id: newRole.id,
-        permission_id: permissionId,
-      }));
-
-      const { error: permissionsError } = await supabase
-        .from("role_permissions")
-        .insert(rolePermissions);
-
-      if (permissionsError) {
-        console.error("Error creating role permissions:", permissionsError);
-        // Try to clean up the created role
-        await supabase.from("roles").delete().eq("id", newRole.id);
-        return NextResponse.json(
-          { error: "Failed to assign permissions to role" },
-          { status: 500 }
-        );
+      // Create role-permission relationships
+      if (permission_ids.length > 0) {
+        await tx.rolePermission.createMany({
+          data: permission_ids.map((permissionId: string) => ({
+            roleId: role.id,
+            permissionId,
+          })),
+        });
       }
 
-      console.log("Role permissions created:", rolePermissions.length);
-    }
+      // Fetch the role with permissions
+      return await tx.role.findUnique({
+        where: { id: role.id },
+        include: {
+          rolePermissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      });
+    });
+
+    console.log("Role created:", newRole);
 
     return NextResponse.json({
       role: newRole,

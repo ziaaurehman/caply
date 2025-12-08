@@ -12,7 +12,15 @@
     "redis:start": "docker start caply-redis",
     "redis:restart": "docker restart caply-redis",
     "redis:logs": "docker logs caply-redis",
-    "redis:cli": "docker exec -it caply-redis redis-cli"
+    "redis:cli": "docker exec -it caply-redis redis-cli",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:start": "docker start caply-postgres",
+    "db:stop": "docker stop caply-postgres",
+    "db:restart": "docker restart caply-postgres",
+    "db:logs": "docker logs -f caply-postgres",
+    "db:cli": "docker exec -it caply-postgres psql -U caply -d caply_db",
+    "db:reset": "docker compose down -v && docker compose up -d postgres"
   },
   "dependencies": {
     "@next-auth/supabase-adapter": "^0.2.1",
@@ -23,6 +31,7 @@
     "@supabase/supabase-js": "^2.50.0",
     "@tanstack/react-query": "^5.85.5",
     "@types/uuid": "^10.0.0",
+    "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
@@ -45,6 +54,7 @@
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.10",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/nodemailer": "^6.4.17",
     "@types/react": "^19",

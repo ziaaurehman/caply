@@ -1,6 +1,6 @@
 // src/app/api/timesheets/update-entry/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function PUT(req: NextRequest) {
@@ -45,119 +45,142 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
   const userContext = validation.context!;
 
   try {
-    // First, verify that the entry belongs to a draft submission owned by the user
-    const { data: entry, error: fetchError } = await supabase
-      .from("timesheet_entries")
-      .select(
-        `
-        *,
-        timesheet_submissions!inner (
-          id,
-          user_id,
-          status,
-          organization_id
-        )
-      `
-      )
-      .eq("id", entryId)
-      .eq("timesheet_submissions.user_id", userContext.userId)
-      .eq("timesheet_submissions.status", "draft")
-      .eq("timesheet_submissions.organization_id", organizationId)
-      .single();
-
-    if (fetchError || !entry) {
-      return NextResponse.json(
-        {
-          error: "Entry not found or not accessible",
+    // Use a transaction to handle all operations atomically
+    const result = await prisma.$transaction(async (tx) => {
+      // First, verify that the entry belongs to a draft submission owned by the user
+      const entry = await tx.timesheetEntry.findFirst({
+        where: {
+          id: entryId,
+          timesheetSubmission: {
+            userId: userContext.userId,
+            status: "draft",
+            organizationId,
+          },
         },
-        { status: 404 }
-      );
-    }
+        include: {
+          timesheetSubmission: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
 
-    // Update the entry
-    const updateData: any = {
-      updated_at: new Date().toISOString(),
+      if (!entry) {
+        throw new Error("Entry not found or not accessible");
+      }
+
+      // Update the entry
+      const updateData: any = {};
+
+      if (project_id !== undefined) updateData.projectId = project_id;
+      if (task_description !== undefined)
+        updateData.taskDescription = task_description;
+      if (monday_hours !== undefined) updateData.mondayHours = monday_hours;
+      if (tuesday_hours !== undefined) updateData.tuesdayHours = tuesday_hours;
+      if (wednesday_hours !== undefined)
+        updateData.wednesdayHours = wednesday_hours;
+      if (thursday_hours !== undefined)
+        updateData.thursdayHours = thursday_hours;
+      if (friday_hours !== undefined) updateData.fridayHours = friday_hours;
+      if (monday_notes !== undefined) updateData.mondayNotes = monday_notes;
+      if (tuesday_notes !== undefined) updateData.tuesdayNotes = tuesday_notes;
+      if (wednesday_notes !== undefined)
+        updateData.wednesdayNotes = wednesday_notes;
+      if (thursday_notes !== undefined)
+        updateData.thursdayNotes = thursday_notes;
+      if (friday_notes !== undefined) updateData.fridayNotes = friday_notes;
+
+      const updatedEntry = await tx.timesheetEntry.update({
+        where: { id: entryId },
+        data: updateData,
+        include: {
+          project: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+        },
+      });
+
+      // Recalculate and update total hours for the submission
+      const allEntries = await tx.timesheetEntry.findMany({
+        where: {
+          timesheetSubmissionId: entry.timesheetSubmission.id,
+        },
+        select: {
+          mondayHours: true,
+          tuesdayHours: true,
+          wednesdayHours: true,
+          thursdayHours: true,
+          fridayHours: true,
+        },
+      });
+
+      const totalHours = allEntries.reduce(
+        (sum, e) =>
+          sum +
+          Number(e.mondayHours || 0) +
+          Number(e.tuesdayHours || 0) +
+          Number(e.wednesdayHours || 0) +
+          Number(e.thursdayHours || 0) +
+          Number(e.fridayHours || 0),
+        0
+      );
+
+      // Update the submission's total hours
+      await tx.timesheetSubmission.update({
+        where: { id: entry.timesheetSubmission.id },
+        data: {
+          totalHours,
+          updatedAt: new Date(),
+        },
+      });
+
+      return updatedEntry;
+    });
+
+    // Transform to match expected format
+    const transformedEntry = {
+      id: result.id,
+      timesheet_submission_id: result.timesheetSubmissionId,
+      project_id: result.projectId,
+      task_description: result.taskDescription,
+      monday_hours: result.mondayHours,
+      tuesday_hours: result.tuesdayHours,
+      wednesday_hours: result.wednesdayHours,
+      thursday_hours: result.thursdayHours,
+      friday_hours: result.fridayHours,
+      monday_notes: result.mondayNotes,
+      tuesday_notes: result.tuesdayNotes,
+      wednesday_notes: result.wednesdayNotes,
+      thursday_notes: result.thursdayNotes,
+      friday_notes: result.fridayNotes,
+      created_at: result.createdAt,
+      updated_at: result.updatedAt,
+      projects: result.project
+        ? {
+            id: result.project.id,
+            name: result.project.name,
+            code: result.project.code,
+          }
+        : null,
     };
 
-    if (project_id !== undefined) updateData.project_id = project_id;
-    if (task_description !== undefined)
-      updateData.task_description = task_description;
-    if (monday_hours !== undefined) updateData.monday_hours = monday_hours;
-    if (tuesday_hours !== undefined) updateData.tuesday_hours = tuesday_hours;
-    if (wednesday_hours !== undefined)
-      updateData.wednesday_hours = wednesday_hours;
-    if (thursday_hours !== undefined)
-      updateData.thursday_hours = thursday_hours;
-    if (friday_hours !== undefined) updateData.friday_hours = friday_hours;
-    if (monday_notes !== undefined) updateData.monday_notes = monday_notes;
-    if (tuesday_notes !== undefined) updateData.tuesday_notes = tuesday_notes;
-    if (wednesday_notes !== undefined)
-      updateData.wednesday_notes = wednesday_notes;
-    if (thursday_notes !== undefined)
-      updateData.thursday_notes = thursday_notes;
-    if (friday_notes !== undefined) updateData.friday_notes = friday_notes;
-
-    const { data: updatedEntry, error: updateError } = await supabase
-      .from("timesheet_entries")
-      .update(updateData)
-      .eq("id", entryId)
-      .select(
-        `
-        *,
-        projects (
-          id,
-          name,
-          code
-        )
-      `
-      )
-      .single();
-
-    if (updateError) throw updateError;
-
-    // Recalculate and update total hours for the submission
-    const { data: allEntries, error: entriesError } = await supabase
-      .from("timesheet_entries")
-      .select(
-        "monday_hours, tuesday_hours, wednesday_hours, thursday_hours, friday_hours"
-      )
-      .eq("timesheet_submission_id", entry.timesheet_submissions.id);
-
-    if (entriesError) throw entriesError;
-
-    const totalHours = allEntries.reduce(
-      (sum, e) =>
-        sum +
-        e.monday_hours +
-        e.tuesday_hours +
-        e.wednesday_hours +
-        e.thursday_hours +
-        e.friday_hours,
-      0
-    );
-
-    // Update the submission's total hours
-    await supabase
-      .from("timesheet_submissions")
-      .update({
-        total_hours: totalHours,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", entry.timesheet_submissions.id);
-
     return NextResponse.json({
-      entry: updatedEntry,
+      entry: transformedEntry,
       success: true,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error updating timesheet entry:", error);
     return NextResponse.json(
       {
-        error: "Internal server error",
+        error: error.message || "Internal server error",
       },
       { status: 500 }
     );

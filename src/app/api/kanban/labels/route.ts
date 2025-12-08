@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(req: NextRequest) {
@@ -39,40 +39,34 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Check if user has access to the board
-    const { data: board, error: boardError } = await supabase
-      .from("boards")
-      .select(
-        `
-        id,
-        projects!inner (
-          id,
-          organization_id
-        )
-      `
-      )
-      .eq("id", boardId)
-      .eq("projects.organization_id", organizationId)
-      .single();
+    const board = await prisma.board.findFirst({
+      where: {
+        id: boardId,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
 
-    if (boardError || !board) {
+    if (!board) {
       return NextResponse.json({ error: "Board not found" }, { status: 404 });
     }
 
     // Get labels for the board
-    const { data: labels, error } = await supabase
-      .from("labels")
-      .select("*")
-      .eq("board_id", boardId)
-      .order("name", { ascending: true });
+    const labels = await prisma.label.findMany({
+      where: {
+        boardId,
+      },
+      orderBy: {
+        name: "asc",
+      },
+    });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const result = { labels: labels || [] };
+    const result = { labels };
 
     return NextResponse.json(result);
   } catch (error) {
@@ -133,58 +127,51 @@ export async function POST(req: NextRequest) {
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
 
     // Check if user has access to the board
-    const { data: board, error: boardError } = await supabase
-      .from("boards")
-      .select(
-        `
-        id,
-        projects!inner (
-          id,
-          organization_id
-        )
-      `
-      )
-      .eq("id", board_id)
-      .eq("projects.organization_id", organizationId)
-      .single();
+    const board = await prisma.board.findFirst({
+      where: {
+        id: board_id,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
 
-    if (boardError || !board) {
+    if (!board) {
       return NextResponse.json({ error: "Board not found" }, { status: 404 });
     }
 
-    // Create label
-    const { data: label, error } = await supabase
-      .from("labels")
-      .insert([
-        {
-          board_id,
+    // Create label and activity log in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create label
+      const label = await tx.label.create({
+        data: {
+          boardId: board_id,
           name,
           color,
         },
-      ])
-      .select()
-      .single();
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: userContext!.userId,
+          boardId: board_id,
+          actionType: "create",
+          entityType: "label",
+          entityId: label.id,
+          details: { label_name: name, label_color: color },
+        },
+      });
 
-    // Create activity log
-    await supabase.from("activities").insert([
-      {
-        user_id: userContext!.userId,
-        board_id: board_id,
-        action_type: "create",
-        entity_type: "label",
-        entity_id: label.id,
-        details: { label_name: name, label_color: color },
-      },
-    ]);
+      return label;
+    });
 
-    return NextResponse.json({ label });
+    return NextResponse.json({ label: result });
   } catch (error) {
     console.error("Error in POST /api/kanban/labels:", error);
     return NextResponse.json(

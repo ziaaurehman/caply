@@ -53,9 +53,10 @@ interface OrganizationStore {
   // Cache metadata
   lastFetch: number | null;
   cacheValid: boolean;
+  cachedUserId: string | null; // Track which user the cache belongs to
 
   // API actions
-  fetchUserOrganizations: () => Promise<void>;
+  fetchUserOrganizations: (userId?: string) => Promise<void>;
   fetchOrganizationContext: (
     organizationId: string,
     includePermissions?: boolean
@@ -71,7 +72,7 @@ interface OrganizationStore {
   isCacheValid: () => boolean;
 
   // State refresh methods
-  refreshUserOrganizations: () => Promise<void>;
+  refreshUserOrganizations: (userId?: string) => Promise<void>;
   invalidateCache: () => void;
   handleInvitationAccepted: (organizationId: string) => Promise<void>;
 
@@ -96,21 +97,56 @@ export const useOrganizationStore = create<OrganizationStore>()(
       error: null,
       lastFetch: null,
       cacheValid: false,
+      cachedUserId: null,
 
       // Cache helper (internal)
-      isCacheValid: () => {
-        const { lastFetch } = get();
+      isCacheValid: (currentUserId?: string) => {
+        const { lastFetch, cachedUserId } = get();
         if (!lastFetch) return false;
+
+        // If userId is provided, check if cache belongs to this user
+        if (currentUserId && cachedUserId !== currentUserId) {
+          // Cache is for a different user, invalidate it
+          set({
+            cacheValid: false,
+            lastFetch: null,
+            cachedUserId: null,
+            userOrganizations: [],
+          });
+          return false;
+        }
+
         return Date.now() - lastFetch < CACHE_DURATION;
       },
 
       // Fetch user organizations (lightweight with request deduplication)
-      fetchUserOrganizations: async () => {
+      fetchUserOrganizations: async (userId?: string) => {
         const { isCacheValid, loading, lastFetch } = get();
 
-        // Return cached data if valid
-        if (isCacheValid() && get().userOrganizations.length > 0) {
+        // Get current user ID from session if not provided
+        if (!userId && typeof window !== "undefined") {
+          // Try to get from NextAuth session
+          try {
+            const { useSession } = await import("next-auth/react");
+            // We can't use hooks here, so we'll fetch fresh data if userId is not provided
+            // This ensures we always get data for the current user
+          } catch (e) {
+            // Ignore
+          }
+        }
+
+        // Return cached data if valid AND belongs to current user
+        if (
+          userId &&
+          isCacheValid(userId) &&
+          get().userOrganizations.length > 0
+        ) {
           return;
+        }
+
+        // If no userId provided or cache invalid, clear cache to force fresh fetch
+        if (!userId || !isCacheValid(userId)) {
+          set({ cacheValid: false, lastFetch: null });
         }
 
         // Prevent duplicate requests within 5 seconds
@@ -142,10 +178,14 @@ export const useOrganizationStore = create<OrganizationStore>()(
           const data = await response.json();
           const organizations = data.organizations || [];
 
+          // Get current user ID from the API response
+          const currentUserId = data.userId || userId || null;
+
           set({
             userOrganizations: organizations,
             lastFetch: Date.now(),
             cacheValid: true,
+            cachedUserId: currentUserId, // Store which user this cache belongs to
             loading: false,
             error: null,
           });
@@ -285,6 +325,7 @@ export const useOrganizationStore = create<OrganizationStore>()(
           error: null,
           lastFetch: null,
           cacheValid: false,
+          cachedUserId: null, // Clear cached user ID
         });
 
         if (typeof window !== "undefined") {
@@ -345,17 +386,18 @@ export const useOrganizationStore = create<OrganizationStore>()(
       },
 
       // State refresh methods
-      refreshUserOrganizations: async () => {
+      refreshUserOrganizations: async (userId?: string) => {
         const { fetchUserOrganizations } = get();
         // Force refresh by clearing cache validity
-        set({ cacheValid: false, lastFetch: null });
-        await fetchUserOrganizations();
+        set({ cacheValid: false, lastFetch: null, cachedUserId: null });
+        await fetchUserOrganizations(userId);
       },
 
       invalidateCache: () => {
         set({
           cacheValid: false,
           lastFetch: null,
+          cachedUserId: null,
           loading: false,
           error: null,
         });
@@ -402,6 +444,7 @@ export const useOrganizationStore = create<OrganizationStore>()(
         userOrganizations: state.userOrganizations,
         lastFetch: state.lastFetch,
         cacheValid: state.cacheValid,
+        cachedUserId: state.cachedUserId, // Persist cached user ID
       }),
     }
   )

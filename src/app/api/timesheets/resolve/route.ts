@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function POST(req: NextRequest) {
@@ -38,20 +38,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
   const userContext = validation.context!;
 
   try {
     // Validate submission exists and is in submitted status
-    const { data: submission, error: fetchError } = await supabase
-      .from("timesheet_submissions")
-      .select("*")
-      .eq("id", submissionId)
-      .eq("organization_id", organizationId)
-      .eq("status", "submitted")
-      .single();
+    const submission = await prisma.timesheetSubmission.findFirst({
+      where: {
+        id: submissionId,
+        organizationId,
+        status: "submitted",
+      },
+    });
 
-    if (fetchError || !submission) {
+    if (!submission) {
       return NextResponse.json(
         {
           error: "Submission not found or not in submitted status",
@@ -63,47 +62,81 @@ export async function POST(req: NextRequest) {
     // Update submission status
     const updateData: any = {
       status: action === "approve" ? "approved" : "rejected",
-      updated_at: new Date().toISOString(),
+      updatedAt: new Date(),
     };
 
     if (action === "approve") {
-      updateData.approved_by = userContext.userId;
-      updateData.approved_at = new Date().toISOString();
+      updateData.approvedBy = userContext.userId;
+      updateData.approvedAt = new Date();
     } else {
-      updateData.rejection_reason = rejectionReason || null;
+      updateData.rejectionReason = rejectionReason || null;
     }
 
-    const { data: updatedSubmission, error: updateError } = await supabase
-      .from("timesheet_submissions")
-      .update(updateData)
-      .eq("id", submissionId)
-      .eq("organization_id", organizationId)
-      .select(
-        `
-        *,
-        timesheet_entries (
-          *,
-          projects (
-            id,
-            name,
-            code
-          )
-        )
-      `
-      )
-      .single();
+    const updatedSubmission = await prisma.timesheetSubmission.update({
+      where: { id: submissionId },
+      data: updateData,
+      include: {
+        entries: {
+          include: {
+            project: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (updateError) throw updateError;
+    // Transform to match expected format
+    const transformedSubmission = {
+      id: updatedSubmission.id,
+      organization_id: updatedSubmission.organizationId,
+      user_id: updatedSubmission.userId,
+      organization_member_id: updatedSubmission.organizationMemberId,
+      week_start_date: updatedSubmission.weekStartDate,
+      week_end_date: updatedSubmission.weekEndDate,
+      status: updatedSubmission.status,
+      total_hours: updatedSubmission.totalHours,
+      submitted_at: updatedSubmission.submittedAt,
+      approved_by: updatedSubmission.approvedBy,
+      approved_at: updatedSubmission.approvedAt,
+      rejection_reason: updatedSubmission.rejectionReason,
+      created_at: updatedSubmission.createdAt,
+      updated_at: updatedSubmission.updatedAt,
+      timesheet_entries: updatedSubmission.entries.map((entry: any) => ({
+        id: entry.id,
+        timesheet_submission_id: entry.timesheetSubmissionId,
+        project_id: entry.projectId,
+        task_description: entry.taskDescription,
+        monday_hours: entry.mondayHours,
+        tuesday_hours: entry.tuesdayHours,
+        wednesday_hours: entry.wednesdayHours,
+        thursday_hours: entry.thursdayHours,
+        friday_hours: entry.fridayHours,
+        created_at: entry.createdAt,
+        updated_at: entry.updatedAt,
+        projects: entry.project
+          ? {
+              id: entry.project.id,
+              name: entry.project.name,
+              code: entry.project.code,
+            }
+          : null,
+      })),
+    };
 
     return NextResponse.json({
-      submission: updatedSubmission,
+      submission: transformedSubmission,
       success: true,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error resolving submission:", error);
     return NextResponse.json(
       {
-        error: "Internal server error",
+        error: error.message || "Internal server error",
       },
       { status: 500 }
     );

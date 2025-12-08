@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 
 // GET /api/invitations/validate?token=xxx - Validate an invitation token
 export async function GET(request: NextRequest) {
@@ -17,39 +17,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Token is required" }, { status: 400 });
     }
 
-    console.log("🗄️ Creating Supabase client");
-    const supabase = await createClient();
-
     console.log("🔍 Finding invitation with token:", token);
-    // Find the invitation - use .maybeSingle() instead of .single() to avoid errors
-    const { data: invitations, error } = await supabase
-      .from("organization_invitations")
-      .select(
-        `
-        id,
-        organization_id,
-        email,
-        role_id,
-        status,
-        expires_at,
-        organizations:organization_id (
-          id,
-          name,
-          logo_url
-        ),
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        )
-      `
-      )
-      .eq("token", token)
-      .eq("status", "pending");
+    // Find the invitation
+    const invitations = await prisma.organizationInvitation.findMany({
+      where: {
+        token,
+        status: "pending",
+      },
+      include: {
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+          },
+        },
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     // Check if we found any invitations
-    if (error || !invitations || invitations.length === 0) {
+    if (!invitations || invitations.length === 0) {
       console.log("❌ No valid invitations found");
       return NextResponse.json(
         { error: "Invalid or expired invitation" },
@@ -61,9 +59,9 @@ export async function GET(request: NextRequest) {
     const invitation = invitations[0];
 
     // Check if invitation has expired
-    const isExpired = new Date(invitation.expires_at) < new Date();
+    const isExpired = invitation.expiresAt < new Date();
     console.log("⏰ Invitation expiration check:", {
-      expiresAt: invitation.expires_at,
+      expiresAt: invitation.expiresAt,
       isExpired,
     });
 
@@ -80,9 +78,18 @@ export async function GET(request: NextRequest) {
       invitation: {
         id: invitation.id,
         email: invitation.email,
-        organization: invitation.organizations,
-        role: invitation.roles,
-        expires_at: invitation.expires_at,
+        organization: {
+          id: invitation.organization.id,
+          name: invitation.organization.name,
+          logo_url: invitation.organization.logoUrl,
+        },
+        role: {
+          id: invitation.role.id,
+          name: invitation.role.name,
+          display_name: invitation.role.displayName,
+          description: invitation.role.description,
+        },
+        expires_at: invitation.expiresAt,
       },
     });
   } catch (error) {
@@ -110,18 +117,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log("🗄️ Creating Supabase client");
-    const supabase = await createClient();
-
     console.log("🔍 Finding invitation with token:", token);
-    // Find the invitation - use .maybeSingle() instead of .single() to avoid errors
-    const { data: invitations, error: inviteError } = await supabase
-      .from("organization_invitations")
-      .select("*")
-      .eq("token", token)
-      .eq("status", "pending");
+    // Find the invitation
+    const invitations = await prisma.organizationInvitation.findMany({
+      where: {
+        token,
+        status: "pending",
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
-    if (inviteError || !invitations || invitations.length === 0) {
+    if (!invitations || invitations.length === 0) {
       console.log("❌ No valid invitations found");
       return NextResponse.json(
         { error: "Invalid or expired invitation" },
@@ -133,9 +141,9 @@ export async function POST(request: NextRequest) {
     const invitation = invitations[0];
 
     // Check if invitation has expired
-    const isExpired = new Date(invitation.expires_at) < new Date();
+    const isExpired = invitation.expiresAt < new Date();
     console.log("⏰ Invitation expiration check:", {
-      expiresAt: invitation.expires_at,
+      expiresAt: invitation.expiresAt,
       isExpired,
     });
 
@@ -149,16 +157,15 @@ export async function POST(request: NextRequest) {
 
     // Check if user is already a member
     console.log("👥 Checking if user is already a member");
-    const { data: existingMember, error: memberCheckError } = await supabase
-      .from("organization_members")
-      .select("id")
-      .eq("organization_id", invitation.organization_id)
-      .eq("user_id", userId)
-      .single();
+    const existingMember = await prisma.organizationMember.findFirst({
+      where: {
+        organizationId: invitation.organizationId,
+        userId,
+      },
+    });
 
     console.log("📊 Member check result:", {
       isAlreadyMember: !!existingMember,
-      hasError: !!memberCheckError && memberCheckError.code !== "PGRST116",
     });
 
     if (existingMember) {
@@ -169,51 +176,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Add user as organization member
+    // Add user as organization member and update invitation in a transaction
     console.log("➕ Adding user as organization member");
-    const { data: member, error: memberError } = await supabase
-      .from("organization_members")
-      .insert({
-        organization_id: invitation.organization_id,
-        user_id: userId,
-        role_id: invitation.role_id,
-        status: "active",
-        invited_by: invitation.invited_by,
-      })
-      .select()
-      .single();
+    await prisma.$transaction(async (tx) => {
+      // Add user as organization member
+      await tx.organizationMember.create({
+        data: {
+          organizationId: invitation.organizationId,
+          userId,
+          roleId: invitation.roleId,
+          status: "active",
+          joinedAt: new Date(),
+        },
+      });
 
-    if (memberError) {
-      console.error("❌ Error creating member:", memberError);
-      return NextResponse.json(
-        { error: "Failed to accept invitation" },
-        { status: 500 }
-      );
-    }
+      console.log("✅ Member added successfully");
 
-    console.log("✅ Member added successfully");
+      // Mark invitation as accepted
+      console.log("✏️ Updating invitation status to accepted");
+      await tx.organizationInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: "accepted",
+          acceptedAt: new Date(),
+        },
+      });
 
-    // Mark invitation as accepted
-    console.log("✏️ Updating invitation status to accepted");
-    const { error: updateError } = await supabase
-      .from("organization_invitations")
-      .update({
-        status: "accepted",
-        accepted_at: new Date().toISOString(),
-      })
-      .eq("id", invitation.id);
-
-    if (updateError) {
-      console.error("⚠️ Error updating invitation:", updateError);
-      // Don't fail the request since member was created successfully
-    } else {
       console.log("✅ Invitation marked as accepted");
-    }
+    });
 
     return NextResponse.json({
       success: true,
       message: "Invitation accepted successfully",
-      organizationId: invitation.organization_id,
+      organizationId: invitation.organizationId,
     });
   } catch (error) {
     console.error("💥 Error accepting invitation:", error);

@@ -43,12 +43,24 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
   const createProjectMutation = useCreateProject();
   const updateProjectMutation = useUpdateProject();
 
-  // Reset form when modal closes
-  React.useEffect(() => {
-    if (!isOpen) {
-      reset();
+  // Helper function to format date for input field
+  const formatDateForInput = (date: string | Date | null | undefined): string => {
+    if (!date) return "";
+    if (typeof date === 'string') {
+      // If it's already a date string (YYYY-MM-DD), return it
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return date;
+      }
+      // If it's an ISO string, extract the date part
+      return date.split('T')[0];
     }
-  }, [isOpen]);
+    // If it's a Date object, convert to YYYY-MM-DD
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
   const {
     register,
@@ -57,37 +69,40 @@ const ProjectModal: React.FC<ProjectModalProps> = ({
     formState: { errors },
     reset,
   } = useForm<FormData>({
-    defaultValues: project
-      ? {
-          name: project.name,
-          description: project.description || "",
-          start_date:
-            project.start_date || new Date().toISOString().split("T")[0],
-          end_date:
-            project.end_date ||
-            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-              .toISOString()
-              .split("T")[0],
-          project_type: project.project_type,
-          budget_hours: project.budget_hours || 0,
-          budget_amount: project.budget_amount || 0,
-          billing_rate: project.billing_rate || 0,
-          status: project.status,
-        }
-      : {
-          name: "",
-          description: "",
-          start_date: new Date().toISOString().split("T")[0],
-          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .split("T")[0],
-          project_type: "time_materials",
-          budget_hours: 0,
-          budget_amount: 0,
-          billing_rate: 0,
-          status: "active",
-        },
+    defaultValues: {
+      name: "",
+      description: "",
+      start_date: new Date().toISOString().split("T")[0],
+      end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0],
+      project_type: "time_materials",
+      budget_hours: 0,
+      budget_amount: 0,
+      billing_rate: 0,
+      status: "active",
+    },
   });
+
+  // Reset form when modal closes or project changes
+  React.useEffect(() => {
+    if (!isOpen) {
+      reset();
+    } else if (project) {
+      // Reset form with project data when modal opens with a project
+      reset({
+        name: project.name,
+        description: project.description || "",
+        start_date: formatDateForInput(project.start_date) || new Date().toISOString().split("T")[0],
+        end_date: formatDateForInput(project.end_date) || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        project_type: project.project_type,
+        budget_hours: project.budget_hours || 0,
+        budget_amount: project.budget_amount || 0,
+        billing_rate: project.billing_rate || 0,
+        status: project.status,
+      });
+    }
+  }, [isOpen, project, reset]);
 
   const watchedProjectType = watch("project_type");
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function PATCH(req: NextRequest) {
@@ -37,85 +37,92 @@ export async function PATCH(req: NextRequest) {
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
 
     // Verify board exists and belongs to this organization
-    const { data: board, error: boardError } = await supabase
-      .from("boards")
-      .select(
-        `
-        id,
-        project_id,
-        projects!inner (
-          id,
-          organization_id
-        )
-      `
-      )
-      .eq("id", board_id)
-      .eq("projects.organization_id", organizationId)
-      .single();
+    const board = await prisma.board.findFirst({
+      where: {
+        id: board_id,
+        project: {
+          organizationId,
+        },
+      },
+      select: {
+        id: true,
+        projectId: true,
+      },
+    });
 
-    if (boardError || !board) {
-      console.error("Board not found error:", boardError);
+    if (!board) {
       return NextResponse.json({ error: "Board not found" }, { status: 404 });
     }
 
     // Verify all lists belong to the board
     const listIds = list_positions.map((lp) => lp.list_id);
-    const { data: lists, error: listsError } = await supabase
-      .from("lists")
-      .select("id, name")
-      .eq("board_id", board_id)
-      .in("id", listIds);
+    const lists = await prisma.list.findMany({
+      where: {
+        boardId: board_id,
+        id: {
+          in: listIds,
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    if (listsError || !lists || lists.length !== listIds.length) {
+    if (lists.length !== listIds.length) {
       return NextResponse.json(
         { error: "Some lists not found in the specified board" },
         { status: 404 }
       );
     }
 
-    const results: any[] = [];
+    // Update positions and create activity log in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      const results: any[] = [];
 
-    // Update position for each list
-    for (const { list_id, position } of list_positions) {
-      const { data: updatedList, error: updateError } = await supabase
-        .from("lists")
-        .update({ position })
-        .eq("id", list_id)
-        .eq("board_id", board_id)
-        .select()
-        .single();
-
-      if (updateError) {
-        results.push({ list_id, success: false, error: updateError.message });
-      } else {
-        results.push({ list_id, success: true, list: updatedList });
+      // Update position for each list
+      for (const { list_id, position } of list_positions) {
+        try {
+          const updatedList = await tx.list.update({
+            where: { id: list_id },
+            data: { position },
+          });
+          results.push({ list_id, success: true, list: updatedList });
+        } catch (error: any) {
+          results.push({
+            list_id,
+            success: false,
+            error: error.message || "Update failed",
+          });
+        }
       }
-    }
 
-    // Create activity log for reordering
-    await supabase.from("activities").insert([
-      {
-        user_id: userContext!.userId,
-        board_id: board_id,
-        action_type: "update",
-        entity_type: "board",
-        entity_id: board_id,
-        details: {
-          action: "reorder_lists",
-          list_count: list_positions.length,
-          new_positions: list_positions,
+      // Create activity log for reordering
+      await tx.activity.create({
+        data: {
+          userId: userContext!.userId,
+          boardId: board_id,
+          actionType: "update",
+          entityType: "board",
+          entityId: board_id,
+          details: {
+            action: "reorder_lists",
+            list_count: list_positions.length,
+            new_positions: list_positions,
+          },
         },
-      },
-    ]);
+      });
 
-    const successCount = results.filter((r) => r.success).length;
-    const errorCount = results.filter((r) => !r.success).length;
+      return results;
+    });
+
+    const successCount = result.filter((r) => r.success).length;
+    const errorCount = result.filter((r) => !r.success).length;
 
     return NextResponse.json({
-      results,
+      results: result,
       summary: {
         total: list_positions.length,
         successful: successCount,

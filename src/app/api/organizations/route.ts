@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 
@@ -11,89 +11,57 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
-
-    // Try cache first (15 days TTL elsewhere when set)
     const userId = session.user.id;
 
     // Get user's organizations with complete membership and role data
-    const { data: organizations, error } = await supabase
-      .from("organization_members")
-      .select(
-        `
-        id,
-        organization_id,
-        user_id,
-        role_id,
-        status,
-        hourly_rate,
-        weekly_capacity,
-        department,
-        hire_date,
-        joined_at,
-        organizations!inner(
-          id,
-          name,
-          slug,
-          description,
-          logo_url,
-          owner_id,
-          created_at
-        ),
-        roles!inner(
-          id,
-          name,
-          display_name,
-          description,
-          role_permissions!inner(
-            permissions!inner(
-              module,
-              action
-            )
-          )
-        )
-      `
-      )
-      .eq("user_id", session.user.id)
-      .eq("status", "active");
+    const memberships = await prisma.organizationMember.findMany({
+      where: {
+        userId,
+        status: "active",
+      },
+      include: {
+        organization: true,
+        role: {
+          include: {
+            rolePermissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (error) {
-      console.error("Error fetching organizations:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch organizations" },
-        { status: 500 }
-      );
-    }
-
-    const transformedOrganizations = organizations?.map((org: any) => ({
-      id: org.organizations.id,
-      name: org.organizations.name,
-      slug: org.organizations.slug,
-      description: org.organizations.description,
-      logo_url: org.organizations.logo_url,
-      is_owner: org.organizations.owner_id === session.user.id,
-      created_at: org.organizations.created_at,
+    const transformedOrganizations = memberships.map((org) => ({
+      id: org.organization.id,
+      name: org.organization.name,
+      slug: org.organization.slug,
+      description: org.organization.description,
+      logo_url: org.organization.logoUrl,
+      is_owner: org.organization.ownerId === userId,
+      created_at: org.organization.createdAt,
       membership_status: org.status,
       membership: {
         id: org.id,
-        organization_id: org.organization_id,
-        user_id: org.user_id,
-        role_id: org.role_id,
+        organization_id: org.organizationId,
+        user_id: org.userId,
+        role_id: org.roleId,
         status: org.status,
-        hourly_rate: org.hourly_rate,
-        weekly_capacity: org.weekly_capacity,
+        hourly_rate: org.hourlyRate,
+        weekly_capacity: org.weeklyCapacity,
         department: org.department,
-        hire_date: org.hire_date,
-        joined_at: org.joined_at,
+        hire_date: org.hireDate,
+        joined_at: org.joinedAt,
         role: {
-          id: org.roles.id,
-          name: org.roles.name,
-          display_name: org.roles.display_name,
-          description: org.roles.description,
+          id: org.role.id,
+          name: org.role.name,
+          display_name: org.role.displayName,
+          description: org.role.description,
           permissions:
-            org.roles.role_permissions?.map((rp: any) => ({
-              resource: rp.permissions.module,
-              action: rp.permissions.action,
+            org.role.rolePermissions?.map((rp) => ({
+              resource: rp.permission.module,
+              action: rp.permission.action,
             })) || [],
         },
       },
@@ -117,7 +85,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
     const body = await request.json();
     const { name, description } = body;
 
@@ -140,69 +107,91 @@ export async function POST(request: NextRequest) {
       "-" +
       Math.random().toString(36).substr(2, 8);
 
-    // Create the organization
-    const { data: organization, error: orgError } = await supabase
-      .from("organizations")
-      .insert({
-        name,
-        slug,
-        description: description || null,
-        owner_id: session.user.id,
-      })
-      .select()
-      .single();
-
-    if (orgError) {
-      console.error("Error creating organization:", orgError);
-      return NextResponse.json(
-        { error: "Failed to create organization" },
-        { status: 500 }
-      );
-    }
-
-    // Get the admin role for this organization (created by trigger)
-    const { data: adminRole, error: roleError } = await supabase
-      .from("roles")
-      .select("id")
-      .eq("name", "admin")
-      .eq("organization_id", organization.id)
-      .eq("is_system_role", false)
-      .single();
-
-    if (roleError || !adminRole) {
-      console.error("Error finding admin role:", roleError);
-      return NextResponse.json(
-        { error: "Failed to set up organization roles" },
-        { status: 500 }
-      );
-    }
-
-    // Add the creator as an admin member
-    const { error: memberError } = await supabase
-      .from("organization_members")
-      .insert({
-        organization_id: organization.id,
-        user_id: session.user.id,
-        role_id: adminRole.id,
-        status: "active",
+    // Create the organization and set up default roles and membership in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create the organization
+      const organization = await tx.organization.create({
+        data: {
+          name,
+          slug,
+          description: description || null,
+          ownerId: session.user.id,
+        },
       });
 
-    if (memberError) {
-      console.error("Error adding organization member:", memberError);
-      return NextResponse.json(
-        { error: "Failed to add user to organization" },
-        { status: 500 }
-      );
-    }
+      // Create default roles for the organization
+      const adminRole = await tx.role.create({
+        data: {
+          name: "admin",
+          displayName: "Organization Administrator",
+          description: "Full control over organization",
+          isSystemRole: false,
+          organizationId: organization.id,
+        },
+      });
+
+      const managerRole = await tx.role.create({
+        data: {
+          name: "manager",
+          displayName: "Manager",
+          description: "Project and team management",
+          isSystemRole: false,
+          organizationId: organization.id,
+        },
+      });
+
+      const memberRole = await tx.role.create({
+        data: {
+          name: "member",
+          displayName: "Team Member",
+          description: "Basic team member access",
+          isSystemRole: false,
+          organizationId: organization.id,
+        },
+      });
+
+      // Get default permissions for admin role (copy from existing system admin if exists)
+      const systemAdminRole = await tx.role.findFirst({
+        where: {
+          name: "admin",
+          isSystemRole: true,
+        },
+        include: {
+          rolePermissions: true,
+        },
+      });
+
+      if (systemAdminRole) {
+        // Copy permissions to new admin role
+        await tx.rolePermission.createMany({
+          data: systemAdminRole.rolePermissions.map((rp) => ({
+            roleId: adminRole.id,
+            permissionId: rp.permissionId,
+          })),
+        });
+      }
+
+      // Add the creator as an admin member
+      await tx.organizationMember.create({
+        data: {
+          organizationId: organization.id,
+          userId: session.user.id,
+          roleId: adminRole.id,
+          status: "active",
+        },
+      });
+
+      return organization;
+    });
 
     return NextResponse.json({
       organization: {
-        id: organization.id,
-        name: organization.name,
-        slug: organization.slug,
-        description: organization.description,
+        id: result.id,
+        name: result.name,
+        slug: result.slug,
+        description: result.description,
         is_owner: true,
-        created_at: organization.created_at,
+        created_at: result.createdAt,
       },
       message: "Organization created successfully",
     });

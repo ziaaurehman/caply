@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import {
   validateOrganizationAccess,
   validateOrganizationAccessWithId,
@@ -42,38 +42,25 @@ export async function GET(
       );
     }
 
-    const supabase = await createClient();
     const roleId = params.id;
     const organizationId = validation.context!.organizationId;
 
     // Get role details
-    const { data: role, error } = await supabase
-      .from("roles")
-      .select(
-        `
-        id,
-        name,
-        display_name,
-        description,
-        is_system_role,
-        organization_id,
-        role_permissions:role_permissions(
-          permissions:permission_id(
-            id,
-            name,
-            display_name,
-            description,
-            module,
-            action
-          )
-        )
-      `
-      )
-      .eq("id", roleId)
-      .eq("organization_id", organizationId)
-      .single();
+    const role = await prisma.role.findFirst({
+      where: {
+        id: roleId,
+        organizationId,
+      },
+      include: {
+        rolePermissions: {
+          include: {
+            permission: true,
+          },
+        },
+      },
+    });
 
-    if (error || !role) {
+    if (!role) {
       return NextResponse.json({ error: "Role not found" }, { status: 404 });
     }
 
@@ -81,14 +68,12 @@ export async function GET(
     const transformedRole = {
       id: role.id,
       name: role.name,
-      display_name: role.display_name,
+      display_name: role.displayName,
       description: role.description,
-      is_system_role: role.is_system_role,
-      organization_id: role.organization_id,
+      is_system_role: role.isSystemRole,
+      organization_id: role.organizationId,
       permissions:
-        role.role_permissions
-          ?.map((rp: any) => rp.permissions)
-          .filter(Boolean) || [],
+        role.rolePermissions?.map((rp) => rp.permission).filter(Boolean) || [],
     };
 
     return NextResponse.json({ role: transformedRole });
@@ -134,55 +119,44 @@ export async function PUT(
       );
     }
 
-    const supabase = await createClient();
     const roleId = params.id;
     const organizationId = validation.context!.organizationId;
 
     const body = await request.json();
     const { display_name, description, permission_ids } = body;
 
-    // Update role basic info
-    const { error: updateError } = await supabase
-      .from("roles")
-      .update({
-        display_name,
-        description,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", roleId)
-      .eq("organization_id", organizationId);
+    // Update role and permissions in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Update role basic info
+      await tx.role.update({
+        where: {
+          id: roleId,
+          organizationId,
+        },
+        data: {
+          displayName: display_name,
+          description,
+        },
+      });
 
-    if (updateError) {
-      console.error("Error updating role:", updateError);
-      return NextResponse.json(
-        { error: "Failed to update role" },
-        { status: 500 }
-      );
-    }
+      // Update permissions if provided
+      if (permission_ids && Array.isArray(permission_ids)) {
+        // Delete existing permissions
+        await tx.rolePermission.deleteMany({
+          where: { roleId },
+        });
 
-    // Update permissions if provided
-    if (permission_ids && Array.isArray(permission_ids)) {
-      // Delete existing permissions
-      await supabase.from("role_permissions").delete().eq("role_id", roleId);
-
-      // Add new permissions
-      const permissionInserts = permission_ids.map((permissionId) => ({
-        role_id: roleId,
-        permission_id: permissionId,
-      }));
-
-      const { error: permissionsError } = await supabase
-        .from("role_permissions")
-        .insert(permissionInserts);
-
-      if (permissionsError) {
-        console.error("Error updating permissions:", permissionsError);
-        return NextResponse.json(
-          { error: "Failed to update permissions" },
-          { status: 500 }
-        );
+        // Add new permissions
+        if (permission_ids.length > 0) {
+          await tx.rolePermission.createMany({
+            data: permission_ids.map((permissionId: string) => ({
+              roleId,
+              permissionId,
+            })),
+          });
+        }
       }
-    }
+    });
 
     return NextResponse.json({ message: "Role updated successfully" });
   } catch (error) {
@@ -227,19 +201,22 @@ export async function DELETE(
       );
     }
 
-    const supabase = await createClient();
     const roleId = params.id;
     const organizationId = validation.context!.organizationId;
 
     // Check if role exists and belongs to the organization
-    const { data: roleToDelete, error: roleError } = await supabase
-      .from("roles")
-      .select("id, name")
-      .eq("id", roleId)
-      .eq("organization_id", organizationId)
-      .single();
+    const roleToDelete = await prisma.role.findFirst({
+      where: {
+        id: roleId,
+        organizationId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    if (roleError || !roleToDelete) {
+    if (!roleToDelete) {
       return NextResponse.json({ error: "Role not found" }, { status: 404 });
     }
 
@@ -254,21 +231,17 @@ export async function DELETE(
     }
 
     // Check if role is being used by any members
-    const { data: membersWithRole, error: membersError } = await supabase
-      .from("organization_members")
-      .select("id")
-      .eq("role_id", roleId)
-      .eq("organization_id", organizationId);
+    const membersWithRole = await prisma.organizationMember.findMany({
+      where: {
+        roleId,
+        organizationId,
+      },
+      select: {
+        id: true,
+      },
+    });
 
-    if (membersError) {
-      console.error("Error checking role usage:", membersError);
-      return NextResponse.json(
-        { error: "Failed to check role usage" },
-        { status: 500 }
-      );
-    }
-
-    if (membersWithRole && membersWithRole.length > 0) {
+    if (membersWithRole.length > 0) {
       return NextResponse.json(
         {
           error: "Cannot delete role that is assigned to team members",
@@ -278,19 +251,11 @@ export async function DELETE(
     }
 
     // Delete the role (permissions will be deleted automatically via CASCADE)
-    const { error: deleteError } = await supabase
-      .from("roles")
-      .delete()
-      .eq("id", roleId)
-      .eq("organization_id", organizationId);
-
-    if (deleteError) {
-      console.error("Error deleting role:", deleteError);
-      return NextResponse.json(
-        { error: "Failed to delete role" },
-        { status: 500 }
-      );
-    }
+    await prisma.role.delete({
+      where: {
+        id: roleId,
+      },
+    });
 
     return NextResponse.json({ message: "Role deleted successfully" });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 
@@ -9,73 +9,96 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = await createClient();
   const { searchParams } = new URL(req.url);
   const isRead = searchParams.get("is_read");
   const limit = parseInt(searchParams.get("limit") || "50");
   const offset = parseInt(searchParams.get("offset") || "0");
 
-  let query = supabase
-    .from("board_notifications")
-    .select(
-      `
-      *,
-      cards (
-        id,
-        title,
-        lists (
-          id,
-          name,
-          boards (
-            id,
-            name
-          )
-        )
-      ),
-      boards (
-        id,
-        name
-      )
-    `
-    )
-    .eq("user_id", session.user.id);
+  // Build where clause
+  const where: any = {
+    userId: session.user.id,
+  };
 
   // Filter by read status if provided
   if (isRead !== null) {
-    query = query.eq("is_read", isRead === "true");
+    where.isRead = isRead === "true";
   }
 
-  const { data: notifications, error } = await query
-    .order("created_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+  // Get notifications with pagination
+  const [notifications, total] = await Promise.all([
+    prisma.boardNotification.findMany({
+      where,
+      include: {
+        card: {
+          include: {
+            list: {
+              include: {
+                board: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        board: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      skip: offset,
+      take: limit,
+    }),
+    prisma.boardNotification.count({ where }),
+  ]);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Get total count for pagination
-  let countQuery = supabase
-    .from("board_notifications")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", session.user.id);
-
-  if (isRead !== null) {
-    countQuery = countQuery.eq("is_read", isRead === "true");
-  }
-
-  const { count, error: countError } = await countQuery;
-
-  if (countError) {
-    return NextResponse.json({ error: countError.message }, { status: 500 });
-  }
+  // Transform to match expected format
+  const transformedNotifications = notifications.map((notification) => ({
+    id: notification.id,
+    user_id: notification.userId,
+    type: notification.type,
+    title: notification.title,
+    message: notification.message,
+    is_read: notification.isRead,
+    related_card_id: notification.relatedCardId,
+    related_board_id: notification.relatedBoardId,
+    created_at: notification.createdAt,
+    cards: notification.card
+      ? {
+          id: notification.card.id,
+          title: notification.card.title,
+          lists: {
+            id: notification.card.list.id,
+            name: notification.card.list.name,
+            boards: {
+              id: notification.card.list.board.id,
+              name: notification.card.list.board.name,
+            },
+          },
+        }
+      : null,
+    boards: notification.board
+      ? {
+          id: notification.board.id,
+          name: notification.board.name,
+        }
+      : null,
+  }));
 
   return NextResponse.json({
-    notifications: notifications || [],
+    notifications: transformedNotifications,
     pagination: {
-      total: count || 0,
+      total,
       limit,
       offset,
-      has_more: (count || 0) > offset + limit,
+      has_more: total > offset + limit,
     },
   });
 }
@@ -86,7 +109,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = await createClient();
   const body = await req.json();
   const { user_id, type, title, message, related_card_id, related_board_id } =
     body;
@@ -98,14 +120,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Verify the target user exists and has access to the related resources
-  const { data: targetUser, error: userError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("id", user_id)
-    .single();
+  // Verify the target user exists
+  const targetUser = await prisma.user.findUnique({
+    where: { id: user_id },
+    select: { id: true },
+  });
 
-  if (userError || !targetUser) {
+  if (!targetUser) {
     return NextResponse.json(
       { error: "Target user not found" },
       { status: 404 }
@@ -114,30 +135,27 @@ export async function POST(req: NextRequest) {
 
   // If related to a card, verify access
   if (related_card_id) {
-    const { data: card, error: cardError } = await supabase
-      .from("cards")
-      .select(
-        `
-        id,
-        lists!inner (
-          id,
-          boards!inner (
-            id,
-            projects!inner (
-              organization_members!inner (
-                user_id
-              )
-            )
-          )
-        )
-      `
-      )
-      .eq("id", related_card_id)
-      .eq("lists.boards.projects.organization_members.user_id", user_id)
-      .eq("lists.boards.projects.organization_members.status", "active")
-      .single();
+    const card = await prisma.card.findFirst({
+      where: {
+        id: related_card_id,
+        list: {
+          board: {
+            project: {
+              projectMembers: {
+                some: {
+                  organizationMember: {
+                    userId: user_id,
+                    status: "active",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (cardError || !card) {
+    if (!card) {
       return NextResponse.json(
         { error: "Card not found or user does not have access" },
         { status: 404 }
@@ -147,24 +165,23 @@ export async function POST(req: NextRequest) {
 
   // If related to a board, verify access
   if (related_board_id) {
-    const { data: board, error: boardError } = await supabase
-      .from("boards")
-      .select(
-        `
-        id,
-        projects!inner (
-          organization_members!inner (
-            user_id
-          )
-        )
-      `
-      )
-      .eq("id", related_board_id)
-      .eq("projects.organization_members.user_id", user_id)
-      .eq("projects.organization_members.status", "active")
-      .single();
+    const board = await prisma.board.findFirst({
+      where: {
+        id: related_board_id,
+        project: {
+          projectMembers: {
+            some: {
+              organizationMember: {
+                userId: user_id,
+                status: "active",
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (boardError || !board) {
+    if (!board) {
       return NextResponse.json(
         { error: "Board not found or user does not have access" },
         { status: 404 }
@@ -173,24 +190,16 @@ export async function POST(req: NextRequest) {
   }
 
   // Create notification
-  const { data: notification, error } = await supabase
-    .from("board_notifications")
-    .insert([
-      {
-        user_id,
-        type,
-        title,
-        message,
-        related_card_id,
-        related_board_id,
-      },
-    ])
-    .select()
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  const notification = await prisma.boardNotification.create({
+    data: {
+      userId: user_id,
+      type,
+      title,
+      message,
+      relatedCardId: related_card_id || null,
+      relatedBoardId: related_board_id || null,
+    },
+  });
 
   return NextResponse.json({ notification });
 }

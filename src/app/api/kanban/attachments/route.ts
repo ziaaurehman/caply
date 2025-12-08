@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { createClient } from "@/utils/supabase/server"; // Keep for file storage
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
@@ -41,60 +42,69 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Verify card exists and user has access through project organization
-    const { data: card, error: cardError } = await supabase
-      .from("cards")
-      .select(
-        `
-        id,
-        title,
-        list_id,
-        lists!inner (
-          id,
-          board_id,
-          boards!inner (
-            id,
-            project_id,
-            projects!inner (
-              id,
-              organization_id
-            )
-          )
-        )
-      `
-      )
-      .eq("id", cardId)
-      .eq("lists.boards.projects.organization_id", organizationId)
-      .single();
+    const card = await prisma.card.findFirst({
+      where: {
+        id: cardId,
+        list: {
+          board: {
+            project: {
+              organizationId,
+            },
+          },
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        listId: true,
+      },
+    });
 
-    if (cardError || !card) {
+    if (!card) {
       return NextResponse.json({ error: "Card not found" }, { status: 404 });
     }
 
     // Get attachments for the card
-    const { data: attachments, error } = await supabase
-      .from("attachments")
-      .select(
-        `
-        *,
-        users (
-          id,
-          full_name,
-          email,
-          avatar_url
-        )
-      `
-      )
-      .eq("card_id", cardId)
-      .order("uploaded_at", { ascending: false });
+    const attachments = await prisma.attachment.findMany({
+      where: {
+        cardId,
+      },
+      include: {
+        uploader: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+      orderBy: {
+        uploadedAt: "desc",
+      },
+    });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    // Transform to match expected format
+    const transformedAttachments = attachments.map((attachment) => ({
+      id: attachment.id,
+      card_id: attachment.cardId,
+      filename: attachment.filename,
+      original_filename: attachment.originalFilename,
+      file_path: attachment.filePath,
+      file_size: attachment.fileSize,
+      mime_type: attachment.mimeType,
+      uploaded_by: attachment.uploadedBy,
+      uploaded_at: attachment.uploadedAt,
+      users: {
+        id: attachment.uploader.id,
+        full_name: attachment.uploader.fullName,
+        email: attachment.uploader.email,
+        avatar_url: attachment.uploader.avatarUrl,
+      },
+    }));
 
-    const result = { attachments: attachments || [] };
+    const result = { attachments: transformedAttachments };
     return NextResponse.json(result);
   } catch (error) {
     console.error("Error fetching attachments:", error);
@@ -148,39 +158,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Verify card exists and user has access through project organization
-    const { data: card, error: cardError } = await supabase
-      .from("cards")
-      .select(
-        `
-        id,
-        title,
-        list_id,
-        lists!inner (
-          id,
-          board_id,
-          boards!inner (
-            id,
-            project_id,
-            projects!inner (
-              id,
-              organization_id
-            )
-          )
-        )
-      `
-      )
-      .eq("id", cardId)
-      .eq("lists.boards.projects.organization_id", organizationId)
-      .single();
+    const card = await prisma.card.findFirst({
+      where: {
+        id: cardId,
+        list: {
+          board: {
+            project: {
+              organizationId,
+            },
+          },
+        },
+      },
+      include: {
+        list: {
+          select: {
+            boardId: true,
+          },
+        },
+      },
+    });
 
-    if (cardError || !card) {
+    if (!card) {
       return NextResponse.json({ error: "Card not found" }, { status: 404 });
     }
 
-    // Upload file to Supabase storage
+    // Upload file to Supabase storage (keeping Supabase for file storage)
+    const supabase = await createClient();
     const fileExt = file.name.split(".").pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
     const filePath = `card-attachments/${cardId}/${fileName}`;
@@ -200,60 +204,75 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Create attachment record
-    const { data: attachment, error: attachmentError } = await supabase
-      .from("attachments")
-      .insert([
-        {
-          card_id: cardId,
+    // Create attachment record and activity log in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create attachment record
+      const attachment = await tx.attachment.create({
+        data: {
+          cardId,
           filename: fileName,
-          original_filename: file.name,
-          file_path: uploadData.path,
-          file_size: file.size,
-          mime_type: file.type,
-          uploaded_by: session.user.id,
+          originalFilename: file.name,
+          filePath: uploadData.path,
+          fileSize: BigInt(file.size),
+          mimeType: file.type,
+          uploadedBy: session.user.id,
         },
-      ])
-      .select(
-        `
-        *,
-        users (
-          id,
-          full_name,
-          email,
-          avatar_url
-        )
-      `
-      )
-      .single();
+        include: {
+          uploader: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              avatarUrl: true,
+            },
+          },
+        },
+      });
 
-    if (attachmentError) {
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: session.user.id,
+          boardId: card.list.boardId,
+          cardId: cardId,
+          actionType: "create",
+          entityType: "attachment",
+          entityId: attachment.id,
+          details: {
+            filename: file.name,
+            file_size: file.size,
+            card_title: card.title,
+          },
+        },
+      });
+
+      return attachment;
+    }).catch(async (error) => {
       // Clean up uploaded file if database insert fails
       await supabase.storage.from("caply").remove([filePath]);
-      return NextResponse.json(
-        { error: attachmentError.message },
-        { status: 500 }
-      );
-    }
+      throw error;
+    });
 
-    // Create activity log
-    await supabase.from("activities").insert([
-      {
-        user_id: session.user.id,
-        board_id: (card.lists as any).board_id,
-        card_id: cardId,
-        action_type: "create",
-        entity_type: "attachment",
-        entity_id: attachment.id,
-        details: {
-          filename: file.name,
-          file_size: file.size,
-          card_title: card.title,
-        },
+    // Transform to match expected format
+    const transformedAttachment = {
+      id: result.id,
+      card_id: result.cardId,
+      filename: result.filename,
+      original_filename: result.originalFilename,
+      file_path: result.filePath,
+      file_size: result.fileSize,
+      mime_type: result.mimeType,
+      uploaded_by: result.uploadedBy,
+      uploaded_at: result.uploadedAt,
+      users: {
+        id: result.uploader.id,
+        full_name: result.uploader.fullName,
+        email: result.uploader.email,
+        avatar_url: result.uploader.avatarUrl,
       },
-    ]);
+    };
 
-    return NextResponse.json({ attachment });
+    return NextResponse.json({ attachment: transformedAttachment });
   } catch (error) {
     console.error("Error creating attachment:", error);
     return NextResponse.json(

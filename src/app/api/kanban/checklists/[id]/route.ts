@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 
@@ -12,75 +12,90 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = await createClient();
   const { id: checklistId } = await params;
   const body = await req.json();
   const { name, position } = body;
 
   // Check if user has access to the checklist
-  const { data: existingChecklist, error: checklistError } = await supabase
-    .from("checklists")
-    .select(
-      `
-      *,
-      cards!inner (
-        id,
-        title,
-        lists!inner (
-          id,
-          boards!inner (
-            id,
-            projects!inner (
-              organization_members!inner (
-                user_id
-              )
-            )
-          )
-        )
-      )
-    `
-    )
-    .eq("id", checklistId)
-    .eq(
-      "cards.lists.boards.projects.organization_members.user_id",
-      session.user.id
-    )
-    .eq("cards.lists.boards.projects.organization_members.status", "active")
-    .single();
+  const existingChecklist = await prisma.checklist.findFirst({
+    where: {
+      id: checklistId,
+      card: {
+        list: {
+          board: {
+            project: {
+              projectMembers: {
+                some: {
+                  organizationMember: {
+                    userId: session.user.id,
+                    status: "active",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    include: {
+      card: {
+        include: {
+          list: {
+            include: {
+              board: {
+                select: {
+                  id: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
 
-  if (checklistError || !existingChecklist) {
+  if (!existingChecklist) {
     return NextResponse.json({ error: "Checklist not found" }, { status: 404 });
   }
 
-  // Update checklist
-  const { data: checklist, error } = await supabase
-    .from("checklists")
-    .update({
-      name,
-      position,
-    })
-    .eq("id", checklistId)
-    .select()
-    .single();
+  // Update checklist and create activity log in a transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // Update checklist
+    const checklist = await tx.checklist.update({
+      where: { id: checklistId },
+      data: {
+        name: name !== undefined ? name : undefined,
+        position: position !== undefined ? position : undefined,
+      },
+    });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+    // Create activity log
+    await tx.activity.create({
+      data: {
+        userId: session.user.id,
+        boardId: existingChecklist.card.list.board.id,
+        cardId: existingChecklist.cardId,
+        actionType: "update",
+        entityType: "checklist",
+        entityId: checklistId,
+        details: { changes: body },
+      },
+    });
 
-  // Create activity log
-  await supabase.from("activities").insert([
-    {
-      user_id: session.user.id,
-      board_id: (existingChecklist.cards as any).lists.boards.id,
-      card_id: existingChecklist.card_id,
-      action_type: "update",
-      entity_type: "checklist",
-      entity_id: checklistId,
-      details: { changes: body },
-    },
-  ]);
+    return checklist;
+  });
 
-  return NextResponse.json({ checklist });
+  // Transform to match expected format
+  const transformedChecklist = {
+    id: result.id,
+    card_id: result.cardId,
+    name: result.name,
+    position: result.position,
+    created_at: result.createdAt,
+    updated_at: result.updatedAt,
+  };
+
+  return NextResponse.json({ checklist: transformedChecklist });
 }
 
 export async function DELETE(
@@ -92,94 +107,81 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = await createClient();
   const { id: checklistId } = await params;
 
   // First, get the checklist with basic card info
-  const { data: checklist, error: checklistError } = await supabase
-    .from("checklists")
-    .select(
-      `
-      *,
-      cards (
-        id,
-        title,
-        list_id,
-        lists (
-          id,
-          board_id,
-          boards (
-            id,
-            project_id,
-            projects (
-              id,
-              organization_id
-            )
-          )
-        )
-      )
-    `
-    )
-    .eq("id", checklistId)
-    .single();
+  const checklist = await prisma.checklist.findUnique({
+    where: { id: checklistId },
+    include: {
+      card: {
+        include: {
+          list: {
+            include: {
+              board: {
+                include: {
+                  project: {
+                    select: {
+                      id: true,
+                      organizationId: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
 
-  if (checklistError || !checklist) {
-    console.error("Checklist not found:", checklistError);
+  if (!checklist) {
     return NextResponse.json({ error: "Checklist not found" }, { status: 404 });
   }
 
   // Check if user has access to the project
-  const projectId = checklist.cards?.lists?.boards?.projects?.id;
-  if (!projectId) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
+  const organizationId =
+    checklist.card.list.board.project.organizationId;
 
-  const { data: organizationMember, error: memberError } = await supabase
-    .from("organization_members")
-    .select("id, status")
-    .eq("user_id", session.user.id)
-    .eq(
-      "organization_id",
-      checklist.cards?.lists?.boards?.projects?.organization_id
-    )
-    .eq("status", "active")
-    .single();
+  const organizationMember = await prisma.organizationMember.findFirst({
+    where: {
+      userId: session.user.id,
+      organizationId,
+      status: "active",
+    },
+  });
 
-  if (memberError || !organizationMember) {
+  if (!organizationMember) {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
 
-  // Delete checklist (CASCADE will handle checklist_items)
-  const { error: deleteError } = await supabase
-    .from("checklists")
-    .delete()
-    .eq("id", checklistId);
+  // Delete checklist and create activity log in a transaction
+  await prisma.$transaction(async (tx) => {
+    // Delete checklist (CASCADE will handle checklist_items)
+    await tx.checklist.delete({
+      where: { id: checklistId },
+    });
 
-  if (deleteError) {
-    console.error("Error deleting checklist:", deleteError);
-    return NextResponse.json({ error: deleteError.message }, { status: 500 });
-  }
-
-  // Create activity log
-  try {
-    await supabase.from("activities").insert([
-      {
-        user_id: session.user.id,
-        board_id: checklist.cards?.lists?.boards?.id,
-        card_id: checklist.card_id,
-        action_type: "delete",
-        entity_type: "checklist",
-        entity_id: checklistId,
-        details: {
-          checklist_name: checklist.name || checklist.title,
-          card_title: checklist.cards?.title,
+    // Create activity log
+    try {
+      await tx.activity.create({
+        data: {
+          userId: session.user.id,
+          boardId: checklist.card.list.board.id,
+          cardId: checklist.cardId,
+          actionType: "delete",
+          entityType: "checklist",
+          entityId: checklistId,
+          details: {
+            checklist_name: checklist.name,
+            card_title: checklist.card.title,
+          },
         },
-      },
-    ]);
-  } catch (activityError) {
-    console.error("Error creating activity log:", activityError);
-    // Don't fail the request if activity log fails
-  }
+      });
+    } catch (activityError) {
+      console.error("Error creating activity log:", activityError);
+      // Don't fail the request if activity log fails
+    }
+  });
 
   return NextResponse.json({ success: true });
 }

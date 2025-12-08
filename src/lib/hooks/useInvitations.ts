@@ -80,7 +80,7 @@ export function useInvitations() {
       setInvitations(prev => prev.filter(inv => inv.token !== token))
       
       // Refresh user's organizations to include the newly joined one
-      await fetchUserOrganizations()
+      await fetchUserOrganizations(session?.user?.id)
       
       // Switch to the newly joined organization
       if (data.organization?.id) {

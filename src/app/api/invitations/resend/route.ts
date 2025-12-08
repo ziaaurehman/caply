@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { sendInvitationEmail } from "@/lib/email";
 import crypto from "crypto";
@@ -23,46 +23,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Get the invitation details
-    const { data: invitation, error: inviteError } = await supabase
-      .from("organization_invitations")
-      .select(
-        `
-        id,
-        organization_id,
-        email,
-        role_id,
-        status,
-        expires_at,
-        created_at,
-        message,
-        token,
-        invited_by,
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        ),
-        organizations:organization_id (
-          id,
-          name,
-          logo_url
-        ),
-        invited_by_user:invited_by (
-          id,
-          full_name,
-          email
-        )
-      `
-      )
-      .eq("id", invitationId)
-      .single();
+    const invitation = await prisma.organizationInvitation.findUnique({
+      where: { id: invitationId },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+          },
+        },
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+          },
+        },
+        inviter: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
+    });
 
-    if (inviteError || !invitation) {
-      console.error("Error fetching invitation:", inviteError);
+    if (!invitation) {
       return NextResponse.json(
         { error: "Invitation not found" },
         { status: 404 }
@@ -71,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     // Validate organization access
     const validation = await validateOrganizationAccessWithId(
-      invitation.organization_id,
+      invitation.organizationId,
       { resource: "users", action: "create" }
     );
 
@@ -93,7 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if invitation has expired
-    if (new Date(invitation.expires_at) < new Date()) {
+    if (invitation.expiresAt < new Date()) {
       return NextResponse.json(
         { error: "Invitation has expired" },
         { status: 400 }
@@ -102,38 +92,27 @@ export async function POST(request: NextRequest) {
 
     // Generate new token and expiry
     const newToken = crypto.randomUUID();
-    const newExpiresAt = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     // Update the invitation with new token and expiry
-    const { error: updateError } = await supabase
-      .from("organization_invitations")
-      .update({
+    await prisma.organizationInvitation.update({
+      where: { id: invitationId },
+      data: {
         token: newToken,
-        expires_at: newExpiresAt,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", invitationId);
-
-    if (updateError) {
-      console.error("Error updating invitation:", updateError);
-      return NextResponse.json(
-        { error: "Failed to update invitation" },
-        { status: 500 }
-      );
-    }
+        expiresAt: newExpiresAt,
+      },
+    });
 
     // Send the new invitation email
     try {
       await sendInvitationEmail({
         email: invitation.email,
-        organizationName: invitation.organizations.name,
-        roleName: invitation.roles.display_name || invitation.roles.name,
-        inviterName: invitation.invited_by_user.full_name,
+        organizationName: invitation.organization.name,
+        roleName: invitation.role.displayName || invitation.role.name,
+        inviterName: invitation.inviter?.fullName ?? "Team",
         token: newToken,
-        message: invitation.message,
-        organizationLogo: invitation.organizations.logo_url,
+        message: invitation.message ?? undefined,
+        organizationLogo: invitation.organization.logoUrl ?? undefined,
       });
     } catch (emailError) {
       console.error("Error sending invitation email:", emailError);
