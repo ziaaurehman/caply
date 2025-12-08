@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(
@@ -34,27 +34,19 @@ export async function GET(
       );
     }
 
-    const supabase = await createClient();
+    const client = await prisma.client.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+    });
 
-    const { data, error } = await supabase
-      .from("clients")
-      .select("*")
-      .eq("id", id)
-      .eq("organization_id", organizationId)
-      .single();
-
-    if (error) {
-      if (error.code === "PGRST116") {
-        return NextResponse.json(
-          { error: "Client not found" },
-          { status: 404 }
-        );
-      }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!client) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
 
     const result = {
-      client: data,
+      client,
     };
 
     return NextResponse.json(result);
@@ -102,37 +94,26 @@ export async function PUT(
       );
     }
 
-    const supabase = await createClient();
-
     // First check if client exists and belongs to the organization
-    const { data: existingClient, error: fetchError } = await supabase
-      .from("clients")
-      .select("id")
-      .eq("id", id)
-      .eq("organization_id", organizationId)
-      .single();
+    const existingClient = await prisma.client.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+    });
 
-    if (fetchError || !existingClient) {
+    if (!existingClient) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
 
     // Update the client
-    const { data, error } = await supabase
-      .from("clients")
-      .update({
-        ...body,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id)
-      .eq("organization_id", organizationId)
-      .select()
-      .single();
+    const { organizationId: _, ...updateData } = body;
+    const client = await prisma.client.update({
+      where: { id },
+      data: updateData,
+    });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ client: data });
+    return NextResponse.json({ client });
   } catch (error: any) {
     console.error("Error in PUT /api/clients/[id]:", error);
     return NextResponse.json(
@@ -176,30 +157,22 @@ export async function DELETE(
       );
     }
 
-    const supabase = await createClient();
-
     // First check if client exists and belongs to the organization
-    const { data: existingClient, error: fetchError } = await supabase
-      .from("clients")
-      .select("id")
-      .eq("id", id)
-      .eq("organization_id", organizationId)
-      .single();
+    const existingClient = await prisma.client.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+    });
 
-    if (fetchError || !existingClient) {
+    if (!existingClient) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
 
     // Delete the client
-    const { error } = await supabase
-      .from("clients")
-      .delete()
-      .eq("id", id)
-      .eq("organization_id", organizationId);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    await prisma.client.delete({
+      where: { id },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

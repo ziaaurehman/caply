@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,90 +10,964 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =====================================================
+// AUTHENTICATION & USER MANAGEMENT
+// =====================================================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String? // Hashed password for credentials authentication
+  fullName      String    @map("full_name")
+  avatarUrl     String?   @map("avatar_url")
+  phone         String?
+  position      String?
+  isSuperAdmin  Boolean   @default(false) @map("is_super_admin")
+  isActive      Boolean   @default(true) @map("is_active")
+  emailVerified Boolean   @default(false) @map("email_verified")
+  lastSignInAt  DateTime? @map("last_sign_in_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organizationsOwned           Organization[]           @relation("OrganizationOwner")
+  organizationMembers          OrganizationMember[]
+  createdProjects              Project[]                @relation("ProjectCreator")
+  createdTasks                 Task[]                   @relation("TaskCreator")
+  assignedTasks                Task[]                   @relation("TaskAssignee")
+  timeEntries                  TimeEntry[]              @relation("TimeEntryUser")
+  timeEntriesApproved          TimeEntry[]              @relation("TimeEntryApprover")
+  expenses                     Expense[]                @relation("ExpenseUser")
+  expensesApproved             Expense[]                @relation("ExpenseApprover")
+  invoices                     Invoice[]                @relation("InvoiceCreator")
+  estimates                    Estimate[]               @relation("EstimateCreator")
+  leaveRequests                LeaveRequest[]           @relation("LeaveRequestUser")
+  leaveRequestsApproved        LeaveRequest[]           @relation("LeaveRequestApprover")
+  timesheetSubmissions         TimesheetSubmission[]    @relation("TimesheetSubmissionUser")
+  timesheetSubmissionsApproved TimesheetSubmission[]    @relation("TimesheetSubmissionApprover")
+  organizationInvitations      OrganizationInvitation[] @relation("InvitationInviter")
+  kanbanBoards                 Board[]                  @relation("BoardCreator")
+  kanbanCards                  Card[]                   @relation("CardCreator")
+  comments                     Comment[]
+  attachments                  Attachment[]
+  activities                   Activity[]
+  boardNotifications           BoardNotification[]
+  checklistItems               ChecklistItem[]
+  projectDocuments             ProjectDocument[]
+  projectWeeklyPlans           ProjectWeeklyPlan[]      @relation("WeeklyPlanCreator")
+  projectDailyOverrides        ProjectDailyOverride[]   @relation("DailyOverrideCreator")
+  projectMembers               ProjectMember[]
+
+  @@index([email])
+  @@index([isActive])
+  @@map("users")
+}
 
 // =====================================================
-// CAPACITY PLANNING MODELS
+// ROLES & PERMISSIONS SYSTEM
+// =====================================================
+
+model Role {
+  id             String   @id @default(uuid())
+  name           String
+  displayName    String   @map("display_name")
+  description    String?
+  isSystemRole   Boolean  @default(false) @map("is_system_role")
+  organizationId String?  @map("organization_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization            Organization?            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationMembers     OrganizationMember[]
+  rolePermissions         RolePermission[]
+  organizationInvitations OrganizationInvitation[]
+
+  // Note: Unique constraints with conditions are handled at application level
+  // For system roles: name must be unique when isSystemRole=true and organizationId=null
+  // For org roles: name must be unique within organizationId
+
+  @@index([organizationId])
+  @@index([isSystemRole])
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  displayName String   @map("display_name")
+  description String?
+  module      String
+  action      String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// =====================================================
+// ORGANIZATIONS SYSTEM
+// =====================================================
+
+model Organization {
+  id                 String    @id @default(uuid())
+  name               String
+  slug               String    @unique
+  description        String?
+  logoUrl            String?   @map("logo_url")
+  website            String?
+  phone              String?
+  address            String?
+  city               String?
+  province           String?
+  postalCode         String?   @map("postal_code")
+  country            String    @default("Canada")
+  timezone           String    @default("America/Toronto")
+  currency           String    @default("CAD")
+  businessHours      Json?     @map("business_hours")
+  taxSettings        Json?     @map("tax_settings")
+  subscriptionPlan   String?   @default("free") @map("subscription_plan")
+  subscriptionStatus String?   @default("active") @map("subscription_status")
+  trialEndsAt        DateTime? @map("trial_ends_at") @db.Timestamptz
+  ownerId            String    @map("owner_id")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  owner                 User                      @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members               OrganizationMember[]
+  roles                 Role[]
+  invitations           OrganizationInvitation[]
+  clients               Client[]
+  projects              Project[]
+  timeEntries           TimeEntry[]
+  expenses              Expense[]
+  invoices              Invoice[]
+  estimates             Estimate[]
+  leaveRequests         LeaveRequest[]
+  subscription          OrganizationSubscription?
+  billingAddresses      BillingAddress[]
+  billingInvoices       BillingInvoice[]
+  paymentTransactions   PaymentTransaction[]
+  subscriptionUsage     SubscriptionUsage[]
+  resourceAllocations   ResourceAllocation[]
+  timesheetSubmissions  TimesheetSubmission[]
+  projectWeeklyPlans    ProjectWeeklyPlan[]
+  projectDailyOverrides ProjectDailyOverride[]
+
+  @@index([slug])
+  @@index([ownerId])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  userId         String    @map("user_id")
+  roleId         String    @map("role_id")
+  hourlyRate     Decimal?  @map("hourly_rate") @db.Decimal(10, 2)
+  weeklyCapacity Int       @default(40) @map("weekly_capacity")
+  department     String?
+  hireDate       DateTime? @map("hire_date") @db.Date
+  status         String    @default("active")
+  invitedBy      String?   @map("invited_by")
+  joinedAt       DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role                 Role                  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  projectMembers       ProjectMember[]
+  resourceAllocations  ResourceAllocation[]
+  timesheetSubmissions TimesheetSubmission[]
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("organization_members")
+}
+
+model OrganizationInvitation {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  email          String
+  roleId         String    @map("role_id")
+  token          String    @unique
+  invitedBy      String?   @map("invited_by")
+  userId         String?   @map("user_id")
+  message        String?
+  status         String    @default("pending")
+  expiresAt      DateTime  @default(now()) @map("expires_at") @db.Timestamptz
+  acceptedAt     DateTime? @map("accepted_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  inviter      User?        @relation("InvitationInviter", fields: [invitedBy], references: [id], onDelete: SetNull)
+
+  // Note: Unique constraint with condition handled at application level
+  // Only one pending invitation per organization+email
+
+  @@index([email])
+  @@index([token])
+  @@index([status])
+  @@map("organization_invitations")
+}
+
+// =====================================================
+// CLIENTS & PROJECTS
+// =====================================================
+
+model Client {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  name           String
+  email          String?
+  phone          String?
+  website        String?
+  address        String?
+  city           String?
+  province       String?
+  postalCode     String?  @map("postal_code")
+  country        String?
+  contactPerson  String?  @map("contact_person")
+  notes          String?
+  status         String   @default("active")
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projects     Project[]
+  expenses     Expense[]
+  invoices     Invoice[]
+  estimates    Estimate[]
+
+  @@index([organizationId])
+  @@map("clients")
+}
+
+model Project {
+  id                      String    @id @default(uuid())
+  organizationId          String    @map("organization_id")
+  clientId                String?   @map("client_id")
+  name                    String
+  code                    String?
+  description             String?
+  projectType             String    @default("time_materials") @map("project_type")
+  billingRate             Decimal?  @map("billing_rate") @db.Decimal(10, 2)
+  budgetHours             Int?      @map("budget_hours")
+  budgetAmount            Decimal?  @map("budget_amount") @db.Decimal(12, 2)
+  startDate               DateTime? @map("start_date") @db.Date
+  endDate                 DateTime? @map("end_date") @db.Date
+  status                  String    @default("active")
+  taskCategories          String[]  @map("task_categories")
+  kanbanEnabled           Boolean   @default(true) @map("kanban_enabled")
+  timesheetEnabled        Boolean   @default(true) @map("timesheet_enabled")
+  teamAvailabilityEnabled Boolean   @default(true) @map("team_availability_enabled")
+  capacityPlanningEnabled Boolean   @default(true) @map("capacity_planning_enabled")
+  state                   String    @default("draft")
+  documents               Json?     @default("[]")
+  createdBy               String?   @map("created_by")
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client             Client?             @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  creator            User?               @relation("ProjectCreator", fields: [createdBy], references: [id])
+  tasks              Task[]
+  timeEntries        TimeEntry[]
+  expenses           Expense[]
+  invoices           Invoice[]
+  estimates          Estimate[]
+  projectMembers     ProjectMember[]
+  boards             Board[]
+  projectAssignments ProjectAssignment[]
+  projectWeeklyPlans ProjectWeeklyPlan[]
+  projectTasks       ProjectTask[]
+  projectDocuments   ProjectDocument[]
+  timesheetEntries   TimesheetEntry[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([status])
+  @@index([state])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id                   String   @id @default(uuid())
+  projectId            String   @map("project_id")
+  organizationMemberId String   @map("organization_member_id")
+  addedBy              String   @map("added_by")
+  role                 String?
+  joinedAt             DateTime @default(now()) @map("joined_at") @db.Timestamptz
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  project              Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  organizationMember   OrganizationMember    @relation(fields: [organizationMemberId], references: [id], onDelete: Cascade)
+  adder                User                  @relation(fields: [addedBy], references: [id], onDelete: Cascade)
+  cardMembers          CardMember[]
+  checklistItems       ChecklistItem[]
+  timesheetSubmissions TimesheetSubmission[]
+
+  @@unique([projectId, organizationMemberId])
+  @@index([projectId])
+  @@index([organizationMemberId])
+  @@map("project_members")
+}
+
+model Task {
+  id             String    @id @default(uuid())
+  projectId      String    @map("project_id")
+  title          String
+  description    String?
+  status         String    @default("todo")
+  priority       String    @default("medium")
+  assignedTo     String?   @map("assigned_to")
+  estimatedHours Decimal?  @map("estimated_hours") @db.Decimal(8, 2)
+  actualHours    Decimal   @default(0) @map("actual_hours") @db.Decimal(8, 2)
+  dueDate        DateTime? @map("due_date") @db.Date
+  position       Int       @default(0)
+  createdBy      String?   @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee    User?       @relation("TaskAssignee", fields: [assignedTo], references: [id])
+  creator     User?       @relation("TaskCreator", fields: [createdBy], references: [id])
+  timeEntries TimeEntry[]
+
+  @@index([projectId])
+  @@index([assignedTo])
+  @@map("tasks")
+}
+
+// =====================================================
+// TIME TRACKING & TIMESHEETS
+// =====================================================
+
+model TimeEntry {
+  id              String    @id @default(uuid())
+  organizationId  String    @map("organization_id")
+  userId          String    @map("user_id")
+  projectId       String    @map("project_id")
+  taskId          String?   @map("task_id")
+  description     String
+  startTime       DateTime? @map("start_time") @db.Timestamptz
+  endTime         DateTime? @map("end_time") @db.Timestamptz
+  durationMinutes Int       @map("duration_minutes")
+  date            DateTime  @db.Date
+  isBillable      Boolean   @default(true) @map("is_billable")
+  hourlyRate      Decimal?  @map("hourly_rate") @db.Decimal(10, 2)
+  status          String    @default("draft")
+  submittedAt     DateTime? @map("submitted_at") @db.Timestamptz
+  approvedBy      String?   @map("approved_by")
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation("TimeEntryUser", fields: [userId], references: [id], onDelete: Cascade)
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  approver     User?        @relation("TimeEntryApprover", fields: [approvedBy], references: [id])
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([date])
+  @@index([status])
+  @@map("time_entries")
+}
+
+model TimesheetSubmission {
+  id                   String    @id @default(uuid())
+  organizationId       String    @map("organization_id")
+  userId               String    @map("user_id")
+  projectMemberId      String?   @map("project_member_id")
+  organizationMemberId String?   @map("organization_member_id")
+  weekStartDate        DateTime  @map("week_start_date") @db.Date
+  weekEndDate          DateTime  @map("week_end_date") @db.Date
+  status               String    @default("draft")
+  submittedAt          DateTime? @map("submitted_at") @db.Timestamptz
+  approvedBy           String?   @map("approved_by")
+  approvedAt           DateTime? @map("approved_at") @db.Timestamptz
+  rejectionReason      String?   @map("rejection_reason")
+  totalHours           Decimal   @default(0) @map("total_hours") @db.Decimal(10, 2)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User                @relation("TimesheetSubmissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  projectMember      ProjectMember?      @relation(fields: [projectMemberId], references: [id], onDelete: Cascade)
+  organizationMember OrganizationMember? @relation(fields: [organizationMemberId], references: [id], onDelete: Cascade)
+  approver           User?               @relation("TimesheetSubmissionApprover", fields: [approvedBy], references: [id])
+  entries            TimesheetEntry[]
+
+  @@unique([organizationId, userId, weekStartDate])
+  @@index([organizationId, userId])
+  @@index([status])
+  @@index([weekStartDate])
+  @@map("timesheet_submissions")
+}
+
+model TimesheetEntry {
+  id                    String   @id @default(uuid())
+  timesheetSubmissionId String   @map("timesheet_submission_id")
+  projectId             String   @map("project_id")
+  taskDescription       String   @map("task_description")
+  mondayHours           Decimal  @default(0) @map("monday_hours") @db.Decimal(5, 2)
+  tuesdayHours          Decimal  @default(0) @map("tuesday_hours") @db.Decimal(5, 2)
+  wednesdayHours        Decimal  @default(0) @map("wednesday_hours") @db.Decimal(5, 2)
+  thursdayHours         Decimal  @default(0) @map("thursday_hours") @db.Decimal(5, 2)
+  fridayHours           Decimal  @default(0) @map("friday_hours") @db.Decimal(5, 2)
+  mondayNotes           String?  @map("monday_notes")
+  tuesdayNotes          String?  @map("tuesday_notes")
+  wednesdayNotes        String?  @map("wednesday_notes")
+  thursdayNotes         String?  @map("thursday_notes")
+  fridayNotes           String?  @map("friday_notes")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  timesheetSubmission TimesheetSubmission @relation(fields: [timesheetSubmissionId], references: [id], onDelete: Cascade)
+  project             Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([timesheetSubmissionId])
+  @@index([projectId])
+  @@map("timesheet_entries")
+}
+
+// =====================================================
+// EXPENSES & INVOICES
+// =====================================================
+
+model Expense {
+  id              String    @id @default(uuid())
+  organizationId  String    @map("organization_id")
+  userId          String    @map("user_id")
+  projectId       String?   @map("project_id")
+  clientId        String?   @map("client_id")
+  category        String
+  description     String
+  amount          Decimal   @map("amount") @db.Decimal(12, 2)
+  currency        String    @default("CAD")
+  date            DateTime  @db.Date
+  receiptUrl      String?   @map("receipt_url")
+  receiptFilename String?   @map("receipt_filename")
+  status          String    @default("pending")
+  approvedBy      String?   @map("approved_by")
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz
+  rejectionReason String?   @map("rejection_reason")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation("ExpenseUser", fields: [userId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  approver     User?        @relation("ExpenseApprover", fields: [approvedBy], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("expenses")
+}
+
+model Invoice {
+  id                 String    @id @default(uuid())
+  organizationId     String    @map("organization_id")
+  clientId           String    @map("client_id")
+  projectId          String?   @map("project_id")
+  invoiceNumber      String    @unique @map("invoice_number")
+  title              String
+  description        String?
+  subtotal           Decimal   @default(0) @map("subtotal") @db.Decimal(12, 2)
+  discountAmount     Decimal   @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  discountPercentage Decimal   @default(0) @map("discount_percentage") @db.Decimal(5, 2)
+  taxAmount          Decimal   @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  totalAmount        Decimal   @default(0) @map("total_amount") @db.Decimal(12, 2)
+  currency           String    @default("CAD")
+  issueDate          DateTime  @map("issue_date") @db.Date
+  dueDate            DateTime  @map("due_date") @db.Date
+  status             String    @default("draft")
+  paidDate           DateTime? @map("paid_date") @db.Date
+  poNumber           String?   @map("po_number")
+  notes              String?
+  createdBy          String?   @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  project      Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  creator      User?             @relation("InvoiceCreator", fields: [createdBy], references: [id])
+  lineItems    InvoiceLineItem[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([invoiceNumber])
+  @@index([status])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(uuid())
+  invoiceId   String   @map("invoice_id")
+  description String
+  quantity    Decimal  @default(1) @map("quantity") @db.Decimal(10, 2)
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
+  amount      Decimal  @map("amount") @db.Decimal(12, 2)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+model Estimate {
+  id                 String    @id @default(uuid())
+  organizationId     String    @map("organization_id")
+  clientId           String    @map("client_id")
+  projectId          String?   @map("project_id")
+  estimateNumber     String    @unique @map("estimate_number")
+  title              String
+  description        String?
+  subtotal           Decimal   @default(0) @map("subtotal") @db.Decimal(12, 2)
+  discountAmount     Decimal   @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  discountPercentage Decimal   @default(0) @map("discount_percentage") @db.Decimal(5, 2)
+  taxAmount          Decimal   @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  totalAmount        Decimal   @default(0) @map("total_amount") @db.Decimal(12, 2)
+  currency           String    @default("CAD")
+  issueDate          DateTime  @map("issue_date") @db.Date
+  validUntil         DateTime  @map("valid_until") @db.Date
+  status             String    @default("draft")
+  acceptedDate       DateTime? @map("accepted_date") @db.Date
+  poNumber           String?   @map("po_number")
+  notes              String?
+  createdBy          String?   @map("created_by")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  project      Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  creator      User?              @relation("EstimateCreator", fields: [createdBy], references: [id])
+  lineItems    EstimateLineItem[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([estimateNumber])
+  @@index([status])
+  @@map("estimates")
+}
+
+model EstimateLineItem {
+  id          String   @id @default(uuid())
+  estimateId  String   @map("estimate_id")
+  description String
+  quantity    Decimal  @default(1) @map("quantity") @db.Decimal(10, 2)
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
+  amount      Decimal  @map("amount") @db.Decimal(12, 2)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([estimateId])
+  @@map("estimate_line_items")
+}
+
+// =====================================================
+// LEAVE MANAGEMENT
+// =====================================================
+
+model LeaveRequest {
+  id              String    @id @default(uuid())
+  organizationId  String    @map("organization_id")
+  userId          String    @map("user_id")
+  type            String
+  startDate       DateTime  @map("start_date") @db.Date
+  endDate         DateTime  @map("end_date") @db.Date
+  daysRequested   Decimal   @map("days_requested") @db.Decimal(4, 1)
+  reason          String?
+  status          String    @default("pending")
+  approvedBy      String?   @map("approved_by")
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz
+  rejectionReason String?   @map("rejection_reason")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation("LeaveRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  approver     User?        @relation("LeaveRequestApprover", fields: [approvedBy], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@map("leave_requests")
+}
+
+// =====================================================
+// KANBAN SYSTEM
+// =====================================================
+
+model Board {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  name            String
+  description     String?
+  backgroundColor String   @default("#0079bf") @map("background_color")
+  backgroundImage String?  @map("background_image")
+  isClosed        Boolean  @default(false) @map("is_closed")
+  visibility      String   @default("project")
+  position        Int      @default(0)
+  createdBy       String   @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator       User                @relation("BoardCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  lists         List[]
+  labels        Label[]
+  activities    Activity[]
+  notifications BoardNotification[]
+
+  @@index([projectId])
+  @@index([createdBy])
+  @@index([position])
+  @@map("boards")
+}
+
+model List {
+  id         String   @id @default(uuid())
+  boardId    String   @map("board_id")
+  name       String
+  position   Int      @default(0)
+  isArchived Boolean  @default(false) @map("is_archived")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cards Card[]
+
+  @@index([boardId])
+  @@index([position])
+  @@map("lists")
+}
+
+model Card {
+  id          String    @id @default(uuid())
+  listId      String    @map("list_id")
+  title       String
+  description String?
+  position    Int       @default(0)
+  dueDate     DateTime? @map("due_date") @db.Timestamptz
+  isCompleted Boolean   @default(false) @map("is_completed")
+  isArchived  Boolean   @default(false) @map("is_archived")
+  coverColor  String?   @map("cover_color")
+  coverImage  String?   @map("cover_image")
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  list               List                @relation(fields: [listId], references: [id], onDelete: Cascade)
+  creator            User                @relation("CardCreator", fields: [createdBy], references: [id], onDelete: Cascade)
+  cardMembers        CardMember[]
+  cardLabels         CardLabel[]
+  checklists         Checklist[]
+  comments           Comment[]
+  attachments        Attachment[]
+  activities         Activity[]
+  boardNotifications BoardNotification[]
+
+  @@index([listId])
+  @@index([createdBy])
+  @@index([position])
+  @@index([dueDate])
+  @@map("cards")
+}
+
+model CardMember {
+  id              String   @id @default(uuid())
+  cardId          String   @map("card_id")
+  projectMemberId String   @map("project_member_id")
+  assignedAt      DateTime @default(now()) @map("assigned_at") @db.Timestamptz
+
+  // Relations
+  card          Card          @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  projectMember ProjectMember @relation(fields: [projectMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, projectMemberId])
+  @@index([cardId])
+  @@index([projectMemberId])
+  @@map("card_members")
+}
+
+model Label {
+  id        String   @id @default(uuid())
+  boardId   String   @map("board_id")
+  name      String
+  color     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  board      Board       @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  cardLabels CardLabel[]
+
+  @@index([boardId])
+  @@map("labels")
+}
+
+model CardLabel {
+  id      String @id @default(uuid())
+  cardId  String @map("card_id")
+  labelId String @map("label_id")
+
+  // Relations
+  card  Card  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  label Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, labelId])
+  @@index([cardId])
+  @@index([labelId])
+  @@map("card_labels")
+}
+
+model Checklist {
+  id        String   @id @default(uuid())
+  cardId    String   @map("card_id")
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  card  Card            @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  items ChecklistItem[]
+
+  @@index([cardId])
+  @@index([position])
+  @@map("checklists")
+}
+
+model ChecklistItem {
+  id                        String    @id @default(uuid())
+  checklistId               String    @map("checklist_id")
+  content                   String
+  isCompleted               Boolean   @default(false) @map("is_completed")
+  position                  Int       @default(0)
+  dueDate                   DateTime? @map("due_date") @db.Timestamptz
+  assignedToProjectMemberId String?   @map("assigned_to_project_member_id")
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  checklist     Checklist      @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  projectMember ProjectMember? @relation(fields: [assignedToProjectMemberId], references: [id], onDelete: SetNull)
+  user          User?          @relation(fields: [userId], references: [id])
+  userId        String?
+
+  @@index([checklistId])
+  @@index([assignedToProjectMemberId])
+  @@map("checklist_items")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  cardId    String   @map("card_id")
+  userId    String   @map("user_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@index([userId])
+  @@map("comments")
+}
+
+model Attachment {
+  id               String   @id @default(uuid())
+  cardId           String   @map("card_id")
+  filename         String
+  originalFilename String   @map("original_filename")
+  filePath         String   @map("file_path")
+  fileSize         BigInt   @map("file_size")
+  mimeType         String   @map("mime_type")
+  uploadedBy       String   @map("uploaded_by")
+  uploadedAt       DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+
+  // Relations
+  card     Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  uploader User @relation(fields: [uploadedBy], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@index([uploadedBy])
+  @@map("attachments")
+}
+
+model Activity {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  boardId    String?  @map("board_id")
+  cardId     String?  @map("card_id")
+  actionType String   @map("action_type")
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  board Board? @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  card  Card?  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([boardId])
+  @@index([cardId])
+  @@index([createdAt])
+  @@map("activities")
+}
+
+model BoardNotification {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  type           String
+  title          String
+  message        String
+  isRead         Boolean  @default(false) @map("is_read")
+  relatedCardId  String?  @map("related_card_id")
+  relatedBoardId String?  @map("related_board_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  relatedCard  Card?  @relation(fields: [relatedCardId], references: [id], onDelete: Cascade)
+  relatedBoard Board? @relation(fields: [relatedBoardId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("board_notifications")
+}
+
+// =====================================================
+// CAPACITY PLANNING SYSTEM
 // =====================================================
 
 model ResourceAllocation {
-  id                  String   @id @default(uuid())
-  organizationId      String   @map("organization_id")
-  organizationMemberId String  @map("organization_member_id")
-  weeklyCapacityHours Decimal? @map("weekly_capacity_hours") @db.Decimal(5, 2)
-  hourlyRate          Decimal? @map("hourly_rate") @db.Decimal(10, 2) // Add this if missing
-  isActive            Boolean  @default(true) @map("is_active") // Add this
-  isArchived          Boolean  @default(false) @map("is_archived") // Add this
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  id                   String   @id @default(uuid())
+  organizationId       String   @map("organization_id")
+  organizationMemberId String   @map("organization_member_id")
+  weeklyCapacityHours  Decimal? @map("weekly_capacity_hours") @db.Decimal(5, 2)
+  hourlyRate           Decimal? @map("hourly_rate") @db.Decimal(10, 2)
+  isActive             Boolean  @default(true) @map("is_active")
+  isArchived           Boolean  @default(false) @map("is_archived")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  projectAssignments  ProjectAssignment[]
-  weeklyPlans         ProjectWeeklyPlan[]
+  // Relations
+  organization            Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationMember      OrganizationMember       @relation(fields: [organizationMemberId], references: [id], onDelete: Cascade)
+  projectAssignments      ProjectAssignment[]
+  weeklyPlans             ProjectWeeklyPlan[]
+  weeklyCapacityOverrides WeeklyCapacityOverride[]
+  projectTasks            ProjectTask[]
 
-
-  @@index([organizationId])
+  @@unique([organizationId, organizationMemberId])
+  @@index([organizationId, isActive])
   @@index([organizationMemberId])
   @@map("resource_allocations")
 }
 
-
 model ProjectAssignment {
-  id                  String   @id @default(uuid())
-  resourceAllocationId String  @map("resource_allocation_id")
-  projectId           String   @map("project_id")
-  hoursPerWeek        Decimal  @map("hours_per_week") @db.Decimal(5, 2)
-  startDate           DateTime  @map("start_date") @db.Date
-  endDate             DateTime? @map("end_date") @db.Date
-  isActive            Boolean  @default(true) @map("is_active")
-  notes               String?
-  defaultHoursPerDay  Decimal  @default(8.00) @map("default_hours_per_day") @db.Decimal(4, 2)
-  allowWeekends       Boolean  @default(false) @map("allow_weekends")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  id                   String    @id @default(uuid())
+  resourceAllocationId String    @map("resource_allocation_id")
+  projectId            String    @map("project_id")
+  hoursPerWeek         Decimal   @map("hours_per_week") @db.Decimal(5, 2)
+  startDate            DateTime  @map("start_date") @db.Date
+  endDate              DateTime? @map("end_date") @db.Date
+  isActive             Boolean   @default(true) @map("is_active")
+  notes                String?
+  defaultHoursPerDay   Decimal   @default(8.00) @map("default_hours_per_day") @db.Decimal(4, 2)
+  allowWeekends        Boolean   @default(false) @map("allow_weekends")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  resourceAllocation  ResourceAllocation @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
-  projectWeeklyPlans  ProjectWeeklyPlan[]
+  // Relations
+  resourceAllocation ResourceAllocation  @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectWeeklyPlans ProjectWeeklyPlan[]
 
-  @@index([resourceAllocationId])
-  @@index([projectId])
+  @@index([resourceAllocationId, projectId])
+  @@index([projectId, startDate, endDate])
   @@index([isActive])
   @@map("project_assignments")
 }
 
-
 model ProjectWeeklyPlan {
-  id                  String   @id @default(uuid())
-  organizationId      String   @map("organization_id")
-  resourceAllocationId String  @map("resource_allocation_id")
-  projectId           String   @map("project_id")
-  projectAssignmentId String   @map("project_assignment_id")
-  weekStartDate       DateTime @map("week_start_date") @db.Date
+  id                   String   @id @default(uuid())
+  organizationId       String   @map("organization_id")
+  resourceAllocationId String   @map("resource_allocation_id")
+  projectId            String   @map("project_id")
+  projectAssignmentId  String   @map("project_assignment_id")
+  weekStartDate        DateTime @map("week_start_date") @db.Date
+  defaultHoursPerDay   Decimal  @map("default_hours_per_day") @db.Decimal(4, 2)
+  allowWeekends        Boolean  @default(false) @map("allow_weekends")
+  isLinked             Boolean  @default(true) @map("is_linked")
+  notes                String?
+  createdBy            String?  @map("created_by")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
- // Month and year for easy monthly view queries
-  year                Int      // e.g., 2024
-  month               Int      // 1-12
-  weekNumber          Int      @map("week_number") // ISO week number (1-53)
-
-  defaultHoursPerDay  Decimal  @map("default_hours_per_day") @db.Decimal(4, 2)
-  allowWeekends       Boolean  @default(false) @map("allow_weekends")
-  isLinked            Boolean  @default(true) @map("is_linked")
-
-
-  // Day-wise hours allocation (Sunday through Saturday)
-  hoursSunday         Decimal? @map("hours_sunday") @db.Decimal(4, 2)
-  hoursMonday         Decimal? @map("hours_monday") @db.Decimal(4, 2)
-  hoursTuesday        Decimal? @map("hours_tuesday") @db.Decimal(4, 2)
-  hoursWednesday      Decimal? @map("hours_wednesday") @db.Decimal(4, 2)
-  hoursThursday       Decimal? @map("hours_thursday") @db.Decimal(4, 2)
-  hoursFriday         Decimal? @map("hours_friday") @db.Decimal(4, 2)
-  hoursSaturday       Decimal? @map("hours_saturday") @db.Decimal(4, 2)
-
-  notes               String?
-  createdBy           String?  @map("created_by")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
-
-  resourceAllocation  ResourceAllocation @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
-  projectAssignment   ProjectAssignment @relation(fields: [projectAssignmentId], references: [id], onDelete: Cascade)
+  // Relations
+  organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  resourceAllocation ResourceAllocation     @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
+  project            Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectAssignment  ProjectAssignment      @relation(fields: [projectAssignmentId], references: [id], onDelete: Cascade)
+  creator            User?                  @relation("WeeklyPlanCreator", fields: [createdBy], references: [id])
+  dailyOverrides     ProjectDailyOverride[]
 
   @@unique([resourceAllocationId, projectId, weekStartDate])
   @@index([organizationId, projectId, weekStartDate])
@@ -104,4 +975,273 @@ model ProjectWeeklyPlan {
   @@map("project_weekly_plans")
 }
 
+model ProjectDailyOverride {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  weeklyPlanId   String   @map("weekly_plan_id")
+  dayOfWeek      Int      @map("day_of_week")
+  actualHours    Decimal  @map("actual_hours") @db.Decimal(4, 2)
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  // Relations
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  weeklyPlan   ProjectWeeklyPlan @relation(fields: [weeklyPlanId], references: [id], onDelete: Cascade)
+  creator      User?             @relation("DailyOverrideCreator", fields: [createdBy], references: [id])
+
+  @@unique([weeklyPlanId, dayOfWeek])
+  @@index([organizationId, weeklyPlanId])
+  @@map("project_daily_overrides")
+}
+
+model WeeklyCapacityOverride {
+  id                   String   @id @default(uuid())
+  resourceAllocationId String   @map("resource_allocation_id")
+  year                 Int
+  weekNumber           Int      @map("week_number")
+  overrideHours        Decimal  @map("override_hours") @db.Decimal(5, 2)
+  reason               String?
+  overrideType         String   @default("vacation") @map("override_type")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  resourceAllocation ResourceAllocation @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceAllocationId, year, weekNumber])
+  @@map("weekly_capacity_overrides")
+}
+
+model ProjectTask {
+  id                   String   @id @default(uuid())
+  projectId            String   @map("project_id")
+  resourceAllocationId String   @map("resource_allocation_id")
+  taskName             String   @map("task_name")
+  estimatedHours       Decimal  @map("estimated_hours") @db.Decimal(6, 2)
+  status               String   @default("not_started")
+  weekAssigned         Int?     @map("week_assigned")
+  yearAssigned         Int?     @map("year_assigned")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  project            Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  resourceAllocation ResourceAllocation @relation(fields: [resourceAllocationId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, resourceAllocationId])
+  @@index([yearAssigned, weekAssigned])
+  @@map("project_tasks")
+}
+
+// =====================================================
+// SUBSCRIPTION & BILLING SYSTEM
+// =====================================================
+
+model SubscriptionPlan {
+  id              String   @id @default(uuid())
+  stripeProductId String   @unique @map("stripe_product_id")
+  stripePriceId   String   @unique @map("stripe_price_id")
+  name            String
+  displayName     String   @map("display_name")
+  description     String?
+  amount          Int
+  currency        String   @default("CAD")
+  interval        String   @default("month")
+  intervalCount   Int      @default(1) @map("interval_count")
+  maxUsers        Int?     @map("max_users")
+  maxProjects     Int?     @map("max_projects")
+  maxStorageGb    Int?     @map("max_storage_gb")
+  features        Json     @default("[]")
+  isActive        Boolean  @default(true) @map("is_active")
+  sortOrder       Int      @default(0) @map("sort_order")
+  isPopular       Boolean  @default(false) @map("is_popular")
+  trialPeriodDays Int      @default(0) @map("trial_period_days")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  subscriptions OrganizationSubscription[]
+
+  @@index([stripeProductId])
+  @@index([stripePriceId])
+  @@index([isActive])
+  @@map("subscription_plans")
+}
+
+model OrganizationSubscription {
+  id                   String    @id @default(uuid())
+  organizationId       String    @unique @map("organization_id")
+  subscriptionPlanId   String    @map("subscription_plan_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  stripeCustomerId     String    @map("stripe_customer_id")
+  status               String    @default("active")
+  currentPeriodStart   DateTime? @map("current_period_start") @db.Timestamptz
+  currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz
+  cancelAtPeriodEnd    Boolean   @default(false) @map("cancel_at_period_end")
+  canceledAt           DateTime? @map("canceled_at") @db.Timestamptz
+  trialStart           DateTime? @map("trial_start") @db.Timestamptz
+  trialEnd             DateTime? @map("trial_end") @db.Timestamptz
+  currentUsers         Int       @default(0) @map("current_users")
+  currentProjects      Int       @default(0) @map("current_projects")
+  currentStorageGb     Decimal   @default(0) @map("current_storage_gb") @db.Decimal(10, 2)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscriptionPlan  SubscriptionPlan    @relation(fields: [subscriptionPlanId], references: [id], onDelete: Restrict)
+  billingInvoices   BillingInvoice[]
+  subscriptionUsage SubscriptionUsage[]
+
+  @@index([organizationId])
+  @@index([stripeSubscriptionId])
+  @@index([status])
+  @@map("organization_subscriptions")
+}
+
+model BillingAddress {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  companyName    String?  @map("company_name")
+  contactName    String?  @map("contact_name")
+  line1          String
+  line2          String?
+  city           String
+  state          String?
+  postalCode     String   @map("postal_code")
+  country        String   @default("CA")
+  taxId          String?  @map("tax_id")
+  isDefault      Boolean  @default(true) @map("is_default")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("billing_addresses")
+}
+
+model BillingInvoice {
+  id               String    @id @default(uuid())
+  organizationId   String    @map("organization_id")
+  subscriptionId   String?   @map("subscription_id")
+  stripeInvoiceId  String    @unique @map("stripe_invoice_id")
+  invoiceNumber    String?   @map("invoice_number")
+  subtotal         Int       @map("subtotal")
+  taxAmount        Int       @default(0) @map("tax_amount")
+  discountAmount   Int       @default(0) @map("discount_amount")
+  totalAmount      Int       @map("total_amount")
+  amountPaid       Int       @default(0) @map("amount_paid")
+  amountDue        Int       @default(0) @map("amount_due")
+  currency         String    @default("CAD")
+  status           String
+  invoiceDate      DateTime  @map("invoice_date") @db.Timestamptz
+  dueDate          DateTime? @map("due_date") @db.Timestamptz
+  paidAt           DateTime? @map("paid_at") @db.Timestamptz
+  hostedInvoiceUrl String?   @map("hosted_invoice_url")
+  invoicePdfUrl    String?   @map("invoice_pdf_url")
+  description      String?
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization        Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription        OrganizationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  paymentTransactions PaymentTransaction[]
+
+  @@index([organizationId])
+  @@index([stripeInvoiceId])
+  @@index([status])
+  @@map("billing_invoices")
+}
+
+model PaymentTransaction {
+  id                    String   @id @default(uuid())
+  organizationId        String   @map("organization_id")
+  invoiceId             String?  @map("invoice_id")
+  stripePaymentIntentId String?  @map("stripe_payment_intent_id")
+  stripeChargeId        String?  @map("stripe_charge_id")
+  amount                Int
+  currency              String   @default("CAD")
+  status                String
+  paymentMethodType     String?  @map("payment_method_type")
+  paymentMethodLast4    String?  @map("payment_method_last4")
+  failureCode           String?  @map("failure_code")
+  failureMessage        String?  @map("failure_message")
+  description           String?
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice      BillingInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@map("payment_transactions")
+}
+
+model SubscriptionUsage {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  subscriptionId String   @map("subscription_id")
+  metricName     String   @map("metric_name")
+  currentValue   Decimal  @default(0) @map("current_value") @db.Decimal(12, 2)
+  maxValue       Decimal? @map("max_value") @db.Decimal(12, 2)
+  periodStart    DateTime @map("period_start") @db.Timestamptz
+  periodEnd      DateTime @map("period_end") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription OrganizationSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, metricName, periodStart])
+  @@index([organizationId])
+  @@index([periodStart, periodEnd])
+  @@map("subscription_usage")
+}
+
+model StripeWebhookEvent {
+  id            String    @id @default(uuid())
+  stripeEventId String    @unique @map("stripe_event_id")
+  eventType     String    @map("event_type")
+  apiVersion    String?   @map("api_version")
+  processed     Boolean   @default(false)
+  processedAt   DateTime? @map("processed_at") @db.Timestamptz
+  errorMessage  String?   @map("error_message")
+  retryCount    Int       @default(0) @map("retry_count")
+  eventData     Json      @map("event_data")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([processed])
+  @@index([eventType])
+  @@map("stripe_webhook_events")
+}
+
+// =====================================================
+// PROJECT DOCUMENTS
+// =====================================================
+
+model ProjectDocument {
+  id               String   @id @default(uuid())
+  projectId        String   @map("project_id")
+  filename         String
+  originalFilename String   @map("original_filename")
+  fileSize         BigInt   @map("file_size")
+  mimeType         String   @map("mime_type")
+  filePath         String   @map("file_path")
+  uploadedAt       DateTime @default(now()) @map("uploaded_at") @db.Timestamptz
+  uploadedBy       String   @map("uploaded_by")
+
+  // Relations
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  uploader User    @relation(fields: [uploadedBy], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([uploadedBy])
+  @@index([uploadedAt])
+  @@map("project_documents")
+}

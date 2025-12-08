@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { searchParams } = new URL(request.url);
@@ -34,44 +34,73 @@ export async function GET(
       );
     }
 
-    const { context: userContext } = validation;
-    const supabase = await createClient();
+    const { id } = await params;
 
-    const { data: leaveRequest, error } = await supabase
-      .from("leave_requests")
-      .select(
-        `
+    const leaveRequest = await prisma.leaveRequest.findFirst({
+      where: {
         id,
-        organization_id,
-        user_id,
-        type,
-        start_date,
-        end_date,
-        days_requested,
-        reason,
-        status,
-        approved_by,
-        approved_at,
-        rejection_reason,
-        created_at,
-        updated_at,
-        users:user_id ( id, full_name, email, avatar_url ),
-        approver:approved_by ( id, full_name, email )
-      `
-      )
-      .eq("id", params.id)
-      .eq("organization_id", organizationId)
-      .single();
+        organizationId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        approver: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
+    });
 
-    if (error) {
-      console.error("Error fetching leave request:", error);
+    if (!leaveRequest) {
       return NextResponse.json(
         { error: "Leave request not found" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ leave_request: leaveRequest });
+    // Transform to match expected format
+    const transformedRequest = {
+      id: leaveRequest.id,
+      organization_id: leaveRequest.organizationId,
+      user_id: leaveRequest.userId,
+      type: leaveRequest.type,
+      start_date: leaveRequest.startDate,
+      end_date: leaveRequest.endDate,
+      days_requested: leaveRequest.daysRequested,
+      reason: leaveRequest.reason,
+      status: leaveRequest.status,
+      approved_by: leaveRequest.approvedBy,
+      approved_at: leaveRequest.approvedAt,
+      rejection_reason: leaveRequest.rejectionReason,
+      created_at: leaveRequest.createdAt,
+      updated_at: leaveRequest.updatedAt,
+      users: leaveRequest.user
+        ? {
+            id: leaveRequest.user.id,
+            full_name: leaveRequest.user.fullName,
+            email: leaveRequest.user.email,
+            avatar_url: leaveRequest.user.avatarUrl,
+          }
+        : null,
+      approver: leaveRequest.approver
+        ? {
+            id: leaveRequest.approver.id,
+            full_name: leaveRequest.approver.fullName,
+            email: leaveRequest.approver.email,
+          }
+        : null,
+    };
+
+    return NextResponse.json({ leave_request: transformedRequest });
   } catch (error) {
     console.error("Leave request GET error:", error);
     return NextResponse.json(
@@ -83,7 +112,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { searchParams } = new URL(request.url);
@@ -114,18 +143,22 @@ export async function PUT(
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
+    const { id } = await params;
 
     const body = await request.json();
     const { leave_type, start_date, end_date, reason } = body;
 
     // Check if user owns this request or has permission to edit
-    const { data: existingRequest } = await supabase
-      .from("leave_requests")
-      .select("user_id, status")
-      .eq("id", params.id)
-      .eq("organization_id", organizationId)
-      .single();
+    const existingRequest = await prisma.leaveRequest.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+      select: {
+        userId: true,
+        status: true,
+      },
+    });
 
     if (!existingRequest) {
       return NextResponse.json(
@@ -135,7 +168,7 @@ export async function PUT(
     }
 
     // Check permissions - users can only edit their own requests
-    if (!userContext || existingRequest.user_id !== userContext.userId) {
+    if (!userContext || existingRequest.userId !== userContext.userId) {
       return NextResponse.json(
         { error: "You can only edit your own leave requests" },
         { status: 403 }
@@ -151,7 +184,7 @@ export async function PUT(
     }
 
     // Calculate total days if dates are provided
-    let totalDays = undefined;
+    let totalDays: number | undefined = undefined;
     if (start_date && end_date) {
       const start = new Date(start_date);
       const end = new Date(end_date);
@@ -161,47 +194,67 @@ export async function PUT(
 
     const updateData: any = {};
     if (leave_type) updateData.type = leave_type;
-    if (start_date) updateData.start_date = start_date;
-    if (end_date) updateData.end_date = end_date;
+    if (start_date) updateData.startDate = new Date(start_date);
+    if (end_date) updateData.endDate = new Date(end_date);
     if (reason !== undefined) updateData.reason = reason;
-    if (totalDays !== undefined) updateData.days_requested = totalDays;
+    if (totalDays !== undefined) updateData.daysRequested = totalDays;
 
-    const { data: leaveRequest, error } = await supabase
-      .from("leave_requests")
-      .update(updateData)
-      .eq("id", params.id)
-      .eq("organization_id", organizationId)
-      .select(
-        `
-        id,
-        organization_id,
-        user_id,
-        type,
-        start_date,
-        end_date,
-        days_requested,
-        reason,
-        status,
-        approved_by,
-        approved_at,
-        rejection_reason,
-        created_at,
-        updated_at,
-        users:user_id ( id, full_name, email, avatar_url ),
-        approver:approved_by ( id, full_name, email )
-      `
-      )
-      .single();
+    const leaveRequest = await prisma.leaveRequest.update({
+      where: { id },
+      data: updateData,
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        approver: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
+    });
 
-    if (error) {
-      console.error("Error updating leave request:", error);
-      return NextResponse.json(
-        { error: "Failed to update leave request" },
-        { status: 500 }
-      );
-    }
+    // Transform to match expected format
+    const transformedRequest = {
+      id: leaveRequest.id,
+      organization_id: leaveRequest.organizationId,
+      user_id: leaveRequest.userId,
+      type: leaveRequest.type,
+      start_date: leaveRequest.startDate,
+      end_date: leaveRequest.endDate,
+      days_requested: leaveRequest.daysRequested,
+      reason: leaveRequest.reason,
+      status: leaveRequest.status,
+      approved_by: leaveRequest.approvedBy,
+      approved_at: leaveRequest.approvedAt,
+      rejection_reason: leaveRequest.rejectionReason,
+      created_at: leaveRequest.createdAt,
+      updated_at: leaveRequest.updatedAt,
+      users: leaveRequest.user
+        ? {
+            id: leaveRequest.user.id,
+            full_name: leaveRequest.user.fullName,
+            email: leaveRequest.user.email,
+            avatar_url: leaveRequest.user.avatarUrl,
+          }
+        : null,
+      approver: leaveRequest.approver
+        ? {
+            id: leaveRequest.approver.id,
+            full_name: leaveRequest.approver.fullName,
+            email: leaveRequest.approver.email,
+          }
+        : null,
+    };
 
-    return NextResponse.json({ leave_request: leaveRequest });
+    return NextResponse.json({ leave_request: transformedRequest });
   } catch (error) {
     console.error("Leave request PUT error:", error);
     return NextResponse.json(
@@ -213,7 +266,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { searchParams } = new URL(request.url);
@@ -244,15 +297,19 @@ export async function DELETE(
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
+    const { id } = await params;
 
     // Check if user owns this request or has permission to delete
-    const { data: existingRequest } = await supabase
-      .from("leave_requests")
-      .select("user_id, status")
-      .eq("id", params.id)
-      .eq("organization_id", organizationId)
-      .single();
+    const existingRequest = await prisma.leaveRequest.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+      select: {
+        userId: true,
+        status: true,
+      },
+    });
 
     if (!existingRequest) {
       return NextResponse.json(
@@ -262,7 +319,7 @@ export async function DELETE(
     }
 
     // Check permissions - users can only delete their own requests
-    if (!userContext || existingRequest.user_id !== userContext.userId) {
+    if (!userContext || existingRequest.userId !== userContext.userId) {
       return NextResponse.json(
         { error: "You can only delete your own leave requests" },
         { status: 403 }
@@ -277,19 +334,9 @@ export async function DELETE(
       );
     }
 
-    const { error } = await supabase
-      .from("leave_requests")
-      .delete()
-      .eq("id", params.id)
-      .eq("organization_id", organizationId);
-
-    if (error) {
-      console.error("Error deleting leave request:", error);
-      return NextResponse.json(
-        { error: "Failed to delete leave request" },
-        { status: 500 }
-      );
-    }
+    await prisma.leaveRequest.delete({
+      where: { id },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

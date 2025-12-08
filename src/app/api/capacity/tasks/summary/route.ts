@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(req: NextRequest) {
@@ -35,32 +35,51 @@ export async function GET(req: NextRequest) {
   const cacheKey = `capacity:tasks:summary:${organizationId}:${userId || "all"}:${projectId || "all"}:${projectIds.join(",") || "all"}:${startDate || "all"}:${endDate || "all"}:${includeTasks}`;
 
   try {
-    const supabase = await createClient();
+    // Build where clause for tasks within organization projects
+    const where: any = {
+      project: {
+        organizationId,
+      },
+    };
 
-    // Build base query for tasks within organization projects
-    let tasksQuery = supabase
-      .from("tasks")
-      .select(
-        `id, project_id, title, estimated_hours, due_date, projects!inner ( id, name, organization_id )`
-      )
-      .eq("projects.organization_id", organizationId);
-
-    if (projectId) tasksQuery = tasksQuery.eq("project_id", projectId);
-    if (projectIds && projectIds.length > 0)
-      tasksQuery = tasksQuery.in("project_id", projectIds);
-
-    // If user filter provided, join via organization_members/project_members mapping using time_entries or assignments if available
-    // As we do not have direct assignment linkage except tasks.assigned_to (users.id), use that
-    if (userId) tasksQuery = tasksQuery.eq("assigned_to", userId);
-
-    if (startDate) tasksQuery = tasksQuery.gte("due_date", startDate);
-    if (endDate) tasksQuery = tasksQuery.lte("due_date", endDate);
-
-    const { data: tasks, error } = await tasksQuery;
-    if (error) {
-      console.error("Error fetching tasks summary:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (projectId) {
+      where.projectId = projectId;
     }
+    if (projectIds && projectIds.length > 0) {
+      where.projectId = {
+        in: projectIds,
+      };
+    }
+
+    // If user filter provided, use assigned_to
+    if (userId) {
+      where.assignedTo = userId;
+    }
+
+    if (startDate) {
+      where.dueDate = {
+        gte: new Date(startDate),
+      };
+    }
+    if (endDate) {
+      where.dueDate = {
+        ...where.dueDate,
+        lte: new Date(endDate),
+      };
+    }
+
+    const tasks = await prisma.task.findMany({
+      where,
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            organizationId: true,
+          },
+        },
+      },
+    });
 
     const byProject = new Map<
       string,
@@ -78,12 +97,12 @@ export async function GET(req: NextRequest) {
       }
     >();
 
-    for (const t of tasks || []) {
-      const key = t.project_id;
+    for (const t of tasks) {
+      const key = t.projectId;
       if (!byProject.has(key)) {
         byProject.set(key, {
-          project_id: t.project_id,
-          project_name: (t as any).projects?.name,
+          project_id: t.projectId,
+          project_name: t.project?.name,
           tasks_count: 0,
           estimated_hours: 0,
           tasks: includeTasks ? [] : undefined,
@@ -91,13 +110,13 @@ export async function GET(req: NextRequest) {
       }
       const agg = byProject.get(key)!;
       agg.tasks_count += 1;
-      agg.estimated_hours += Number(t.estimated_hours || 0);
+      agg.estimated_hours += Number(t.estimatedHours || 0);
       if (includeTasks) {
         (agg.tasks as any).push({
           id: t.id,
           title: t.title,
-          estimated_hours: t.estimated_hours || 0,
-          due_date: t.due_date,
+          estimated_hours: Number(t.estimatedHours || 0),
+          due_date: t.dueDate,
         });
       }
     }

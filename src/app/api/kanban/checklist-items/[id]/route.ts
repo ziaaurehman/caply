@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
@@ -15,7 +15,6 @@ export async function PATCH(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
     const body = await req.json();
     const {
       content,
@@ -28,39 +27,35 @@ export async function PATCH(
     const orgId = organizationId || req.headers.get("x-organization-id");
 
     // First get the checklist item to find the organization
-    const { data: existingItem, error: itemError } = await supabase
-      .from("checklist_items")
-      .select(
-        `
-        *,
-        checklists!inner (
-          id,
-          name,
-          card_id,
-          cards!inner (
-            id,
-            title,
-            lists!inner (
-              id,
-              board_id,
-              boards!inner (
-                id,
-                project_id,
-                projects!inner (
-                  id,
-                  organization_id
-                )
-              )
-            )
-          )
-        )
-      `
-      )
-      .eq("id", itemId)
-      .single();
+    const existingItem = await prisma.checklistItem.findUnique({
+      where: { id: itemId },
+      include: {
+        checklist: {
+          include: {
+            card: {
+              include: {
+                list: {
+                  include: {
+                    board: {
+                      include: {
+                        project: {
+                          select: {
+                            id: true,
+                            organizationId: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (itemError || !existingItem) {
-      console.log("Checklist item not found:", itemError);
+    if (!existingItem) {
       return NextResponse.json(
         { error: "Checklist item not found" },
         { status: 404 }
@@ -68,8 +63,8 @@ export async function PATCH(
     }
 
     // Get the organization ID from the item
-    const itemOrgId = (existingItem.checklists as any).cards.lists.boards
-      .projects.organization_id;
+    const itemOrgId =
+      existingItem.checklist.card.list.board.project.organizationId;
 
     // Validate organization access
     const validation = await validateOrganizationAccessWithId(itemOrgId, {
@@ -88,22 +83,16 @@ export async function PATCH(
 
     // If assigned_to_project_member_id is provided, verify the project member exists
     if (assigned_to_project_member_id) {
-      const organizationId = (existingItem.checklists as any).cards.lists.boards
-        .projects.organization_id;
-      const { data: projectMember, error: memberError } = await supabase
-        .from("project_members")
-        .select(
-          `
-        id,
-        organization_member_id,
-        projects!inner(id, organization_id)
-      `
-        )
-        .eq("id", assigned_to_project_member_id)
-        .eq("projects.organization_id", organizationId)
-        .single();
+      const projectMember = await prisma.projectMember.findFirst({
+        where: {
+          id: assigned_to_project_member_id,
+          project: {
+            organizationId: itemOrgId,
+          },
+        },
+      });
 
-      if (memberError || !projectMember) {
+      if (!projectMember) {
         return NextResponse.json(
           { error: "Assigned project member not found" },
           { status: 404 }
@@ -111,72 +100,107 @@ export async function PATCH(
       }
     }
 
-    // Update checklist item
-    const { data: checklistItem, error } = await supabase
-      .from("checklist_items")
-      .update({
-        content,
-        is_completed,
-        position,
-        due_date,
-        assigned_to_project_member_id,
-      })
-      .eq("id", itemId)
-      .select(
-        `
-      *,
-      assigned_to_project_member_id,
-              project_members (
-          id,
-          organization_member_id,
-          role,
-          joined_at,
-          organization_members!inner (
-            id,
-            user_id,
-            users!organization_members_user_id_fkey!inner (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
-          )
-        )
-    `
-      )
-      .single();
+    // Update checklist item and create activity log in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update checklist item
+      const checklistItem = await tx.checklistItem.update({
+        where: { id: itemId },
+        data: {
+          content: content !== undefined ? content : undefined,
+          isCompleted: is_completed !== undefined ? is_completed : undefined,
+          position: position !== undefined ? position : undefined,
+          dueDate:
+            due_date !== undefined
+              ? due_date
+                ? new Date(due_date)
+                : null
+              : undefined,
+          assignedToProjectMemberId:
+            assigned_to_project_member_id !== undefined
+              ? assigned_to_project_member_id || null
+              : undefined,
+        },
+        include: {
+          projectMember: {
+            include: {
+              organizationMember: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      fullName: true,
+                      email: true,
+                      avatarUrl: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+      // Create activity log
+      let actionType = "update";
+      let details: any = { changes: body };
 
-    // Create activity log
-    let actionType = "update";
-    let details: any = { changes: body };
+      if (body.hasOwnProperty("is_completed")) {
+        actionType = is_completed ? "complete" : "incomplete";
+        details = {
+          item_content: existingItem.content,
+          completed: is_completed,
+          checklist_name: existingItem.checklist.name,
+          card_title: existingItem.checklist.card.title,
+        };
+      }
 
-    if (body.hasOwnProperty("is_completed")) {
-      actionType = is_completed ? "complete" : "incomplete";
-      details = {
-        item_content: existingItem.content,
-        completed: is_completed,
-        checklist_name: (existingItem.checklists as any).name,
-        card_title: (existingItem.checklists as any).cards.title,
-      };
-    }
+      await tx.activity.create({
+        data: {
+          userId: session.user.id,
+          boardId: existingItem.checklist.card.list.board.id,
+          cardId: existingItem.checklist.cardId,
+          actionType,
+          entityType: "checklist_item",
+          entityId: itemId,
+          details,
+        },
+      });
 
-    await supabase.from("activities").insert([
-      {
-        user_id: session.user.id,
-        board_id: (existingItem.checklists as any).cards.lists.boards.id,
-        card_id: (existingItem.checklists as any).card_id,
-        action_type: actionType,
-        entity_type: "checklist_item",
-        entity_id: itemId,
-        details,
-      },
-    ]);
+      return checklistItem;
+    });
 
-    return NextResponse.json({ checklist_item: checklistItem });
+    // Transform to match expected format
+    const transformedItem = {
+      id: result.id,
+      checklist_id: result.checklistId,
+      content: result.content,
+      is_completed: result.isCompleted,
+      position: result.position,
+      due_date: result.dueDate,
+      assigned_to_project_member_id: result.assignedToProjectMemberId,
+      created_at: result.createdAt,
+      updated_at: result.updatedAt,
+      project_members: result.projectMember
+        ? {
+            id: result.projectMember.id,
+            organization_member_id: result.projectMember.organizationMemberId,
+            role: result.projectMember.role,
+            joined_at: result.projectMember.joinedAt,
+            organization_members: {
+              id: result.projectMember.organizationMember.id,
+              user_id: result.projectMember.organizationMember.userId,
+              users: {
+                id: result.projectMember.organizationMember.user.id,
+                full_name: result.projectMember.organizationMember.user.fullName,
+                email: result.projectMember.organizationMember.user.email,
+                avatar_url: result.projectMember.organizationMember.user.avatarUrl,
+              },
+            },
+          }
+        : null,
+    };
+
+    return NextResponse.json({ checklist_item: transformedItem });
   } catch (error) {
     console.error("Error updating checklist item:", error);
     return NextResponse.json(
@@ -196,43 +220,38 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
     const { id: itemId } = await params;
 
     // First get the checklist item to find the organization
-    const { data: existingItem, error: itemError } = await supabase
-      .from("checklist_items")
-      .select(
-        `
-        *,
-        checklists!inner (
-          id,
-          name,
-          card_id,
-          cards!inner (
-            id,
-            title,
-            lists!inner (
-              id,
-              board_id,
-              boards!inner (
-                id,
-                project_id,
-                projects!inner (
-                  id,
-                  organization_id
-                )
-              )
-            )
-          )
-        )
-      `
-      )
-      .eq("id", itemId)
-      .single();
+    const existingItem = await prisma.checklistItem.findUnique({
+      where: { id: itemId },
+      include: {
+        checklist: {
+          include: {
+            card: {
+              include: {
+                list: {
+                  include: {
+                    board: {
+                      include: {
+                        project: {
+                          select: {
+                            id: true,
+                            organizationId: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (itemError || !existingItem) {
-      console.log("Checklist item not found for deletion:", itemError);
+    if (!existingItem) {
       return NextResponse.json(
         { error: "Checklist item not found" },
         { status: 404 }
@@ -240,8 +259,8 @@ export async function DELETE(
     }
 
     // Get the organization ID from the item
-    const itemOrgId = (existingItem.checklists as any).cards.lists.boards
-      .projects.organization_id;
+    const itemOrgId =
+      existingItem.checklist.card.list.board.project.organizationId;
 
     // Validate organization access
     const validation = await validateOrganizationAccessWithId(itemOrgId, {
@@ -258,32 +277,30 @@ export async function DELETE(
       );
     }
 
-    // Delete checklist item
-    const { error } = await supabase
-      .from("checklist_items")
-      .delete()
-      .eq("id", itemId);
+    // Delete checklist item and create activity log in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Delete checklist item
+      await tx.checklistItem.delete({
+        where: { id: itemId },
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Create activity log
-    await supabase.from("activities").insert([
-      {
-        user_id: session.user.id,
-        board_id: (existingItem.checklists as any).cards.lists.boards.id,
-        card_id: (existingItem.checklists as any).card_id,
-        action_type: "delete",
-        entity_type: "checklist_item",
-        entity_id: itemId,
-        details: {
-          item_content: existingItem.content,
-          checklist_name: (existingItem.checklists as any).name,
-          card_title: (existingItem.checklists as any).cards.title,
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: session.user.id,
+          boardId: existingItem.checklist.card.list.board.id,
+          cardId: existingItem.checklist.cardId,
+          actionType: "delete",
+          entityType: "checklist_item",
+          entityId: itemId,
+          details: {
+            item_content: existingItem.content,
+            checklist_name: existingItem.checklist.name,
+            card_title: existingItem.checklist.card.title,
+          },
         },
-      },
-    ]);
+      });
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

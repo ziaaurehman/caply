@@ -1,4 +1,4 @@
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 
@@ -46,51 +46,39 @@ export async function getUserOrganizationContext(
   useCache: boolean = true
 ): Promise<UserOrganizationContext | null> {
   try {
-    const supabase = await createClient();
+    // Get membership with role information
+    const membership = await prisma.organizationMember.findFirst({
+      where: {
+        userId,
+        organizationId,
+        status: "active",
+      },
+      include: {
+        role: true,
+      },
+    });
 
-    // Optimized query with selective fields
-    const { data: membership, error } = await supabase
-      .from("organization_members")
-      .select(
-        `
-        id,
-        organization_id,
-        user_id,
-        role_id,
-        status,
-        roles!inner(
-          id,
-          name,
-          display_name
-        )
-      `
-      )
-      .eq("user_id", userId)
-      .eq("organization_id", organizationId)
-      .eq("status", "active")
-      .single();
-
-    if (error || !membership) {
+    if (!membership) {
       return null;
     }
 
     // Get permissions separately for better caching
-    const permissions = await getRolePermissions(membership.role_id, useCache);
+    const permissions = await getRolePermissions(membership.roleId, useCache);
 
     const context: UserOrganizationContext = {
       userId,
       organizationId,
       membership: {
         id: membership.id,
-        organization_id: membership.organization_id,
-        user_id: membership.user_id,
-        role_id: membership.role_id,
+        organization_id: membership.organizationId,
+        user_id: membership.userId,
+        role_id: membership.roleId,
         status: membership.status,
         role: {
-          id: (membership as any).roles.id,
-          name: (membership as any).roles.name,
-          display_name: (membership as any).roles.display_name,
-          description: "",
+          id: membership.role.id,
+          name: membership.role.name,
+          display_name: membership.role.displayName,
+          description: membership.role.description || "",
           permissions,
         },
       },
@@ -110,33 +98,20 @@ async function getRolePermissions(
   roleId: string,
   useCache: boolean = true
 ): Promise<Permission[]> {
-  const cacheKey = `role_permissions:${roleId}`;
-
   try {
-    const supabase = await createClient();
+    const rolePermissions = await prisma.rolePermission.findMany({
+      where: {
+        roleId,
+      },
+      include: {
+        permission: true,
+      },
+    });
 
-    const { data: permissions, error } = await supabase
-      .from("role_permissions")
-      .select(
-        `
-        permissions!inner(
-          module,
-          action
-        )
-      `
-      )
-      .eq("role_id", roleId);
-
-    if (error) {
-      console.error("Error fetching role permissions:", error);
-      return [];
-    }
-
-    const permissionList =
-      permissions?.map((rp: any) => ({
-        resource: rp.permissions.module,
-        action: rp.permissions.action,
-      })) || [];
+    const permissionList = rolePermissions.map((rp) => ({
+      resource: rp.permission.module,
+      action: rp.permission.action,
+    }));
 
     return permissionList;
   } catch (error) {
@@ -183,19 +158,16 @@ export async function isOrganizationOwner(
   organizationId: string
 ): Promise<boolean> {
   try {
-    const supabase = await createClient();
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { ownerId: true },
+    });
 
-    const { data: organization, error } = await supabase
-      .from("organizations")
-      .select("owner_id")
-      .eq("id", organizationId)
-      .single();
-
-    if (error || !organization) {
+    if (!organization) {
       return false;
     }
 
-    return organization.owner_id === userId;
+    return organization.ownerId === userId;
   } catch (error) {
     console.error("Error checking organization ownership:", error);
     return false;
@@ -226,17 +198,17 @@ export async function validateOrganizationAccess(
 
     // For now, we'll use the first organization the user belongs to
     // Later this should come from request headers or body
-    const supabase = await createClient();
+    const userOrg = await prisma.organizationMember.findFirst({
+      where: {
+        userId: session.user.id,
+        status: "active",
+      },
+      select: {
+        organizationId: true,
+      },
+    });
 
-    const { data: userOrg, error: orgError } = await supabase
-      .from("organization_members")
-      .select("organization_id")
-      .eq("user_id", session.user.id)
-      .eq("status", "active")
-      .limit(1)
-      .single();
-
-    if (orgError || !userOrg) {
+    if (!userOrg) {
       return {
         success: false,
         error: "No organization found",
@@ -246,7 +218,7 @@ export async function validateOrganizationAccess(
 
     const context = await getUserOrganizationContext(
       session.user.id,
-      userOrg.organization_id
+      userOrg.organizationId
     );
 
     if (!context) {
@@ -386,39 +358,35 @@ export async function getUserOrganizationsLite(userId: string): Promise<
   }>
 > {
   try {
-    const supabase = await createClient();
+    const memberships = await prisma.organizationMember.findMany({
+      where: {
+        userId,
+        status: "active",
+      },
+      include: {
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+            ownerId: true,
+          },
+        },
+        role: {
+          select: {
+            name: true,
+            displayName: true,
+          },
+        },
+      },
+    });
 
-    const { data: memberships, error } = await supabase
-      .from("organization_members")
-      .select(
-        `
-        organization_id,
-        role_id,
-        organizations!inner(
-          id,
-          name,
-          logo_url,
-          owner_id
-        ),
-        roles!inner(
-          name,
-          display_name
-        )
-      `
-      )
-      .eq("user_id", userId)
-      .eq("status", "active");
-
-    if (error || !memberships) {
-      return [];
-    }
-
-    const orgs = memberships.map((m: any) => ({
-      id: m.organizations.id,
-      name: m.organizations.name,
-      logo_url: m.organizations.logo_url,
-      role: m.roles.display_name,
-      is_owner: m.organizations.owner_id === userId,
+    const orgs = memberships.map((m) => ({
+      id: m.organization.id,
+      name: m.organization.name,
+      logo_url: m.organization.logoUrl || undefined,
+      role: m.role.displayName,
+      is_owner: m.organization.ownerId === userId,
     }));
 
     return orgs;

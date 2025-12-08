@@ -1,6 +1,6 @@
 // src/app/api/timesheets/delete-entry/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function DELETE(req: NextRequest) {
@@ -32,86 +32,85 @@ export async function DELETE(req: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
   const userContext = validation.context!;
 
   try {
-    // First, verify that the entry belongs to a draft submission owned by the user
-    const { data: entry, error: fetchError } = await supabase
-      .from("timesheet_entries")
-      .select(
-        `
-        timesheet_submission_id,
-        timesheet_submissions!inner (
-          id,
-          user_id,
-          status,
-          organization_id
-        )
-      `
-      )
-      .eq("id", entryId)
-      .eq("timesheet_submissions.user_id", userContext.userId)
-      .eq("timesheet_submissions.status", "draft")
-      .eq("timesheet_submissions.organization_id", organizationId)
-      .single();
-
-    if (fetchError || !entry) {
-      return NextResponse.json(
-        {
-          error: "Entry not found or not accessible",
+    // Use a transaction to handle all operations atomically
+    await prisma.$transaction(async (tx) => {
+      // First, verify that the entry belongs to a draft submission owned by the user
+      const entry = await tx.timesheetEntry.findFirst({
+        where: {
+          id: entryId,
+          timesheetSubmission: {
+            userId: userContext.userId,
+            status: "draft",
+            organizationId,
+          },
         },
-        { status: 404 }
+        include: {
+          timesheetSubmission: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (!entry) {
+        throw new Error("Entry not found or not accessible");
+      }
+
+      const submissionId = entry.timesheetSubmission.id;
+
+      // Delete the entry
+      await tx.timesheetEntry.delete({
+        where: { id: entryId },
+      });
+
+      // Recalculate and update total hours for the submission
+      const remainingEntries = await tx.timesheetEntry.findMany({
+        where: {
+          timesheetSubmissionId: submissionId,
+        },
+        select: {
+          mondayHours: true,
+          tuesdayHours: true,
+          wednesdayHours: true,
+          thursdayHours: true,
+          fridayHours: true,
+        },
+      });
+
+      const totalHours = remainingEntries.reduce(
+        (sum, e) =>
+          sum +
+          Number(e.mondayHours || 0) +
+          Number(e.tuesdayHours || 0) +
+          Number(e.wednesdayHours || 0) +
+          Number(e.thursdayHours || 0) +
+          Number(e.fridayHours || 0),
+        0
       );
-    }
 
-    // Delete the entry
-    const { error: deleteError } = await supabase
-      .from("timesheet_entries")
-      .delete()
-      .eq("id", entryId);
-
-    if (deleteError) throw deleteError;
-
-    // Recalculate and update total hours for the submission
-    const { data: remainingEntries, error: entriesError } = await supabase
-      .from("timesheet_entries")
-      .select(
-        "monday_hours, tuesday_hours, wednesday_hours, thursday_hours, friday_hours"
-      )
-      .eq("timesheet_submission_id", entry.timesheet_submissions.id);
-
-    if (entriesError) throw entriesError;
-
-    const totalHours = remainingEntries.reduce(
-      (sum, e) =>
-        sum +
-        e.monday_hours +
-        e.tuesday_hours +
-        e.wednesday_hours +
-        e.thursday_hours +
-        e.friday_hours,
-      0
-    );
-
-    // Update the submission's total hours
-    await supabase
-      .from("timesheet_submissions")
-      .update({
-        total_hours: totalHours,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", entry.timesheet_submissions.id);
+      // Update the submission's total hours
+      await tx.timesheetSubmission.update({
+        where: { id: submissionId },
+        data: {
+          totalHours,
+          updatedAt: new Date(),
+        },
+      });
+    });
 
     return NextResponse.json({
       success: true,
       message: "Entry deleted successfully",
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error deleting timesheet entry:", error);
     return NextResponse.json(
       {
-        error: "Internal server error",
+        error: error.message || "Internal server error",
       },
       { status: 500 }
     );

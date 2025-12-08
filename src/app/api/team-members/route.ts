@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { sendInvitationEmail } from "@/lib/email";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 // Helper function to refresh team members cache
-async function refreshTeamMembersCache(organizationId: string, supabase: any) {}
+async function refreshTeamMembersCache(organizationId: string) {}
 
 export { refreshTeamMembersCache };
 
@@ -49,206 +49,150 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
     console.log("✅ Organization access validated for:", organizationId);
 
     // Calculate offset for pagination
-    const offset = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-    // For search queries, we need to get the actual count after filtering
-    // because count queries with complex joins don't work well with head: true
-    let totalCount = 0;
-    let countError = null;
-
-    if (search) {
-      console.log("🔍 Running optimized search count query for term:", search);
-
-      // Single optimized query with joins for counting
-      let searchCountQuery = supabase
-        .from("organization_members")
-        .select(
-          `
-          id,
-          users!inner(email, full_name)
-        `,
-          { count: "exact", head: true }
-        )
-        .eq("organization_id", organizationId);
-
-      // Add status filter
-      if (status !== "all") {
-        searchCountQuery = searchCountQuery.eq("status", status);
-      }
-
-      // Use PostgreSQL's text search for better performance
-      const searchPattern = `%${search.toLowerCase()}%`;
-      // searchCountQuery = searchCountQuery.or(
-      //   `department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern}`
-      // );
-      searchCountQuery = searchCountQuery.or(
-        `(department.ilike.${searchPattern},users.email.ilike.${searchPattern},users.full_name.ilike.${searchPattern})`
-      );
-
-      const { count, error: searchCountError } = await searchCountQuery;
-      totalCount = count || 0;
-      countError = searchCountError?.message ?? "";
-
-      console.log("📊 Optimized search count result:", {
-        searchTerm: search,
-        totalCount,
-        hasError: !!searchCountError,
-        errorMessage: searchCountError?.message,
-      });
-    } else {
-      console.log("📊 Running simple count query (no search)");
-      // For non-search queries, use simple count
-      let countQuery = supabase
-        .from("organization_members")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId);
-
-      // Add status filter
-      if (status !== "all") {
-        countQuery = countQuery.eq("status", status);
-      }
-
-      const { count, error } = await countQuery;
-      totalCount = count || 0;
-      countError = error;
-
-      console.log("📊 Simple count result:", {
-        totalCount,
-        hasError: !!error,
-        errorMessage: error?.message,
-      });
-    }
-
-    if (countError) {
-      console.error("Error counting team members:", countError);
-      return NextResponse.json(
-        { error: "Failed to count team members" },
-        { status: 500 }
-      );
-    }
-
-    // Get team members with their roles and user info
-    console.log("🔍 Fetching team members for organization:", organizationId);
-    let membersQuery = supabase
-      .from("organization_members")
-      .select(
-        `
-        id,
-        user_id,
-        role_id,
-        hourly_rate,
-        weekly_capacity,
-        department,
-        hire_date,
-        status,
-        joined_at,
-        users:user_id (
-          id,
-          email,
-          full_name,
-          avatar_url,
-          position,
-          phone,
-          is_active
-        ),
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        )
-      `
-      )
-      .eq("organization_id", organizationId);
+    // Build where clause
+    const where: any = {
+      organizationId,
+    };
 
     // Add status filter
     if (status !== "all") {
-      membersQuery = membersQuery.eq("status", status);
+      where.status = status;
     }
 
     // Add search filter if search term provided
     if (search) {
-      console.log(
-        "🔍 Applying optimized search filter to members query for term:",
-        search
-      );
-
-      // Use the same optimized search pattern as count query
-      const searchPattern = `%${search.toLowerCase()}%`;
-      membersQuery = membersQuery.ilike("users.email", searchPattern);
-      // .ilike("department", searchPattern)
-      // .ilike("users.full_name", searchPattern);
-      // .or(
-      //   `department.ilike.${searchPattern}, users.email.ilike.${searchPattern}, users.full_name.ilike.${searchPattern}`
-      // );
+      where.OR = [
+        { department: { contains: search, mode: "insensitive" } },
+        { user: { email: { contains: search, mode: "insensitive" } } },
+        { user: { fullName: { contains: search, mode: "insensitive" } } },
+      ];
     }
 
-    // Add pagination and ordering
-    const { data: members, error } = await membersQuery
-      .order("joined_at", { ascending: false })
-      .range(offset, offset + limit - 1);
+    // Get total count and members in parallel
+    const [totalCount, members] = await Promise.all([
+      prisma.organizationMember.count({ where }),
+      prisma.organizationMember.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { joinedAt: "desc" },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              avatarUrl: true,
+              position: true,
+              phone: true,
+              isActive: true,
+            },
+          },
+          role: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+              description: true,
+            },
+          },
+        },
+      }),
+    ]);
 
     console.log("📊 Members query result:", {
       membersCount: members?.length || 0,
-      hasError: !!error,
-      errorMessage: error?.message,
-      errorCode: error?.code,
+      totalCount,
     });
 
-    if (error) {
-      console.error("❌ Error fetching team members:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch team members" },
-        { status: 500 }
-      );
-    }
+    // Transform members to match expected format
+    const transformedMembers = members.map((member) => ({
+      id: member.id,
+      user_id: member.userId,
+      role_id: member.roleId,
+      hourly_rate: member.hourlyRate,
+      weekly_capacity: member.weeklyCapacity,
+      department: member.department,
+      hire_date: member.hireDate,
+      status: member.status,
+      joined_at: member.joinedAt,
+      users: {
+        id: member.user.id,
+        email: member.user.email,
+        full_name: member.user.fullName,
+        avatar_url: member.user.avatarUrl,
+        position: member.user.position,
+        phone: member.user.phone,
+        is_active: member.user.isActive,
+      },
+      roles: {
+        id: member.role.id,
+        name: member.role.name,
+        display_name: member.role.displayName,
+        description: member.role.description,
+      },
+    }));
 
-    // Get pending invitations (no caching needed - they're temporary)
+    // Get pending invitations
     console.log(
       "🔍 Fetching pending invitations for organization:",
       organizationId
     );
-    const { data: invitations, error: inviteError } = await supabase
-      .from("organization_invitations")
-      .select(
-        `
-        id,
-        email,
-        role_id,
-        status,
-        expires_at,
-        created_at,
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        )
-      `
-      )
-      .eq("organization_id", organizationId)
-      .eq("status", "pending")
-      .gt("expires_at", new Date().toISOString());
-
-    console.log("📊 Invitations query result:", {
-      invitationsCount: invitations?.length || 0,
-      hasError: !!inviteError,
-      errorMessage: inviteError?.message,
+    const invitations = await prisma.organizationInvitation.findMany({
+      where: {
+        organizationId,
+        status: "pending",
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
     });
 
-    const totalPages = Math.ceil((totalCount || 0) / limit);
+    // Transform invitations to match expected format
+    const transformedInvitations = invitations.map((invitation) => ({
+      id: invitation.id,
+      email: invitation.email,
+      role_id: invitation.roleId,
+      status: invitation.status,
+      expires_at: invitation.expiresAt,
+      created_at: invitation.createdAt,
+      roles: {
+        id: invitation.role.id,
+        name: invitation.role.name,
+        display_name: invitation.role.displayName,
+        description: invitation.role.description,
+      },
+    }));
+
+    console.log("📊 Invitations query result:", {
+      invitationsCount: transformedInvitations.length,
+    });
+
+    const totalPages = Math.ceil(totalCount / limit);
 
     const result = {
-      members: members || [],
-      invitations: invitations || [],
+      members: transformedMembers,
+      invitations: transformedInvitations,
       pagination: {
         page,
         limit,
-        total: totalCount || 0,
+        total: totalCount,
         totalPages,
         hasNext: page < totalPages,
         hasPrev: page > 1,
@@ -320,7 +264,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
     console.log("✅ Organization access validated for:", organizationId);
 
     // Permission check is already done in validateOrganizationAccessWithId
@@ -331,11 +274,10 @@ export async function POST(request: NextRequest) {
 
     // Check if user already exists
     console.log("🔍 Checking if user exists:", email);
-    const { data: existingUser } = await supabase
-      .from("users")
-      .select("id")
-      .eq("email", email)
-      .single();
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
 
     console.log("👤 Existing user check:", {
       exists: !!existingUser,
@@ -344,12 +286,12 @@ export async function POST(request: NextRequest) {
 
     // Check if user is already a member
     if (existingUser) {
-      const { data: existingMember } = await supabase
-        .from("organization_members")
-        .select("id")
-        .eq("organization_id", organizationId)
-        .eq("user_id", existingUser.id)
-        .single();
+      const existingMember = await prisma.organizationMember.findFirst({
+        where: {
+          organizationId,
+          userId: existingUser.id,
+        },
+      });
 
       console.log("👥 Existing member check:", {
         isAlreadyMember: !!existingMember,
@@ -364,13 +306,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for existing pending invitation
-    const { data: existingInvitation } = await supabase
-      .from("organization_invitations")
-      .select("id")
-      .eq("organization_id", organizationId)
-      .eq("email", email)
-      .eq("status", "pending")
-      .single();
+    const existingInvitation = await prisma.organizationInvitation.findFirst({
+      where: {
+        organizationId,
+        email,
+        status: "pending",
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+    });
 
     console.log("📧 Existing invitation check:", {
       hasInvitation: !!existingInvitation,
@@ -384,11 +329,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Get role information for the invitation
-    const { data: roleInfo } = await supabase
-      .from("roles")
-      .select("name, display_name")
-      .eq("id", roleId)
-      .single();
+    const roleInfo = await prisma.role.findUnique({
+      where: { id: roleId },
+      select: { name: true, displayName: true },
+    });
 
     // Generate invitation token
     const token = crypto.randomUUID();
@@ -399,48 +343,30 @@ export async function POST(request: NextRequest) {
 
     // Always create invitation (for both existing and new users)
     console.log("📧 Creating invitation for user:", email);
-    const expiresAt = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    const { data: invitation, error: inviteError } = await supabase
-      .from("organization_invitations")
-      .insert({
-        organization_id: organizationId,
+    const invitation = await prisma.organizationInvitation.create({
+      data: {
+        organizationId,
         email,
-        role_id: roleId,
+        roleId,
         token,
-        invited_by: userContext.userId,
+        invitedBy: userContext.userId,
         message: message || null,
-        expires_at: expiresAt,
-        user_id: existingUser?.id || null, // Link to existing user if they exist
-      })
-      .select(
-        `
-        id,
-        email,
-        role_id,
-        status,
-        expires_at,
-        created_at,
-        user_id,
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        )
-      `
-      )
-      .single();
-
-    if (inviteError) {
-      console.error("❌ Error creating invitation:", inviteError);
-      return NextResponse.json(
-        { error: "Failed to create invitation" },
-        { status: 500 }
-      );
-    }
+        expiresAt,
+        userId: existingUser?.id || null, // Link to existing user if they exist
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+          },
+        },
+      },
+    });
 
     console.log("✅ Invitation created successfully");
 
@@ -449,28 +375,26 @@ export async function POST(request: NextRequest) {
       console.log("📧 Sending invitation email...");
 
       // Get organization info for email
-      const { data: orgInfo } = await supabase
-        .from("organizations")
-        .select("name, logo_url")
-        .eq("id", organizationId)
-        .single();
+      const orgInfo = await prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { name: true, logoUrl: true },
+      });
 
       // Get inviter info
-      const { data: inviterInfo } = await supabase
-        .from("users")
-        .select("full_name")
-        .eq("id", userContext.userId)
-        .single();
+      const inviterInfo = await prisma.user.findUnique({
+        where: { id: userContext.userId },
+        select: { fullName: true },
+      });
 
       const emailResult = await sendInvitationEmail({
         email,
         token,
         organizationName: orgInfo?.name || "Organization",
-        organizationLogo: orgInfo?.logo_url,
-        roleName: roleInfo?.display_name || "Team Member",
-        inviterName: inviterInfo?.full_name || "Team Admin",
+        organizationLogo: orgInfo?.logoUrl || undefined,
+        roleName: roleInfo?.displayName || "Team Member",
+        inviterName: inviterInfo?.fullName || "Team Admin",
         message: message || undefined,
-        expiresAt,
+        expiresAt: expiresAt.toISOString(),
       });
 
       if (emailResult.success) {
@@ -494,9 +418,26 @@ export async function POST(request: NextRequest) {
       // Don't fail the request if email fails - invitation is still created
     }
 
+    // Transform invitation to match expected format
+    const transformedInvitation = {
+      id: invitation.id,
+      email: invitation.email,
+      role_id: invitation.roleId,
+      status: invitation.status,
+      expires_at: invitation.expiresAt,
+      created_at: invitation.createdAt,
+      user_id: invitation.userId,
+      roles: {
+        id: invitation.role.id,
+        name: invitation.role.name,
+        display_name: invitation.role.displayName,
+        description: invitation.role.description,
+      },
+    };
+
     return NextResponse.json({
       success: true,
-      invitation,
+      invitation: transformedInvitation,
       message: existingUser
         ? "Invitation sent to existing user"
         : "Invitation sent to new user",

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-// COMMENTED OUT: Import no longer needed after commenting out verification
-// import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -18,39 +17,23 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // COMMENTED OUT: Verification that was causing 403 errors
-  // const validation = await validateOrganizationAccessWithId(organizationId, {
-  //   resource: "timesheets",
-  //   action: "read",
-  // });
-
-  // if (!validation.success) {
-  //   return NextResponse.json(
-  //     {
-  //       error: validation.error,
-  //     },
-  //     { status: validation.status }
-  //   );
-  // }
-
-  const supabase = await createClient();
-
-  // Get user ID from session directly (bypassing verification)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  // Get user ID from session
+  const session = await getServerSession(authConfig);
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get organization membership directly
-  const { data: membership } = await supabase
-    .from("organization_members")
-    .select("id, user_id, organization_id")
-    .eq("user_id", user.id)
-    .eq("organization_id", organizationId)
-    .eq("status", "active")
-    .maybeSingle();
+  // Get organization membership
+  const membership = await prisma.organizationMember.findFirst({
+    where: {
+      userId: session.user.id,
+      organizationId,
+      status: "active",
+    },
+    select: {
+      id: true,
+    },
+  });
 
   if (!membership) {
     return NextResponse.json(
@@ -113,30 +96,27 @@ export async function GET(req: NextRequest) {
       new Set(projectAssignments.map((pa) => pa.projectId))
     );
 
-    const { data: projects, error } = await supabase
-      .from("projects")
-      .select(
-        `
-        id,
-        name,
-        code,
-        description,
-        status,
-        created_at,
-        updated_at
-      `
-      )
-      .eq("organization_id", organizationId)
-      .in("id", projectIds);
-
-    if (error) {
-      console.error("Error fetching capacity projects:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const projects = await prisma.project.findMany({
+      where: {
+        organizationId,
+        id: {
+          in: projectIds,
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        description: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
     // Step 5: Transform the data to match the expected format
     const projectsMap = new Map(
-      (projects || []).map((p) => [
+      projects.map((p) => [
         p.id,
         {
           id: p.id,
@@ -144,8 +124,8 @@ export async function GET(req: NextRequest) {
           code: p.code,
           description: p.description,
           status: p.status,
-          created_at: p.created_at,
-          updated_at: p.updated_at,
+          created_at: p.createdAt,
+          updated_at: p.updatedAt,
         },
       ])
     );

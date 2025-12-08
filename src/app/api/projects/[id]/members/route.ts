@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(
@@ -39,18 +39,21 @@ export async function GET(
       );
     }
 
-    const supabase = await createClient();
     const userContext = validation.context!;
 
     // First verify the project exists and user has access
-    const { data: project, error: projectError } = await supabase
-      .from("projects")
-      .select("id, organization_id")
-      .eq("id", projectId)
-      .eq("organization_id", organizationId)
-      .single();
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+    });
 
-    if (projectError || !project) {
+    if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
@@ -64,12 +67,12 @@ export async function GET(
 
     if (!hasFullAccess) {
       // Check if user is a member of this project
-      const { data: memberCheck } = await supabase
-        .from("project_members")
-        .select("id")
-        .eq("project_id", projectId)
-        .eq("organization_member_id", userContext.membership.id)
-        .single();
+      const memberCheck = await prisma.projectMember.findFirst({
+        where: {
+          projectId,
+          organizationMemberId: userContext.membership.id,
+        },
+      });
 
       if (!memberCheck) {
         return NextResponse.json(
@@ -80,34 +83,46 @@ export async function GET(
     }
 
     // Fetch project members
-    const { data: members, error } = await supabase
-      .from("project_members")
-      .select(
-        `
-        id,
-        organization_member_id,
-        role,
-        joined_at,
-        organization_members!organization_member_id (
-          id,
-          user_id,
-          users!user_id (
-            id,
-            full_name,
-            email,
-            avatar_url
-          )
-        )
-      `
-      )
-      .eq("project_id", projectId);
+    const members = await prisma.projectMember.findMany({
+      where: {
+        projectId,
+      },
+      include: {
+        organizationMember: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    // Transform to match expected format
+    const transformedMembers = members.map((member) => ({
+      id: member.id,
+      organization_member_id: member.organizationMemberId,
+      role: member.role,
+      joined_at: member.joinedAt,
+      organization_members: {
+        id: member.organizationMember.id,
+        user_id: member.organizationMember.userId,
+        users: {
+          id: member.organizationMember.user.id,
+          full_name: member.organizationMember.user.fullName,
+          email: member.organizationMember.user.email,
+          avatar_url: member.organizationMember.user.avatarUrl,
+        },
+      },
+    }));
 
     const result = {
-      members: members || [],
+      members: transformedMembers,
     };
 
     return NextResponse.json(result);

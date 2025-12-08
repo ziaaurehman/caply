@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 // Optimized: Simple queries with smart caching and pre-calculations
@@ -53,30 +53,19 @@ export async function GET(req: NextRequest) {
       ? `overview:main:${organizationId}`
       : `overview:${organizationId}:${projectId || ""}:${startDate || ""}:${endDate || ""}:${filterUserIds.join(",") || ""}:${showOnlyOverallocated}`;
 
-    const supabase = await createClient();
-
     // Step 1: Get active resources for this organization (simple query)
-    let resourcesQuery = supabase
-      .from("resource_allocations")
-      .select(
-        `
-        id,
-        organization_member_id,
-        weekly_capacity_hours,
-        is_active
-      `
-      )
-      .eq("organization_id", organizationId)
-      .eq("is_active", true);
-
-    const { data: resources, error: resourcesError } = await resourcesQuery;
-    if (resourcesError) {
-      console.error("Error fetching resources:", resourcesError);
-      return NextResponse.json(
-        { error: resourcesError.message },
-        { status: 500 }
-      );
-    }
+    const resources = await prisma.resourceAllocation.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        organizationMemberId: true,
+        weeklyCapacityHours: true,
+        isActive: true,
+      },
+    });
 
     if (!resources || resources.length === 0) {
       const emptyResponse = {
@@ -96,40 +85,30 @@ export async function GET(req: NextRequest) {
     }
 
     // Step 2: Get organization members info
-    const { data: orgMembers, error: membersError } = await supabase
-      .from("organization_members")
-      .select(
-        `
-        id,
-        user_id,
-        department,
-        users!user_id (
-          id,
-          full_name,
-          email,
-          avatar_url,
-          position
-        )
-      `
-      )
-      .in(
-        "id",
-        resources.map((r) => r.organization_member_id)
-      );
-
-    if (membersError) {
-      console.error("Error fetching organization members:", membersError);
-      return NextResponse.json(
-        { error: membersError.message },
-        { status: 500 }
-      );
-    }
+    const orgMembers = await prisma.organizationMember.findMany({
+      where: {
+        id: {
+          in: resources.map((r) => r.organizationMemberId),
+        },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+            position: true,
+          },
+        },
+      },
+    });
 
     // Filter by user IDs if specified
-    let filteredMembers = orgMembers || [];
+    let filteredMembers = orgMembers;
     if (filterUserIds.length > 0) {
       filteredMembers = filteredMembers.filter((member) =>
-        filterUserIds.includes((member as any).users?.id)
+        filterUserIds.includes(member.userId)
       );
     }
 
@@ -153,93 +132,110 @@ export async function GET(req: NextRequest) {
     // Step 3: Get project assignments for date range
     const resourceIds = resources
       .filter((r) =>
-        filteredMembers.some((m) => m.id === r.organization_member_id)
+        filteredMembers.some((m) => m.id === r.organizationMemberId)
       )
       .map((r) => r.id);
 
-    let assignmentsQuery = supabase
-      .from("project_assignments")
-      .select(
-        `
-        id,
-        project_id,
-        hours_per_week,
-        start_date,
-        end_date,
-        resource_allocation_id
-      `
-      )
-      .in("resource_allocation_id", resourceIds)
-      .eq("is_active", true);
+    const assignmentsWhere: any = {
+      resourceAllocationId: {
+        in: resourceIds,
+      },
+      isActive: true,
+    };
 
     // Apply date filtering
     if (startDate && endDate) {
-      assignmentsQuery = assignmentsQuery
-        .lte("start_date", endDate)
-        .or(`end_date.is.null,end_date.gte.${startDate}`);
+      assignmentsWhere.OR = [
+        {
+          startDate: {
+            lte: new Date(endDate),
+          },
+        },
+        {
+          OR: [{ endDate: null }, { endDate: { gte: new Date(startDate) } }],
+        },
+      ];
     } else if (endDate) {
-      assignmentsQuery = assignmentsQuery.lte("start_date", endDate);
+      assignmentsWhere.startDate = {
+        lte: new Date(endDate),
+      };
     } else if (startDate) {
-      assignmentsQuery = assignmentsQuery.or(
-        `end_date.is.null,end_date.gte.${startDate}`
-      );
+      assignmentsWhere.OR = [
+        { endDate: null },
+        { endDate: { gte: new Date(startDate) } },
+      ];
     }
 
-    if (projectId)
-      assignmentsQuery = assignmentsQuery.eq("project_id", projectId);
-
-    const { data: assignments, error: assignmentsError } =
-      await assignmentsQuery;
-    if (assignmentsError) {
-      console.error("Error fetching assignments:", assignmentsError);
-      return NextResponse.json(
-        { error: assignmentsError.message },
-        { status: 500 }
-      );
+    if (projectId) {
+      assignmentsWhere.projectId = projectId;
     }
+
+    const assignments = await prisma.projectAssignment.findMany({
+      where: assignmentsWhere,
+      select: {
+        id: true,
+        projectId: true,
+        hoursPerWeek: true,
+        startDate: true,
+        endDate: true,
+        resourceAllocationId: true,
+      },
+    });
 
     // Step 4: Build overview (in memory calculations - fast)
     const resourceMap = new Map(resources.map((r) => [r.id, r]));
     const memberMap = new Map(filteredMembers.map((m) => [m.id, m]));
 
     // Group assignments by resource
-    const assignmentsByResource = new Map();
-    assignments?.forEach((assignment) => {
-      const resourceId = assignment.resource_allocation_id;
+    const assignmentsByResource = new Map<string, any[]>();
+    assignments.forEach((assignment) => {
+      const resourceId = assignment.resourceAllocationId;
       if (!assignmentsByResource.has(resourceId)) {
         assignmentsByResource.set(resourceId, []);
       }
-      assignmentsByResource.get(resourceId).push(assignment);
+      assignmentsByResource.get(resourceId)!.push(assignment);
     });
 
     const capacityOverview = Array.from(memberMap.values())
       .map((member) => {
         // Find corresponding resource
         const resource = resources.find(
-          (r) => r.organization_member_id === member.id
+          (r) => r.organizationMemberId === member.id
         );
         if (!resource) return null;
 
         const memberAssignments = assignmentsByResource.get(resource.id) || [];
         const totalAllocatedHours = memberAssignments.reduce(
-          (sum: number, a: any) => sum + Number(a.hours_per_week || 0),
+          (sum: number, a: any) => sum + Number(a.hoursPerWeek || 0),
           0
         );
-        const capacity = Number(resource.weekly_capacity_hours || 40);
+        const capacity = Number(resource.weeklyCapacityHours || 40);
         const utilizationPercent =
           capacity > 0 ? (totalAllocatedHours / capacity) * 100 : 0;
 
         return {
           member: {
-            id: (member as any).users?.id,
-            user: (member as any).users,
-            role:
-              (member as any).department ||
-              (member as any).users?.position ||
-              "",
+            id: member.user?.id,
+            user: member.user
+              ? {
+                  id: member.user.id,
+                  full_name: member.user.fullName,
+                  email: member.user.email,
+                  avatar_url: member.user.avatarUrl,
+                  position: member.user.position,
+                }
+              : null,
+            role: member.department || member.user?.position || "",
             organization_member_id: member.id,
           },
-          allocations: memberAssignments, // Simplified - just the assignment data
+          allocations: memberAssignments.map((a: any) => ({
+            id: a.id,
+            project_id: a.projectId,
+            hours_per_week: Number(a.hoursPerWeek),
+            start_date: a.startDate,
+            end_date: a.endDate,
+            resource_allocation_id: a.resourceAllocationId,
+          })),
           capacity,
           totalAllocatedHours,
           availableHours: Math.max(0, capacity - totalAllocatedHours),
@@ -254,7 +250,7 @@ export async function GET(req: NextRequest) {
                   : "underutilized",
         };
       })
-      .filter(Boolean);
+      .filter((item): item is NonNullable<typeof item> => item !== null);
 
     // Filter overallocated if requested
     const filteredOverview = showOnlyOverallocated

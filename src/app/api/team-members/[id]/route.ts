@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
@@ -44,74 +44,85 @@ export async function PUT(
       );
     }
 
-    const supabase = await createClient();
     const userContext = validation.context!;
 
     // Get the member to update
-    const { data: member, error: memberError } = await supabase
-      .from("organization_members")
-      .select("id, organization_id, user_id")
-      .eq("id", memberId)
-      .eq("organization_id", headerOrgId)
-      .single();
+    const member = await prisma.organizationMember.findFirst({
+      where: {
+        id: memberId,
+        organizationId: headerOrgId,
+      },
+    });
 
-    if (memberError || !member) {
+    if (!member) {
       return NextResponse.json({ error: "Member not found" }, { status: 404 });
     }
 
     // Update the member
     const updateData: any = {};
-    if (roleId) updateData.role_id = roleId;
+    if (roleId) updateData.roleId = roleId;
     if (department !== undefined) updateData.department = department;
-    if (hourlyRate !== undefined) updateData.hourly_rate = hourlyRate;
+    if (hourlyRate !== undefined) updateData.hourlyRate = hourlyRate;
     if (weeklyCapacity !== undefined)
-      updateData.weekly_capacity = weeklyCapacity;
+      updateData.weeklyCapacity = weeklyCapacity;
 
-    const { data: updatedMember, error: updateError } = await supabase
-      .from("organization_members")
-      .update(updateData)
-      .eq("id", memberId)
-      .select(
-        `
-        id,
-        user_id,
-        role_id,
-        hourly_rate,
-        weekly_capacity,
-        department,
-        hire_date,
-        status,
-        joined_at,
-        users:user_id (
-          id,
-          email,
-          full_name,
-          avatar_url,
-          position,
-          phone,
-          is_active
-        ),
-        roles:role_id (
-          id,
-          name,
-          display_name,
-          description
-        )
-      `
-      )
-      .single();
+    const updatedMember = await prisma.organizationMember.update({
+      where: { id: memberId },
+      data: updateData,
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            avatarUrl: true,
+            position: true,
+            phone: true,
+            isActive: true,
+          },
+        },
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            description: true,
+          },
+        },
+      },
+    });
 
-    if (updateError) {
-      console.error("Error updating member:", updateError);
-      return NextResponse.json(
-        { error: "Failed to update member" },
-        { status: 500 }
-      );
-    }
+    // Transform to match expected format
+    const transformedMember = {
+      id: updatedMember.id,
+      user_id: updatedMember.userId,
+      role_id: updatedMember.roleId,
+      hourly_rate: updatedMember.hourlyRate,
+      weekly_capacity: updatedMember.weeklyCapacity,
+      department: updatedMember.department,
+      hire_date: updatedMember.hireDate,
+      status: updatedMember.status,
+      joined_at: updatedMember.joinedAt,
+      users: {
+        id: updatedMember.user.id,
+        email: updatedMember.user.email,
+        full_name: updatedMember.user.fullName,
+        avatar_url: updatedMember.user.avatarUrl,
+        position: updatedMember.user.position,
+        phone: updatedMember.user.phone,
+        is_active: updatedMember.user.isActive,
+      },
+      roles: {
+        id: updatedMember.role.id,
+        name: updatedMember.role.name,
+        display_name: updatedMember.role.displayName,
+        description: updatedMember.role.description,
+      },
+    };
 
     return NextResponse.json({
       success: true,
-      member: updatedMember,
+      member: transformedMember,
     });
   } catch (error) {
     console.error("Error in team member PUT:", error);
@@ -160,23 +171,26 @@ export async function DELETE(
       );
     }
 
-    const supabase = await createClient();
     const userContext = validation.context!;
 
     // Get the member to delete
-    const { data: member, error: memberError } = await supabase
-      .from("organization_members")
-      .select("id, organization_id, user_id")
-      .eq("id", memberId)
-      .eq("organization_id", headerOrgId)
-      .single();
+    const member = await prisma.organizationMember.findFirst({
+      where: {
+        id: memberId,
+        organizationId: headerOrgId,
+      },
+      select: {
+        id: true,
+        userId: true,
+      },
+    });
 
-    if (memberError || !member) {
+    if (!member) {
       return NextResponse.json({ error: "Member not found" }, { status: 404 });
     }
 
     // Prevent deleting yourself
-    if (member.user_id === session.user.id) {
+    if (member.userId === session.user.id) {
       return NextResponse.json(
         { error: "Cannot remove yourself from the organization" },
         { status: 400 }
@@ -184,22 +198,20 @@ export async function DELETE(
     }
 
     // Check if the user is an organization owner
-    const { data: organization, error: ownerError } = await supabase
-      .from("organizations")
-      .select("owner_id")
-      .eq("id", headerOrgId)
-      .single();
+    const organization = await prisma.organization.findUnique({
+      where: { id: headerOrgId },
+      select: { ownerId: true },
+    });
 
-    if (ownerError) {
-      console.error("Error checking organization owner:", ownerError);
+    if (!organization) {
       return NextResponse.json(
-        { error: "Failed to verify organization ownership" },
-        { status: 500 }
+        { error: "Organization not found" },
+        { status: 404 }
       );
     }
 
     // Prevent deleting organization owner
-    if (organization.owner_id === member.user_id) {
+    if (organization.ownerId === member.userId) {
       return NextResponse.json(
         {
           error:
@@ -210,18 +222,9 @@ export async function DELETE(
     }
 
     // Delete the member
-    const { error: deleteError } = await supabase
-      .from("organization_members")
-      .delete()
-      .eq("id", memberId);
-
-    if (deleteError) {
-      console.error("Error deleting member:", deleteError);
-      return NextResponse.json(
-        { error: "Failed to remove member" },
-        { status: 500 }
-      );
-    }
+    await prisma.organizationMember.delete({
+      where: { id: memberId },
+    });
 
     return NextResponse.json({
       success: true,

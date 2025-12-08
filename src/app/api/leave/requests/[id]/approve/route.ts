@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { searchParams } = new URL(request.url);
@@ -35,7 +35,7 @@ export async function POST(
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
+    const { id } = await params;
 
     const body = await request.json();
     const { status, comment, rejected_reason } = body;
@@ -52,14 +52,14 @@ export async function POST(
     }
 
     // Get the existing request
-    const { data: existingRequest, error: fetchError } = await supabase
-      .from("leave_requests")
-      .select("*")
-      .eq("id", params.id)
-      .eq("organization_id", organizationId)
-      .single();
+    const existingRequest = await prisma.leaveRequest.findFirst({
+      where: {
+        id,
+        organizationId,
+      },
+    });
 
-    if (fetchError || !existingRequest) {
+    if (!existingRequest) {
       return NextResponse.json(
         { error: "Leave request not found" },
         { status: 404 }
@@ -76,56 +76,76 @@ export async function POST(
     // Update the request
     const updateData: any = {
       status,
-      approved_by: userContext!.userId,
-      approved_at: new Date().toISOString(),
+      approvedBy: userContext!.userId,
+      approvedAt: new Date(),
     };
 
     if (comment) {
-      updateData.approver_comment = comment;
+      updateData.approverComment = comment;
     }
 
     if (status === "rejected" && rejected_reason) {
-      updateData.rejected_reason = rejected_reason;
+      updateData.rejectionReason = rejected_reason;
     }
 
-    const { data: leaveRequest, error } = await supabase
-      .from("leave_requests")
-      .update(updateData)
-      .eq("id", params.id)
-      .eq("organization_id", organizationId)
-      .select(
-        `
-        id,
-        organization_id,
-        user_id,
-        type,
-        start_date,
-        end_date,
-        days_requested,
-        reason,
-        status,
-        approved_by,
-        approved_at,
-        rejection_reason,
-        created_at,
-        updated_at,
-        users:user_id ( id, full_name, email, avatar_url ),
-        approver:approved_by ( id, full_name, email )
-      `
-      )
-      .single();
+    const leaveRequest = await prisma.leaveRequest.update({
+      where: { id },
+      data: updateData,
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        approver: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+      },
+    });
 
-    if (error) {
-      console.error("Error updating leave request:", error);
-      return NextResponse.json(
-        { error: "Failed to update leave request" },
-        { status: 500 }
-      );
-    }
+    // Transform to match expected format
+    const transformedRequest = {
+      id: leaveRequest.id,
+      organization_id: leaveRequest.organizationId,
+      user_id: leaveRequest.userId,
+      type: leaveRequest.type,
+      start_date: leaveRequest.startDate,
+      end_date: leaveRequest.endDate,
+      days_requested: leaveRequest.daysRequested,
+      reason: leaveRequest.reason,
+      status: leaveRequest.status,
+      approved_by: leaveRequest.approvedBy,
+      approved_at: leaveRequest.approvedAt,
+      rejection_reason: leaveRequest.rejectionReason,
+      created_at: leaveRequest.createdAt,
+      updated_at: leaveRequest.updatedAt,
+      users: leaveRequest.user
+        ? {
+            id: leaveRequest.user.id,
+            full_name: leaveRequest.user.fullName,
+            email: leaveRequest.user.email,
+            avatar_url: leaveRequest.user.avatarUrl,
+          }
+        : null,
+      approver: leaveRequest.approver
+        ? {
+            id: leaveRequest.approver.id,
+            full_name: leaveRequest.approver.fullName,
+            email: leaveRequest.approver.email,
+          }
+        : null,
+    };
 
     // Note: leave balances table not used; skipping balance updates
 
-    return NextResponse.json({ leave_request: leaveRequest });
+    return NextResponse.json({ leave_request: transformedRequest });
   } catch (error) {
     console.error("Leave request approval error:", error);
     return NextResponse.json(

@@ -343,6 +343,24 @@ export default function TimesheetsPage() {
           entryId: entryId,
           data: updateData,
         });
+        // Clear the change for this entry since it's now saved on the server
+        // The refetch will bring the updated value, so we don't need to keep the change
+        setEntryChanges((prev) => {
+          const newChanges = { ...prev };
+          // Only remove the fields that were just updated, keep other pending changes
+          if (newChanges[entryId]) {
+            const remainingChanges = { ...newChanges[entryId] };
+            Object.keys(updateData).forEach((key) => {
+              delete remainingChanges[key as keyof TimesheetEntry];
+            });
+            if (Object.keys(remainingChanges).length === 0) {
+              delete newChanges[entryId];
+            } else {
+              newChanges[entryId] = remainingChanges as any;
+            }
+          }
+          return newChanges;
+        });
         setError(null);
       } catch (error: any) {
         // Revert the optimistic update on error
@@ -411,12 +429,13 @@ export default function TimesheetsPage() {
   };
 
   const calculateTotal = (entry: TimeEntry): number => {
+    // Convert all hour values to numbers before adding
     return (
-      entry.monday.hours +
-      entry.tuesday.hours +
-      entry.wednesday.hours +
-      entry.thursday.hours +
-      entry.friday.hours
+      Number(entry.monday?.hours || 0) +
+      Number(entry.tuesday?.hours || 0) +
+      Number(entry.wednesday?.hours || 0) +
+      Number(entry.thursday?.hours || 0) +
+      Number(entry.friday?.hours || 0)
     );
   };
 
@@ -623,31 +642,31 @@ export default function TimesheetsPage() {
           taskDescription: updatedEntry.task_description,
           isPlanned: project?.isPlanned || false,
           monday: {
-            hours: updatedEntry.monday_hours,
+            hours: Number(updatedEntry.monday_hours || 0),
             notes: updatedEntry.monday_notes || "",
           },
           tuesday: {
-            hours: updatedEntry.tuesday_hours,
+            hours: Number(updatedEntry.tuesday_hours || 0),
             notes: updatedEntry.tuesday_notes || "",
           },
           wednesday: {
-            hours: updatedEntry.wednesday_hours,
+            hours: Number(updatedEntry.wednesday_hours || 0),
             notes: updatedEntry.wednesday_notes || "",
           },
           thursday: {
-            hours: updatedEntry.thursday_hours,
+            hours: Number(updatedEntry.thursday_hours || 0),
             notes: updatedEntry.thursday_notes || "",
           },
           friday: {
-            hours: updatedEntry.friday_hours,
+            hours: Number(updatedEntry.friday_hours || 0),
             notes: updatedEntry.friday_notes || "",
           },
           total:
-            updatedEntry.monday_hours +
-            updatedEntry.tuesday_hours +
-            updatedEntry.wednesday_hours +
-            updatedEntry.thursday_hours +
-            updatedEntry.friday_hours,
+            Number(updatedEntry.monday_hours || 0) +
+            Number(updatedEntry.tuesday_hours || 0) +
+            Number(updatedEntry.wednesday_hours || 0) +
+            Number(updatedEntry.thursday_hours || 0) +
+            Number(updatedEntry.friday_hours || 0),
           isNew: false,
         };
       }) || [];
@@ -663,26 +682,32 @@ export default function TimesheetsPage() {
       projectName: project?.name || "",
       taskDescription: entry.task_description,
       isPlanned: project?.isPlanned || false,
-      monday: { hours: entry.monday_hours, notes: entry.monday_notes || "" },
+      monday: {
+        hours: Number(entry.monday_hours || 0),
+        notes: entry.monday_notes || "",
+      },
       tuesday: {
-        hours: entry.tuesday_hours,
+        hours: Number(entry.tuesday_hours || 0),
         notes: entry.tuesday_notes || "",
       },
       wednesday: {
-        hours: entry.wednesday_hours,
+        hours: Number(entry.wednesday_hours || 0),
         notes: entry.wednesday_notes || "",
       },
       thursday: {
-        hours: entry.thursday_hours,
+        hours: Number(entry.thursday_hours || 0),
         notes: entry.thursday_notes || "",
       },
-      friday: { hours: entry.friday_hours, notes: entry.friday_notes || "" },
+      friday: {
+        hours: Number(entry.friday_hours || 0),
+        notes: entry.friday_notes || "",
+      },
       total:
-        entry.monday_hours +
-        entry.tuesday_hours +
-        entry.wednesday_hours +
-        entry.thursday_hours +
-        entry.friday_hours,
+        Number(entry.monday_hours || 0) +
+        Number(entry.tuesday_hours || 0) +
+        Number(entry.wednesday_hours || 0) +
+        Number(entry.thursday_hours || 0) +
+        Number(entry.friday_hours || 0),
       isNew: true,
     };
   });
@@ -1158,7 +1183,7 @@ function MyTimesheetView({
                     })}
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <span className="text-sm font-medium text-gray-900">
-                        {entry.total}
+                        {Number(entry.total || 0).toFixed(2)}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
@@ -1681,12 +1706,12 @@ function DetailsModal({
                 <span className="text-sm font-medium text-gray-900">
                   Total:{" "}
                   {(
-                    (entry.monday_hours || 0) +
-                    (entry.tuesday_hours || 0) +
-                    (entry.wednesday_hours || 0) +
-                    (entry.thursday_hours || 0) +
-                    (entry.friday_hours || 0)
-                  ).toFixed(1)}
+                    Number(entry.monday_hours || 0) +
+                    Number(entry.tuesday_hours || 0) +
+                    Number(entry.wednesday_hours || 0) +
+                    Number(entry.thursday_hours || 0) +
+                    Number(entry.friday_hours || 0)
+                  ).toFixed(2)}
                   h
                 </span>
               </div>

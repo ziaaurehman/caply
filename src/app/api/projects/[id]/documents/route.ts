@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { createClient } from "@/utils/supabase/server"; // Keep for file storage
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(
@@ -36,45 +37,56 @@ export async function GET(
       );
     }
 
-    const supabase = await createClient();
-
     // Verify project exists and user has access
-    const { data: project, error: projectError } = await supabase
-      .from("projects")
-      .select("id, name")
-      .eq("id", projectId)
-      .eq("organization_id", organizationId)
-      .single();
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    if (projectError || !project) {
+    if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
     // Fetch project documents
-    const { data: documents, error } = await supabase
-      .from("project_documents")
-      .select(
-        `
-        id,
-        filename,
-        original_filename,
-        file_size,
-        mime_type,
-        file_path,
-        uploaded_at,
-        uploaded_by
-      `
-      )
-      .eq("project_id", projectId)
-      .order("uploaded_at", { ascending: false });
+    const documents = await prisma.projectDocument.findMany({
+      where: {
+        projectId,
+      },
+      orderBy: {
+        uploadedAt: "desc",
+      },
+      select: {
+        id: true,
+        filename: true,
+        originalFilename: true,
+        fileSize: true,
+        mimeType: true,
+        filePath: true,
+        uploadedAt: true,
+        uploadedBy: true,
+      },
+    });
 
-    if (error) {
-      console.error("Error fetching project documents:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    // Transform to match expected format
+    const transformedDocuments = documents.map((doc) => ({
+      id: doc.id,
+      filename: doc.filename,
+      original_filename: doc.originalFilename,
+      file_size: doc.fileSize,
+      mime_type: doc.mimeType,
+      file_path: doc.filePath,
+      uploaded_at: doc.uploadedAt,
+      uploaded_by: doc.uploadedBy,
+    }));
 
     const result = {
-      documents: documents || [],
+      documents: transformedDocuments,
     };
 
     return NextResponse.json(result);
@@ -119,19 +131,24 @@ export async function POST(
     }
 
     const userId = validation.context.userId;
-    const supabase = await createClient();
 
     // Verify project exists and user has access
-    const { data: project, error: projectError } = await supabase
-      .from("projects")
-      .select("id, name")
-      .eq("id", projectId)
-      .eq("organization_id", organizationId)
-      .single();
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    if (projectError || !project) {
+    if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
+
+    const supabase = await createClient(); // For file storage
 
     // Parse form data
     const formData = await req.formData();
@@ -222,37 +239,48 @@ export async function POST(
       .getPublicUrl(filePath);
 
     // Save document record to database
-    const { data: document, error: dbError } = await supabase
-      .from("project_documents")
-      .insert({
-        project_id: projectId,
-        filename: uniqueFilename,
-        original_filename: file.name,
-        file_size: file.size,
-        mime_type: file.type,
-        file_path: filePath,
-        uploaded_by: userId,
-      })
-      .select()
-      .single();
+    try {
+      const document = await prisma.projectDocument.create({
+        data: {
+          projectId,
+          filename: uniqueFilename,
+          originalFilename: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+          filePath,
+          uploadedBy: userId,
+        },
+      });
 
-    if (dbError) {
+      // Transform to match expected format
+      const transformedDocument = {
+        id: document.id,
+        project_id: document.projectId,
+        filename: document.filename,
+        original_filename: document.originalFilename,
+        file_size: document.fileSize,
+        mime_type: document.mimeType,
+        file_path: document.filePath,
+        uploaded_at: document.uploadedAt,
+        uploaded_by: document.uploadedBy,
+      };
+
+      return NextResponse.json({
+        document: transformedDocument,
+        message: "Document uploaded successfully",
+      });
+    } catch (dbError: any) {
       console.error("Error saving document record:", dbError);
       // Try to clean up uploaded file
       await supabase.storage.from("caply").remove([filePath]);
 
       return NextResponse.json(
         {
-          error: `Failed to save document record: ${dbError.message}`,
+          error: `Failed to save document record: ${dbError.message || "Database error"}`,
         },
         { status: 500 }
       );
     }
-
-    return NextResponse.json({
-      document,
-      message: "Document uploaded successfully",
-    });
   } catch (error) {
     console.error("Error in POST /api/projects/[id]/documents:", error);
     return NextResponse.json(

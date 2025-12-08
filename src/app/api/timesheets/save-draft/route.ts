@@ -1,8 +1,8 @@
 // src/app/api/timesheets/save-draft/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-// COMMENTED OUT: Import no longer needed after commenting out verification
-// import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -23,39 +23,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // COMMENTED OUT: Verification that was causing 403 errors
-  // const validation = await validateOrganizationAccessWithId(organizationId, {
-  //   resource: "timesheets",
-  //   action: "update",
-  // });
-
-  // if (!validation.success) {
-  //   return NextResponse.json(
-  //     {
-  //       error: validation.error,
-  //     },
-  //     { status: validation.status }
-  //   );
-  // }
-
-  const supabase = await createClient();
-
-  // Get user ID from session directly (bypassing verification)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  // Get user ID from session
+  const session = await getServerSession(authConfig);
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get organization membership directly
-  const { data: membership } = await supabase
-    .from("organization_members")
-    .select("id, user_id, organization_id")
-    .eq("user_id", user.id)
-    .eq("organization_id", organizationId)
-    .eq("status", "active")
-    .maybeSingle();
+  // Get organization membership
+  const membership = await prisma.organizationMember.findFirst({
+    where: {
+      userId: session.user.id,
+      organizationId,
+      status: "active",
+    },
+    select: {
+      id: true,
+    },
+  });
 
   if (!membership) {
     return NextResponse.json(
@@ -64,250 +48,284 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Create a minimal userContext object for compatibility
-  const userContext = {
-    userId: user.id,
-    membership: {
-      id: membership.id,
-    },
-  };
+  const userId = session.user.id;
 
   try {
-    let currentSubmission;
+    const weekStartDate = new Date(weekStart);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekStartDate.getDate() + 4);
 
-    // If submissionId is provided, use it directly
-    if (submissionId) {
-      const { data: existingSubmission, error: fetchError } = await supabase
-        .from("timesheet_submissions")
-        .select("id, status")
-        .eq("id", submissionId)
-        .eq("user_id", userContext.userId)
-        .eq("organization_id", organizationId)
-        .single();
+    // Use a transaction to handle all operations atomically
+    const result = await prisma.$transaction(async (tx) => {
+      let currentSubmission;
 
-      if (fetchError || !existingSubmission) {
-        return NextResponse.json(
-          { error: "Submission not found" },
-          { status: 404 }
-        );
-      }
+      // If submissionId is provided, use it directly
+      if (submissionId) {
+        const existingSubmission = await tx.timesheetSubmission.findFirst({
+          where: {
+            id: submissionId,
+            userId,
+            organizationId,
+          },
+          select: {
+            id: true,
+            status: true,
+          },
+        });
 
-      // Only allow updates to draft submissions
-      if (existingSubmission.status !== "draft") {
-        return NextResponse.json(
-          { error: "Cannot update a submitted timesheet" },
-          { status: 400 }
-        );
-      }
+        if (!existingSubmission) {
+          throw new Error("Submission not found");
+        }
 
-      // Update existing submission
-      const weekStartDate = new Date(weekStart);
-      const weekEndDate = new Date(weekStartDate);
-      weekEndDate.setDate(weekStartDate.getDate() + 4);
-
-      const { data: submission, error: updateError } = await supabase
-        .from("timesheet_submissions")
-        .update({
-          total_hours: totalHours,
-          week_start_date: weekStart,
-          week_end_date: weekEndDate.toISOString().split("T")[0],
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", submissionId)
-        .select()
-        .single();
-
-      if (updateError) throw updateError;
-      currentSubmission = submission;
-    } else {
-      // Check for existing submission with proper filters
-      const { data: prevSubmission, error: prevSubmissionError } =
-        await supabase
-          .from("timesheet_submissions")
-          .select("id, status")
-          .eq("organization_id", organizationId)
-          .eq("user_id", userContext.userId)
-          .eq("week_start_date", weekStart)
-          .maybeSingle();
-
-      if (prevSubmissionError && prevSubmissionError.code !== "PGRST116") {
-        // PGRST116 is "not found" which is fine, other errors are not
-        throw prevSubmissionError;
-      }
-
-      if (prevSubmission) {
         // Only allow updates to draft submissions
-        if (prevSubmission.status !== "draft") {
-          return NextResponse.json(
-            { error: "Cannot update a submitted timesheet" },
-            { status: 400 }
-          );
+        if (existingSubmission.status !== "draft") {
+          throw new Error("Cannot update a submitted timesheet");
         }
 
         // Update existing submission
-        const weekStartDate = new Date(weekStart);
-        const weekEndDate = new Date(weekStartDate);
-        weekEndDate.setDate(weekStartDate.getDate() + 4);
-
-        const { data: submission, error: updateError } = await supabase
-          .from("timesheet_submissions")
-          .update({
-            total_hours: totalHours,
-            week_end_date: weekEndDate.toISOString().split("T")[0],
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", prevSubmission.id)
-          .select()
-          .single();
-
-        if (updateError) throw updateError;
-        currentSubmission = submission;
+        currentSubmission = await tx.timesheetSubmission.update({
+          where: { id: submissionId },
+          data: {
+            totalHours,
+            weekStartDate: new Date(weekStart),
+            weekEndDate,
+            updatedAt: new Date(),
+          },
+        });
       } else {
-        // Create new submission using UPSERT to handle race conditions
-        const weekStartDate = new Date(weekStart);
-        const weekEndDate = new Date(weekStartDate);
-        weekEndDate.setDate(weekStartDate.getDate() + 4);
+        // Check for existing submission
+        const prevSubmission = await tx.timesheetSubmission.findFirst({
+          where: {
+            organizationId,
+            userId,
+            weekStartDate: new Date(weekStart),
+          },
+          select: {
+            id: true,
+            status: true,
+          },
+        });
 
-        // Get project member ID
-        const { data: projectMember } = await supabase
-          .from("project_members")
-          .select("id")
-          .eq("organization_id", organizationId)
-          .eq("organization_member_id", userContext.membership.id)
-          .maybeSingle();
-
-        // Use UPSERT to handle the unique constraint
-        const { data: submission, error: upsertError } = await supabase
-          .from("timesheet_submissions")
-          .upsert(
-            {
-              organization_id: organizationId,
-              user_id: userContext.userId,
-              project_member_id: projectMember?.id || null,
-              week_start_date: weekStart,
-              week_end_date: weekEndDate.toISOString().split("T")[0],
-              status: "draft",
-              total_hours: totalHours,
-            },
-            {
-              onConflict: "organization_id,user_id,week_start_date",
-              ignoreDuplicates: false,
-            }
-          )
-          .select()
-          .single();
-
-        if (upsertError) {
-          // If upsert fails, try to fetch the existing one
-          const { data: existing, error: fetchError } = await supabase
-            .from("timesheet_submissions")
-            .select("id, status")
-            .eq("organization_id", organizationId)
-            .eq("user_id", userContext.userId)
-            .eq("week_start_date", weekStart)
-            .single();
-
-          if (fetchError) throw upsertError;
-
-          if (existing.status !== "draft") {
-            return NextResponse.json(
-              { error: "Cannot update a submitted timesheet" },
-              { status: 400 }
-            );
+        if (prevSubmission) {
+          // Only allow updates to draft submissions
+          if (prevSubmission.status !== "draft") {
+            throw new Error("Cannot update a submitted timesheet");
           }
 
-          // Update the existing one
-          const weekStartDate = new Date(weekStart);
-          const weekEndDate = new Date(weekStartDate);
-          weekEndDate.setDate(weekStartDate.getDate() + 4);
-
-          const { data: updated, error: updateError } = await supabase
-            .from("timesheet_submissions")
-            .update({
-              total_hours: totalHours,
-              week_end_date: weekEndDate.toISOString().split("T")[0],
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", existing.id)
-            .select()
-            .single();
-
-          if (updateError) throw updateError;
-          currentSubmission = updated;
+          // Update existing submission
+          currentSubmission = await tx.timesheetSubmission.update({
+            where: { id: prevSubmission.id },
+            data: {
+              totalHours,
+              weekEndDate,
+              updatedAt: new Date(),
+            },
+          });
         } else {
-          currentSubmission = submission;
+          // Create new submission using the organizationMemberId we fetched earlier
+          // Note: organizationMemberId is optional, so we can use the membership.id we found
+          try {
+            currentSubmission = await tx.timesheetSubmission.create({
+              data: {
+                organizationId,
+                userId,
+                organizationMemberId: membership.id, // Use the actual OrganizationMember ID
+                weekStartDate: new Date(weekStart),
+                weekEndDate,
+                status: "draft",
+                totalHours,
+              },
+            });
+          } catch (createError: any) {
+            // If creation fails, check if it's due to unique constraint or foreign key
+            console.error("Error creating timesheet submission:", createError);
+            
+            // If it's a foreign key error, the membership might not exist
+            if (createError.code === 'P2003') {
+              throw new Error("Invalid organization membership. Please refresh and try again.");
+            }
+            
+            // If creation fails due to unique constraint, fetch and update
+            if (createError.code === 'P2002') {
+              const existing = await tx.timesheetSubmission.findFirst({
+                where: {
+                  organizationId,
+                  userId,
+                  weekStartDate: new Date(weekStart),
+                },
+              });
+
+              if (!existing) throw createError;
+
+              if (existing.status !== "draft") {
+                throw new Error("Cannot update a submitted timesheet");
+              }
+
+              currentSubmission = await tx.timesheetSubmission.update({
+                where: { id: existing.id },
+                data: {
+                  totalHours,
+                  weekEndDate,
+                  updatedAt: new Date(),
+                },
+              });
+            } else {
+              // Re-throw other errors
+              throw createError;
+            }
+          }
         }
       }
-    }
 
-    // Update or create entries
-    if (currentSubmission && entries.length > 0) {
-      // Delete existing entries
-      await supabase
-        .from("timesheet_entries")
-        .delete()
-        .eq("timesheet_submission_id", currentSubmission.id);
+      // Update or create entries
+      if (currentSubmission && entries.length > 0) {
+        // Delete existing entries
+        await tx.timesheetEntry.deleteMany({
+          where: {
+            timesheetSubmissionId: currentSubmission.id,
+          },
+        });
 
-      // Insert new entries (only non-empty ones)
-      const entriesToInsert = entries
-        .filter(
-          (entry: any) =>
-            entry.project_id &&
-            (entry.monday_hours > 0 ||
-              entry.tuesday_hours > 0 ||
-              entry.wednesday_hours > 0 ||
-              entry.thursday_hours > 0 ||
-              entry.friday_hours > 0 ||
-              (entry.task_description && entry.task_description.trim()))
-        )
-        .map((entry: any) => ({
-          timesheet_submission_id: currentSubmission.id,
-          project_id: entry.project_id,
-          task_description: entry.task_description || "",
-          monday_hours: entry.monday_hours || 0,
-          tuesday_hours: entry.tuesday_hours || 0,
-          wednesday_hours: entry.wednesday_hours || 0,
-          thursday_hours: entry.thursday_hours || 0,
-          friday_hours: entry.friday_hours || 0,
-          monday_notes: entry.monday_notes || null,
-          tuesday_notes: entry.tuesday_notes || null,
-          wednesday_notes: entry.wednesday_notes || null,
-          thursday_notes: entry.thursday_notes || null,
-          friday_notes: entry.friday_notes || null,
-        }));
-
-      if (entriesToInsert.length > 0) {
-        const { error: entriesError } = await supabase
-          .from("timesheet_entries")
-          .insert(entriesToInsert);
-
-        if (entriesError) throw entriesError;
-      }
-    }
-
-    // Fetch updated submission with entries
-    const { data: updatedSubmission, error: fetchError } = await supabase
-      .from("timesheet_submissions")
-      .select(
-        `
-        *,
-        timesheet_entries (
-          *,
-          projects (
-            id,
-            name,
-            code
+        // Insert new entries (only non-empty ones)
+        const entriesToInsert = entries
+          .filter(
+            (entry: any) =>
+              entry.project_id &&
+              ((entry.monday_hours || 0) > 0 ||
+                (entry.tuesday_hours || 0) > 0 ||
+                (entry.wednesday_hours || 0) > 0 ||
+                (entry.thursday_hours || 0) > 0 ||
+                (entry.friday_hours || 0) > 0 ||
+                (entry.task_description && entry.task_description.trim()))
           )
-        )
-      `
-      )
-      .eq("id", currentSubmission.id)
-      .single();
+          .map((entry: any) => ({
+            timesheetSubmissionId: currentSubmission.id,
+            projectId: entry.project_id,
+            taskDescription: entry.task_description || "",
+            mondayHours: entry.monday_hours || 0,
+            tuesdayHours: entry.tuesday_hours || 0,
+            wednesdayHours: entry.wednesday_hours || 0,
+            thursdayHours: entry.thursday_hours || 0,
+            fridayHours: entry.friday_hours || 0,
+            mondayNotes: entry.monday_notes || null,
+            tuesdayNotes: entry.tuesday_notes || null,
+            wednesdayNotes: entry.wednesday_notes || null,
+            thursdayNotes: entry.thursday_notes || null,
+            fridayNotes: entry.friday_notes || null,
+          }));
 
-    if (fetchError) throw fetchError;
+        if (entriesToInsert.length > 0) {
+          await tx.timesheetEntry.createMany({
+            data: entriesToInsert,
+          });
+        }
+
+        // Recalculate total hours from all entries (convert to Number first)
+        const allEntries = await tx.timesheetEntry.findMany({
+          where: {
+            timesheetSubmissionId: currentSubmission.id,
+          },
+          select: {
+            mondayHours: true,
+            tuesdayHours: true,
+            wednesdayHours: true,
+            thursdayHours: true,
+            fridayHours: true,
+          },
+        });
+
+        const calculatedTotalHours = allEntries.reduce(
+          (sum, e) =>
+            sum +
+            Number(e.mondayHours || 0) +
+            Number(e.tuesdayHours || 0) +
+            Number(e.wednesdayHours || 0) +
+            Number(e.thursdayHours || 0) +
+            Number(e.fridayHours || 0),
+          0
+        );
+
+        // Update the submission with the calculated total
+        await tx.timesheetSubmission.update({
+          where: { id: currentSubmission.id },
+          data: {
+            totalHours: calculatedTotalHours,
+            updatedAt: new Date(),
+          },
+        });
+      }
+
+      // Fetch updated submission with entries
+      const submission = await tx.timesheetSubmission.findUnique({
+        where: { id: currentSubmission.id },
+        include: {
+          entries: {
+            include: {
+              project: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!submission) {
+        throw new Error("Failed to fetch submission after update");
+      }
+
+      return submission;
+    });
+
+    if (!result) {
+      throw new Error("Failed to process submission");
+    }
+
+    // Transform to match expected format
+    const transformedSubmission = {
+      id: result.id,
+      organization_id: result.organizationId,
+      user_id: result.userId,
+      organization_member_id: result.organizationMemberId,
+      week_start_date: result.weekStartDate,
+      week_end_date: result.weekEndDate,
+      status: result.status,
+      total_hours: result.totalHours,
+      submitted_at: result.submittedAt,
+      created_at: result.createdAt,
+      updated_at: result.updatedAt,
+      timesheet_entries: result.entries.map((entry: any) => ({
+        id: entry.id,
+        submission_id: entry.timesheetSubmissionId,
+        project_id: entry.projectId,
+        task_description: entry.taskDescription,
+        monday_hours: entry.mondayHours,
+        tuesday_hours: entry.tuesdayHours,
+        wednesday_hours: entry.wednesdayHours,
+        thursday_hours: entry.thursdayHours,
+        friday_hours: entry.fridayHours,
+        monday_notes: entry.mondayNotes,
+        tuesday_notes: entry.tuesdayNotes,
+        wednesday_notes: entry.wednesdayNotes,
+        thursday_notes: entry.thursdayNotes,
+        friday_notes: entry.fridayNotes,
+        created_at: entry.createdAt,
+        updated_at: entry.updatedAt,
+        projects: entry.project
+          ? {
+              id: entry.project.id,
+              name: entry.project.name,
+              code: entry.project.code,
+            }
+          : null,
+      })),
+    };
 
     return NextResponse.json({
-      submission: updatedSubmission,
+      submission: transformedSubmission,
       success: true,
     });
   } catch (error: any) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function POST(request: NextRequest) {
@@ -21,24 +21,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Get the invitation details
-    const { data: invitation, error: inviteError } = await supabase
-      .from("organization_invitations")
-      .select(
-        `
-        id,
-        organization_id,
-        email,
-        status
-      `
-      )
-      .eq("id", invitationId)
-      .single();
+    const invitation = await prisma.organizationInvitation.findUnique({
+      where: { id: invitationId },
+      select: {
+        id: true,
+        organizationId: true,
+        email: true,
+        status: true,
+      },
+    });
 
-    if (inviteError || !invitation) {
-      console.error("Error fetching invitation:", inviteError);
+    if (!invitation) {
       return NextResponse.json(
         { error: "Invitation not found" },
         { status: 404 }
@@ -47,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     // Validate organization access
     const validation = await validateOrganizationAccessWithId(
-      invitation.organization_id,
+      invitation.organizationId,
       { resource: "users", action: "delete" }
     );
 
@@ -69,21 +63,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Update the invitation status to 'cancelled'
-    const { error: updateError } = await supabase
-      .from("organization_invitations")
-      .update({
+    await prisma.organizationInvitation.update({
+      where: { id: invitationId },
+      data: {
         status: "cancelled",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", invitationId);
-
-    if (updateError) {
-      console.error("Error cancelling invitation:", updateError);
-      return NextResponse.json(
-        { error: "Failed to cancel invitation" },
-        { status: 500 }
-      );
-    }
+      },
+    });
 
     return NextResponse.json({
       success: true,

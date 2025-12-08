@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { createClient } from "@/utils/supabase/server"; // Keep for file storage
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(
@@ -33,33 +34,34 @@ export async function GET(
       );
     }
 
-    const supabase = await createClient();
-
     // Verify project exists and user has access
-    const { data: project, error: projectError } = await supabase
-      .from("projects")
-      .select("id, name")
-      .eq("id", projectId)
-      .eq("organization_id", organizationId)
-      .single();
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    if (projectError || !project) {
+    if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
     // Get document details
-    const { data: document, error: documentError } = await supabase
-      .from("project_documents")
-      .select("*")
-      .eq("id", documentId)
-      .eq("project_id", projectId)
-      .single();
+    const document = await prisma.projectDocument.findFirst({
+      where: {
+        id: documentId,
+        projectId,
+      },
+    });
 
-    if (documentError || !document) {
+    if (!document) {
       console.error("Document not found:", {
         documentId,
         projectId,
-        documentError,
       });
       return NextResponse.json(
         { error: "Document not found" },
@@ -68,11 +70,12 @@ export async function GET(
     }
 
     // Check if file exists in storage with better debugging
-    console.log("Checking storage for file path:", document.file_path);
+    console.log("Checking storage for file path:", document.filePath);
 
-    const { data: publicUrlObj } = await supabase.storage
+    const supabase = await createClient(); // For file storage
+    const { data: publicUrlObj } = supabase.storage
       .from("caply")
-      .getPublicUrl(document.file_path);
+      .getPublicUrl(document.filePath);
 
     const publicUrl = publicUrlObj.publicUrl;
 
@@ -87,8 +90,21 @@ export async function GET(
 
     console.log("here is the public url", publicUrl);
 
+    // Transform to match expected format
+    const transformedDocument = {
+      id: document.id,
+      project_id: document.projectId,
+      filename: document.filename,
+      original_filename: document.originalFilename,
+      file_size: document.fileSize,
+      mime_type: document.mimeType,
+      file_path: document.filePath,
+      uploaded_at: document.uploadedAt,
+      uploaded_by: document.uploadedBy,
+    };
+
     const result = {
-      document,
+      document: transformedDocument,
       download_url: publicUrl,
     };
 
@@ -136,53 +152,54 @@ export async function DELETE(
       );
     }
 
-    const supabase = await createClient();
-
     // Verify project exists and user has access
-    const { data: project, error: projectError } = await supabase
-      .from("projects")
-      .select("id, name")
-      .eq("id", projectId)
-      .eq("organization_id", organizationId)
-      .single();
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    if (projectError || !project) {
+    if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
     // Get document details
-    const { data: document, error: documentError } = await supabase
-      .from("project_documents")
-      .select("*")
-      .eq("id", documentId)
-      .eq("project_id", projectId)
-      .single();
+    const document = await prisma.projectDocument.findFirst({
+      where: {
+        id: documentId,
+        projectId,
+      },
+    });
 
-    if (documentError || !document) {
+    if (!document) {
       return NextResponse.json(
         { error: "Document not found" },
         { status: 404 }
       );
     }
 
-    // Delete file from storage
-    const { error: storageError } = await supabase.storage
-      .from("caply")
-      .remove([document.file_path]);
+    // Delete document record from database and file from storage
+    try {
+      await prisma.projectDocument.delete({
+        where: { id: documentId },
+      });
 
-    if (storageError) {
-      console.error("Error deleting file from storage:", storageError);
-      // Continue with database deletion even if storage deletion fails
-    }
+      // Delete file from storage (after successful database deletion)
+      const supabase = await createClient(); // For file storage
+      const { error: storageError } = await supabase.storage
+        .from("caply")
+        .remove([document.filePath]);
 
-    // Delete document record from database
-    const { error: dbError } = await supabase
-      .from("project_documents")
-      .delete()
-      .eq("id", documentId)
-      .eq("project_id", projectId);
-
-    if (dbError) {
+      if (storageError) {
+        console.error("Error deleting file from storage:", storageError);
+        // Don't fail the request if storage deletion fails
+      }
+    } catch (dbError: any) {
       console.error("Error deleting document record:", dbError);
       return NextResponse.json(
         { error: "Failed to delete document record" },

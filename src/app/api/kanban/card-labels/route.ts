@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient();
   const body = await req.json();
   const { card_id, label_id } = body;
   const organizationId =
@@ -41,41 +40,49 @@ export async function POST(req: NextRequest) {
   }
 
   // Check if card exists within the organization
-  const { data: card, error: cardError } = await supabase
-    .from("cards")
-    .select(
-      `
-      id,
-      title,
-      lists!inner (
-        id,
-        boards!inner (
-          id,
-          projects!inner (
-            organization_id
-          )
-        )
-      )
-    `
-    )
-    .eq("id", card_id)
-    .eq("lists.boards.projects.organization_id", organizationId)
-    .single();
+  const card = await prisma.card.findFirst({
+    where: {
+      id: card_id,
+      list: {
+        board: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+    },
+    include: {
+      list: {
+        include: {
+          board: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      },
+    },
+  });
 
-  if (cardError || !card) {
+  if (!card) {
     return NextResponse.json({ error: "Card not found" }, { status: 404 });
   }
 
   // Verify the label belongs to the same board
-  const boardId = (card.lists as any).boards.id;
-  const { data: label, error: labelError } = await supabase
-    .from("labels")
-    .select("id, name, color")
-    .eq("id", label_id)
-    .eq("board_id", boardId)
-    .single();
+  const boardId = card.list.board.id;
+  const label = await prisma.label.findFirst({
+    where: {
+      id: label_id,
+      boardId,
+    },
+    select: {
+      id: true,
+      name: true,
+      color: true,
+    },
+  });
 
-  if (labelError || !label) {
+  if (!label) {
     return NextResponse.json(
       { error: "Label not found on this board" },
       { status: 404 }
@@ -83,12 +90,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Check if label is already assigned to the card
-  const { data: existingCardLabel } = await supabase
-    .from("card_labels")
-    .select("id")
-    .eq("card_id", card_id)
-    .eq("label_id", label_id)
-    .single();
+  const existingCardLabel = await prisma.cardLabel.findFirst({
+    where: {
+      cardId: card_id,
+      labelId: label_id,
+    },
+  });
 
   if (existingCardLabel) {
     return NextResponse.json(
@@ -97,53 +104,49 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Assign label to card
-  const { data: cardLabel, error } = await supabase
-    .from("card_labels")
-    .insert([
-      {
-        card_id,
-        label_id,
+  // Assign label to card and create activity log in a transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // Assign label to card
+    const cardLabel = await tx.cardLabel.create({
+      data: {
+        cardId: card_id,
+        labelId: label_id,
       },
-    ])
-    .select(
-      `
-      *,
-      labels (
-        id,
-        name,
-        color
-      )
-    `
-    )
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Create activity log
-  await supabase.from("activities").insert([
-    {
-      user_id: validation.context!.userId,
-      board_id: boardId,
-      card_id: card_id,
-      action_type: "create",
-      entity_type: "card_label",
-      entity_id: cardLabel.id,
-      details: {
-        label_name: label.name,
-        label_color: label.color,
-        card_title: card.title,
+      include: {
+        label: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+          },
+        },
       },
-    },
-  ]);
+    });
 
-  return NextResponse.json({ card_label: cardLabel });
+    // Create activity log
+    await tx.activity.create({
+      data: {
+        userId: validation.context!.userId,
+        boardId: boardId,
+        cardId: card_id,
+        actionType: "create",
+        entityType: "card_label",
+        entityId: cardLabel.id,
+        details: {
+          label_name: label.name,
+          label_color: label.color,
+          card_title: card.title,
+        },
+      },
+    });
+
+    return cardLabel;
+  });
+
+  return NextResponse.json({ card_label: result });
 }
 
 export async function DELETE(req: NextRequest) {
-  const supabase = await createClient();
   const { searchParams } = new URL(req.url);
   const cardId = searchParams.get("card_id");
   const labelId = searchParams.get("label_id");
@@ -180,82 +183,85 @@ export async function DELETE(req: NextRequest) {
   }
 
   // Check if card exists within the organization
-  const { data: card, error: cardError } = await supabase
-    .from("cards")
-    .select(
-      `
-      id,
-      title,
-      lists!inner (
-        id,
-        boards!inner (
-          id,
-          projects!inner (
-            organization_id
-          )
-        )
-      )
-    `
-    )
-    .eq("id", cardId)
-    .eq("lists.boards.projects.organization_id", organizationId)
-    .single();
+  const card = await prisma.card.findFirst({
+    where: {
+      id: cardId,
+      list: {
+        board: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+    },
+    include: {
+      list: {
+        include: {
+          board: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      },
+    },
+  });
 
-  if (cardError || !card) {
+  if (!card) {
     return NextResponse.json({ error: "Card not found" }, { status: 404 });
   }
 
   // Get the card label to delete
-  const { data: cardLabel, error: cardLabelError } = await supabase
-    .from("card_labels")
-    .select(
-      `
-      id,
-      labels (
-        id,
-        name,
-        color
-      )
-    `
-    )
-    .eq("card_id", cardId)
-    .eq("label_id", labelId)
-    .single();
+  const cardLabel = await prisma.cardLabel.findFirst({
+    where: {
+      cardId,
+      labelId,
+    },
+    include: {
+      label: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+        },
+      },
+    },
+  });
 
-  if (cardLabelError || !cardLabel) {
+  if (!cardLabel) {
     return NextResponse.json(
       { error: "Card label not found" },
       { status: 404 }
     );
   }
 
-  // Remove label from card
-  const { error } = await supabase
-    .from("card_labels")
-    .delete()
-    .eq("card_id", cardId)
-    .eq("label_id", labelId);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Create activity log
-  await supabase.from("activities").insert([
-    {
-      user_id: validation.context!.userId,
-      board_id: (card.lists as any).boards.id,
-      card_id: cardId,
-      action_type: "delete",
-      entity_type: "card_label",
-      entity_id: cardLabel.id,
-      details: {
-        label_name: (cardLabel.labels as any).name,
-        label_color: (cardLabel.labels as any).color,
-        card_title: card.title,
+  // Remove label from card and create activity log in a transaction
+  await prisma.$transaction(async (tx) => {
+    // Remove label from card
+    await tx.cardLabel.deleteMany({
+      where: {
+        cardId,
+        labelId,
       },
-    },
-  ]);
+    });
+
+    // Create activity log
+    await tx.activity.create({
+      data: {
+        userId: validation.context!.userId,
+        boardId: card.list.board.id,
+        cardId: cardId,
+        actionType: "delete",
+        entityType: "card_label",
+        entityId: cardLabel.id,
+        details: {
+          label_name: cardLabel.label.name,
+          label_color: cardLabel.label.color,
+          card_title: card.title,
+        },
+      },
+    });
+  });
 
   return NextResponse.json({ success: true });
 }

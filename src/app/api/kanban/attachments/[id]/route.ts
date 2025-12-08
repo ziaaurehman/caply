@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { createClient } from "@/utils/supabase/server"; // Keep for file storage
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
@@ -14,38 +15,34 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
     const attachmentId = (await params).id;
 
     // First get the attachment to find the organization and file path
-    const { data: existingAttachment, error: attachmentError } = await supabase
-      .from("attachments")
-      .select(
-        `
-        *,
-        cards!inner (
-          id,
-          title,
-          lists!inner (
-            id,
-            board_id,
-            boards!inner (
-              id,
-              project_id,
-              projects!inner (
-                id,
-                organization_id
-              )
-            )
-          )
-        )
-      `
-      )
-      .eq("id", attachmentId)
-      .single();
+    const existingAttachment = await prisma.attachment.findUnique({
+      where: { id: attachmentId },
+      include: {
+        card: {
+          include: {
+            list: {
+              include: {
+                board: {
+                  include: {
+                    project: {
+                      select: {
+                        id: true,
+                        organizationId: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (attachmentError || !existingAttachment) {
-      console.log("Attachment not found:", attachmentError);
+    if (!existingAttachment) {
       return NextResponse.json(
         { error: "Attachment not found" },
         { status: 404 }
@@ -53,8 +50,8 @@ export async function DELETE(
     }
 
     // Get the organization ID from the attachment
-    const attachmentOrgId = (existingAttachment.cards as any).lists.boards
-      .projects.organization_id;
+    const attachmentOrgId =
+      existingAttachment.card.list.board.project.organizationId;
 
     // Validate organization access
     const validation = await validateOrganizationAccessWithId(attachmentOrgId, {
@@ -71,41 +68,45 @@ export async function DELETE(
       );
     }
 
-    // Delete file from storage
+    // Delete file from storage and database record in a transaction
+    const supabase = await createClient();
+    await prisma
+      .$transaction(async (tx) => {
+        // Delete attachment record
+        await tx.attachment.delete({
+          where: { id: attachmentId },
+        });
+
+        // Create activity log
+        await tx.activity.create({
+          data: {
+            userId: session.user.id,
+            boardId: existingAttachment.card.list.boardId,
+            cardId: existingAttachment.cardId,
+            actionType: "delete",
+            entityType: "attachment",
+            entityId: attachmentId,
+            details: {
+              filename: existingAttachment.originalFilename,
+              card_title: existingAttachment.card.title,
+            },
+          },
+        });
+      })
+      .catch(async (error) => {
+        // If database deletion fails, don't delete from storage
+        throw error;
+      });
+
+    // Delete file from storage (after successful database deletion)
     const { error: storageError } = await supabase.storage
       .from("caply")
-      .remove([existingAttachment.file_path]);
+      .remove([existingAttachment.filePath]);
 
     if (storageError) {
       console.error("Storage delete error:", storageError);
-      // Continue with database deletion even if storage deletion fails
+      // Don't fail the request if storage deletion fails
     }
-
-    // Delete attachment record
-    const { error } = await supabase
-      .from("attachments")
-      .delete()
-      .eq("id", attachmentId);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Create activity log
-    await supabase.from("activities").insert([
-      {
-        user_id: session.user.id,
-        board_id: (existingAttachment.cards as any).lists.board_id,
-        card_id: existingAttachment.card_id,
-        action_type: "delete",
-        entity_type: "attachment",
-        entity_id: attachmentId,
-        details: {
-          filename: existingAttachment.original_filename,
-          card_title: (existingAttachment.cards as any).title,
-        },
-      },
-    ]);
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -127,37 +128,34 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
     const attachmentId = (await params).id;
 
     // Get the attachment with organization validation
-    const { data: attachment, error: attachmentError } = await supabase
-      .from("attachments")
-      .select(
-        `
-        *,
-        cards!inner (
-          id,
-          title,
-          lists!inner (
-            id,
-            board_id,
-            boards!inner (
-              id,
-              project_id,
-              projects!inner (
-                id,
-                organization_id
-              )
-            )
-          )
-        )
-      `
-      )
-      .eq("id", attachmentId)
-      .single();
+    const attachment = await prisma.attachment.findUnique({
+      where: { id: attachmentId },
+      include: {
+        card: {
+          include: {
+            list: {
+              include: {
+                board: {
+                  include: {
+                    project: {
+                      select: {
+                        id: true,
+                        organizationId: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (attachmentError || !attachment) {
+    if (!attachment) {
       return NextResponse.json(
         { error: "Attachment not found" },
         { status: 404 }
@@ -165,8 +163,7 @@ export async function GET(
     }
 
     // Get the organization ID from the attachment
-    const attachmentOrgId = (attachment.cards as any).lists.boards.projects
-      .organization_id;
+    const attachmentOrgId = attachment.card.list.board.project.organizationId;
 
     // Validate organization access
     const validation = await validateOrganizationAccessWithId(attachmentOrgId, {
@@ -183,10 +180,11 @@ export async function GET(
       );
     }
 
-    // Get download URL from storage
+    // Get download URL from storage (keeping Supabase for file storage)
+    const supabase = await createClient();
     const { data: urlData } = await supabase.storage
       .from("caply")
-      .createSignedUrl(attachment.file_path, 3600); // 1 hour expiry
+      .createSignedUrl(attachment.filePath, 3600); // 1 hour expiry
 
     if (!urlData?.signedUrl) {
       return NextResponse.json(
@@ -195,8 +193,21 @@ export async function GET(
       );
     }
 
+    // Transform to match expected format
+    const transformedAttachment = {
+      id: attachment.id,
+      card_id: attachment.cardId,
+      filename: attachment.filename,
+      original_filename: attachment.originalFilename,
+      file_path: attachment.filePath,
+      file_size: attachment.fileSize,
+      mime_type: attachment.mimeType,
+      uploaded_by: attachment.uploadedBy,
+      uploaded_at: attachment.uploadedAt,
+    };
+
     return NextResponse.json({
-      attachment,
+      attachment: transformedAttachment,
       download_url: urlData.signedUrl,
     });
   } catch (error) {

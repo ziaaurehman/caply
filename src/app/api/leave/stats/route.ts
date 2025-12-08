@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(request: NextRequest) {
@@ -31,54 +31,44 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { context: userContext } = validation;
-    const supabase = await createClient();
-
     const userId = searchParams.get("user_id");
 
-    let query = supabase
-      .from("leave_requests")
-      .select("status, days_requested, start_date")
-      .eq("organization_id", organizationId);
+    const where: any = {
+      organizationId,
+    };
 
     if (userId) {
-      query = query.eq("user_id", userId);
+      where.userId = userId;
     }
 
-    const { data: requests, error } = await query;
-
-    if (error) {
-      console.error("Error fetching leave stats:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch leave stats" },
-        { status: 500 }
-      );
-    }
+    const requests = await prisma.leaveRequest.findMany({
+      where,
+      select: {
+        status: true,
+        daysRequested: true,
+        startDate: true,
+      },
+    });
 
     const stats = {
-      total_requests: requests?.length || 0,
-      pending_requests:
-        requests?.filter((r) => r.status === "pending").length || 0,
-      approved_requests:
-        requests?.filter((r) => r.status === "approved").length || 0,
-      rejected_requests:
-        requests?.filter((r) => r.status === "rejected").length || 0,
+      total_requests: requests.length,
+      pending_requests: requests.filter((r) => r.status === "pending").length,
+      approved_requests: requests.filter((r) => r.status === "approved").length,
+      rejected_requests: requests.filter((r) => r.status === "rejected").length,
       total_days_requested:
-        requests?.reduce((sum, r) => sum + (r.days_requested || 0), 0) || 0,
-      total_days_approved:
-        requests
-          ?.filter((r) => r.status === "approved")
-          .reduce((sum, r) => sum + (r.days_requested || 0), 0) || 0,
-      upcoming_requests:
-        requests?.filter((r) => {
-          if (r.status !== "approved") return false;
-          const startDate = new Date(r.start_date);
-          const today = new Date();
-          const thirtyDaysFromNow = new Date(
-            today.getTime() + 30 * 24 * 60 * 60 * 1000
-          );
-          return startDate >= today && startDate <= thirtyDaysFromNow;
-        }).length || 0,
+        requests.reduce((sum, r) => sum + (r.daysRequested || 0), 0),
+      total_days_approved: requests
+        .filter((r) => r.status === "approved")
+        .reduce((sum, r) => sum + (r.daysRequested || 0), 0),
+      upcoming_requests: requests.filter((r) => {
+        if (r.status !== "approved") return false;
+        const startDate = new Date(r.startDate);
+        const today = new Date();
+        const thirtyDaysFromNow = new Date(
+          today.getTime() + 30 * 24 * 60 * 60 * 1000
+        );
+        return startDate >= today && startDate <= thirtyDaysFromNow;
+      }).length,
     };
 
     return NextResponse.json({ stats });

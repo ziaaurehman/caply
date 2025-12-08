@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 
 export async function GET(
   req: NextRequest,
@@ -19,45 +19,41 @@ export async function GET(
       );
     }
 
-    const supabase = await createClient();
-
     // Get all boards and their lists/cards for this project
-    const { data: boards, error: boardsError } = await supabase
-      .from("boards")
-      .select(
-        `
-        id,
-        name,
-        lists!inner (
-          id,
-          name,
-          position,
-          cards (
-            id,
-            title,
-            is_completed,
-            checklists (
-              id,
-              checklist_items (
-                id,
-                is_completed
-              )
-            )
-          )
-        )
-      `
-      )
-      .eq("project_id", projectId)
-      .eq("lists.is_archived", false)
-      .eq("cards.is_archived", false);
-
-    if (boardsError) {
-      console.error("Error fetching boards for progress:", boardsError);
-      return NextResponse.json(
-        { error: "Failed to fetch project boards" },
-        { status: 500 }
-      );
-    }
+    const boards = await prisma.board.findMany({
+      where: {
+        projectId,
+      },
+      include: {
+        lists: {
+          where: {
+            isArchived: false,
+          },
+          orderBy: {
+            position: "asc",
+          },
+          include: {
+            cards: {
+              where: {
+                isArchived: false,
+              },
+              include: {
+                checklists: {
+                  include: {
+                    checklistItems: {
+                      select: {
+                        id: true,
+                        isCompleted: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
     if (!boards || boards.length === 0) {
       const result = {
@@ -83,7 +79,7 @@ export async function GET(
     for (const board of boards) {
       if (!board.lists || board.lists.length === 0) continue;
 
-      const lists = board.lists.sort((a, b) => a.position - b.position);
+      const lists = board.lists;
       const boardAnalysis = {
         boardId: board.id,
         boardName: board.name,
@@ -175,7 +171,7 @@ function calculateListWeight(
  */
 function calculateCardProgress(card: any, listWeight: number): number {
   // If card is explicitly marked as completed, it's 100% regardless of list
-  if (card.is_completed) {
+  if (card.isCompleted) {
     return 100;
   }
 
@@ -185,10 +181,10 @@ function calculateCardProgress(card: any, listWeight: number): number {
     let completedChecklistItems = 0;
 
     card.checklists.forEach((checklist: any) => {
-      if (checklist.checklist_items) {
-        checklist.checklist_items.forEach((item: any) => {
+      if (checklist.checklistItems) {
+        checklist.checklistItems.forEach((item: any) => {
           totalChecklistItems++;
-          if (item.is_completed) {
+          if (item.isCompleted) {
             completedChecklistItems++;
           }
         });

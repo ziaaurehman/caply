@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 // Optimized: Simplified queries and better caching
@@ -36,63 +36,49 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
     const userContext = validation.context!;
 
     // Check if user has admin/manager role or capacity.manage permission for full access
+    const role = userContext.membership.role;
     const hasFullAccess =
-      userContext.membership.role.name === "admin" ||
-      userContext.membership.role.name === "manager" ||
-      userContext.membership.role.permissions.some(
-        (p) => p.resource === "capacity" && p.action === "manage"
-      );
-
-    // Simple cache key - different for full vs member access
-    const cacheKey = `projects:capacity:${organizationId}:${hasFullAccess ? "all" : "member:" + userContext.userId}`;
+      role.name === "admin" ||
+      role.name === "manager" ||
+      (role.rolePermissions?.some(
+        (rp: any) =>
+          rp.permission?.resource === "capacity" &&
+          rp.permission?.action === "manage"
+      ) ?? false);
 
     let projectIds: string[] = [];
 
     if (hasFullAccess) {
       // Admin gets all capacity-enabled projects - just get IDs first
-      const { data: allProjects, error: allProjectsError } = await supabase
-        .from("projects")
-        .select("id")
-        .eq("organization_id", organizationId)
-        .eq("capacity_planning_enabled", true);
+      const allProjects = await prisma.project.findMany({
+        where: {
+          organizationId,
+          capacityPlanningEnabled: true,
+        },
+        select: {
+          id: true,
+        },
+      });
 
-      if (allProjectsError) {
-        console.error("Error fetching all projects:", allProjectsError);
-        return NextResponse.json(
-          { error: allProjectsError.message },
-          { status: 500 }
-        );
-      }
-
-      projectIds = allProjects?.map((p) => p.id) || [];
+      projectIds = allProjects.map((p) => p.id);
     } else {
       // Regular users can only see capacity projects they are members of
-      const { data: memberProjectIds, error: memberError } = await supabase
-        .from("project_members")
-        .select(
-          `
-          project_id,
-          projects!inner (
-            capacity_planning_enabled
-          )
-        `
-        )
-        .eq("organization_member_id", userContext.membership.id)
-        .eq("projects.capacity_planning_enabled", true);
+      const memberProjects = await prisma.projectMember.findMany({
+        where: {
+          organizationMemberId: userContext.membership.id,
+          project: {
+            capacityPlanningEnabled: true,
+          },
+        },
+        select: {
+          projectId: true,
+        },
+      });
 
-      if (memberError) {
-        console.error("Error fetching member projects:", memberError);
-        return NextResponse.json(
-          { error: memberError.message },
-          { status: 500 }
-        );
-      }
-
-      projectIds = memberProjectIds?.map((p) => p.project_id) || [];
+      projectIds = memberProjects.map((p) => p.projectId);
     }
 
     if (projectIds.length === 0) {
@@ -108,55 +94,55 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(emptyResponse);
     }
 
-    // Get project details (simpler query)
-    const { data: projects, error: projectsError } = await supabase
-      .from("projects")
-      .select(
-        `
-        id,
-        name,
-        code,
-        status,
-        capacity_planning_enabled,
-        created_at
-      `
-      )
-      .in("id", projectIds)
-      .order("created_at", { ascending: false });
+    // Get project details
+    const projects = await prisma.project.findMany({
+      where: {
+        id: {
+          in: projectIds,
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        status: true,
+        capacityPlanningEnabled: true,
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
-    if (projectsError) {
-      console.error("Error fetching project details:", projectsError);
-      return NextResponse.json(
-        { error: projectsError.message },
-        { status: 500 }
-      );
-    }
-
-    // Optionally get member count for each project (separate query for better performance)
-    const { data: memberCounts, error: memberCountsError } = await supabase
-      .from("project_members")
-      .select("project_id")
-      .in("project_id", projectIds);
-
-    if (memberCountsError) {
-      console.error("Error fetching member counts:", memberCountsError);
-      // Continue without member counts - not critical
-    }
+    // Get member count for each project
+    const memberCounts = await prisma.projectMember.groupBy({
+      by: ["projectId"],
+      where: {
+        projectId: {
+          in: projectIds,
+        },
+      },
+      _count: {
+        id: true,
+      },
+    });
 
     // Count members per project
-    const memberCountMap = new Map();
-    memberCounts?.forEach((member) => {
-      const count = memberCountMap.get(member.project_id) || 0;
-      memberCountMap.set(member.project_id, count + 1);
+    const memberCountMap = new Map<string, number>();
+    memberCounts.forEach((member) => {
+      memberCountMap.set(member.projectId, member._count.id);
     });
 
     // Enrich projects with member count
-    const enrichedProjects =
-      projects?.map((project) => ({
-        ...project,
-        member_count: memberCountMap.get(project.id) || 0,
-        // Remove the heavy project_members join - frontend can fetch details separately if needed
-      })) || [];
+    const enrichedProjects = projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      code: project.code,
+      status: project.status,
+      capacity_planning_enabled: project.capacityPlanningEnabled,
+      created_at: project.createdAt,
+      member_count: memberCountMap.get(project.id) || 0,
+    }));
 
     const response = {
       projects: enrichedProjects,

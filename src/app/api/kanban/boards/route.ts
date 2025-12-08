@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(req: NextRequest) {
@@ -39,22 +39,25 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
   const userContext = validation.context!;
 
   // Verify project exists and belongs to the organization
-  const { data: project, error: projectError } = await supabase
-    .from("projects")
-    .select("id, organization_id, kanban_enabled")
-    .eq("id", projectId)
-    .eq("organization_id", organizationId)
-    .single();
+  const project = await prisma.project.findFirst({
+    where: {
+      id: projectId,
+      organizationId,
+    },
+    select: {
+      id: true,
+      kanbanEnabled: true,
+    },
+  });
 
-  if (projectError || !project) {
+  if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  if (!project.kanban_enabled) {
+  if (!project.kanbanEnabled) {
     return NextResponse.json(
       { error: "Kanban is not enabled for this project" },
       { status: 403 }
@@ -62,33 +65,47 @@ export async function GET(req: NextRequest) {
   }
 
   // Get ONLY basic board information (no nested data)
-  const { data: boards, error } = await supabase
-    .from("boards")
-    .select(
-      `
-      id,
-      project_id,
-      name,
-      description,
-      background_color,
-      background_image,
-      is_closed,
-      visibility,
-      position,
-      created_by,
-      created_at,
-      updated_at
-    `
-    )
-    .eq("project_id", projectId)
-    .eq("is_closed", false)
-    .order("position", { ascending: true });
+  const boards = await prisma.board.findMany({
+    where: {
+      projectId,
+      isClosed: false,
+    },
+    orderBy: {
+      position: "asc",
+    },
+    select: {
+      id: true,
+      projectId: true,
+      name: true,
+      description: true,
+      backgroundColor: true,
+      backgroundImage: true,
+      isClosed: true,
+      visibility: true,
+      position: true,
+      createdBy: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  // Transform to match expected format
+  const transformedBoards = boards.map((board) => ({
+    id: board.id,
+    project_id: board.projectId,
+    name: board.name,
+    description: board.description,
+    background_color: board.backgroundColor,
+    background_image: board.backgroundImage,
+    is_closed: board.isClosed,
+    visibility: board.visibility,
+    position: board.position,
+    created_by: board.createdBy,
+    created_at: board.createdAt,
+    updated_at: board.updatedAt,
+  }));
 
-  const result = { boards: boards || [] };
+  const result = { boards: transformedBoards };
   return NextResponse.json(result);
 }
 
@@ -135,22 +152,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
   const userContext = validation.context!;
 
   // Verify project exists and belongs to the organization
-  const { data: project, error: projectError } = await supabase
-    .from("projects")
-    .select("id, organization_id, kanban_enabled")
-    .eq("id", project_id)
-    .eq("organization_id", organizationId)
-    .single();
+  const project = await prisma.project.findFirst({
+    where: {
+      id: project_id,
+      organizationId,
+    },
+    select: {
+      id: true,
+      kanbanEnabled: true,
+    },
+  });
 
-  if (projectError || !project) {
+  if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  if (!project.kanban_enabled) {
+  if (!project.kanbanEnabled) {
     return NextResponse.json(
       { error: "Kanban is not enabled for this project" },
       { status: 403 }
@@ -158,49 +178,66 @@ export async function POST(req: NextRequest) {
   }
 
   // Get next position
-  const { data: lastBoard } = await supabase
-    .from("boards")
-    .select("position")
-    .eq("project_id", project_id)
-    .order("position", { ascending: false })
-    .limit(1)
-    .single();
+  const lastBoard = await prisma.board.findFirst({
+    where: {
+      projectId: project_id,
+    },
+    orderBy: {
+      position: "desc",
+    },
+    select: {
+      position: true,
+    },
+  });
 
   const position = lastBoard ? lastBoard.position + 1 : 0;
 
-  // Create board
-  const { data: board, error } = await supabase
-    .from("boards")
-    .insert([
-      {
-        project_id,
+  // Create board and activity log in a transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // Create board
+    const board = await tx.board.create({
+      data: {
+        projectId: project_id,
         name,
-        description,
-        background_color: background_color || "#0079bf",
-        background_image,
+        description: description || null,
+        backgroundColor: background_color || "#0079bf",
+        backgroundImage: background_image || null,
         visibility: visibility || "project",
         position,
-        created_by: userContext.userId,
+        createdBy: userContext.userId,
       },
-    ])
-    .select()
-    .single();
+    });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+    // Create activity log
+    await tx.activity.create({
+      data: {
+        userId: userContext.userId,
+        boardId: board.id,
+        actionType: "create",
+        entityType: "board",
+        entityId: board.id,
+        details: { board_name: name },
+      },
+    });
 
-  // Create activity log
-  await supabase.from("activities").insert([
-    {
-      user_id: userContext.userId,
-      board_id: board.id,
-      action_type: "create",
-      entity_type: "board",
-      entity_id: board.id,
-      details: { board_name: name },
-    },
-  ]);
+    return board;
+  });
 
-  return NextResponse.json({ board });
+  // Transform to match expected format
+  const transformedBoard = {
+    id: result.id,
+    project_id: result.projectId,
+    name: result.name,
+    description: result.description,
+    background_color: result.backgroundColor,
+    background_image: result.backgroundImage,
+    is_closed: result.isClosed,
+    visibility: result.visibility,
+    position: result.position,
+    created_by: result.createdBy,
+    created_at: result.createdAt,
+    updated_at: result.updatedAt,
+  };
+
+  return NextResponse.json({ board: transformedBoard });
 }

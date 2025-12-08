@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(req: NextRequest) {
@@ -33,20 +33,17 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
-    const { data, error } = await supabase
-      .from("clients")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const clients = await prisma.client.findMany({
+      where: {
+        organizationId,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     const result = {
-      clients: data || [],
+      clients: clients || [],
     };
 
     return NextResponse.json(result);
@@ -94,7 +91,23 @@ export async function POST(req: NextRequest) {
     }
 
     const { context: userContext } = validation;
-    const { name, organizationId: bodyOrgId, ...rest } = body;
+    const {
+      name,
+      organizationId: bodyOrgId,
+      email,
+      phone,
+      website,
+      address,
+      city,
+      province,
+      postal_code,
+      postalCode,
+      country,
+      contact_person,
+      contactPerson,
+      notes,
+      status,
+    } = body;
 
     if (!name) {
       return NextResponse.json(
@@ -103,25 +116,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("clients")
-      .insert([
-        {
-          organization_id: organizationId,
-          name,
-          created_by: userContext!.userId,
-          ...rest,
-        },
-      ])
-      .select()
-      .single();
+    const client = await prisma.client.create({
+      data: {
+        organizationId,
+        name,
+        createdBy: userContext!.userId,
+        email: email || undefined,
+        phone: phone || undefined,
+        website: website || undefined,
+        address: address || undefined,
+        city: city || undefined,
+        province: province || undefined,
+        postalCode: postalCode || postal_code || undefined,
+        country: country || undefined,
+        contactPerson: contactPerson || contact_person || undefined,
+        notes: notes || undefined,
+        status: status || "active",
+      },
+    });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ client: data });
+    return NextResponse.json({ client });
   } catch (error: any) {
     console.error("Error in POST /api/clients:", error);
     return NextResponse.json(

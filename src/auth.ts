@@ -2,7 +2,8 @@ import NextAuth from "next-auth";
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
+import { verifyPassword } from "@/lib/password";
 import { JWT } from "next-auth/jwt";
 import { Session } from "next-auth";
 
@@ -46,25 +47,23 @@ async function getUserProfile(userId: string) {
       return cached.profile;
     }
 
-    const supabase = await createClient();
+    // Get user profile from database using Prisma
+    const userData = await prisma.user.findUnique({
+      where: { id: userId },
+    });
 
-    // Get user profile from users table (organization-based schema)
-    const { data: userData, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", userId)
-      .single();
-
-    if (error || !userData) {
+    if (!userData) {
       console.log("No user found for:", userId);
       return null;
     }
+
     const profile = {
       id: userData.id,
       email: userData.email,
-      name: userData.full_name,
-      avatar: userData.avatar_url,
+      name: userData.fullName,
+      avatar: userData.avatarUrl,
     };
+
     // Cache the profile
     userProfileCache.set(userId, {
       profile,
@@ -97,46 +96,71 @@ export const authConfig: NextAuthOptions = {
         }
 
         try {
-          const supabase = await createClient();
-
           console.log(`Attempting to sign in with email: ${credentials.email}`);
 
-          // Sign in with email and password
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email: credentials.email,
-            password: credentials.password,
+          // Find user by email
+          const user = await prisma.user.findUnique({
+            where: { email: credentials.email },
           });
 
-          if (error) {
-            console.log("Supabase auth error:", error.message);
-            throw new Error(error.message);
+          if (!user) {
+            console.log("User not found:", credentials.email);
+            throw new Error("Invalid email or password");
           }
 
-          if (!data.user) {
-            console.log("No user returned from Supabase");
-            throw new Error("Invalid credentials");
+          // Check if user has a password (credentials-based user)
+          if (!user.password) {
+            console.log("User does not have a password set");
+            throw new Error("Invalid email or password");
           }
 
-          console.log("User authenticated successfully:", data.user.id);
+          // Verify password
+          const isValidPassword = await verifyPassword(
+            credentials.password,
+            user.password
+          );
 
-          // Get user profile from database
-          const profile = await getUserProfile(data.user.id);
+          if (!isValidPassword) {
+            console.log("Invalid password for user:", credentials.email);
+            throw new Error("Invalid email or password");
+          }
+
+          // Check if user is active
+          if (!user.isActive) {
+            console.log("User account is inactive:", credentials.email);
+            throw new Error("Account is inactive. Please contact support.");
+          }
+
+          console.log("User authenticated successfully:", user.id);
+
+          // Update last sign in time
+          await prisma.user
+            .update({
+              where: { id: user.id },
+              data: { lastSignInAt: new Date() },
+            })
+            .catch((err: unknown) => {
+              // Log but don't fail authentication if update fails
+              console.warn("Failed to update last sign in time:", err);
+            });
+
+          // Get user profile
+          const profile = await getUserProfile(user.id);
 
           if (profile) {
             return {
               id: profile.id,
               email: profile.email,
-              name: profile.name || data.user.email?.split("@")[0],
+              name: profile.name || user.email?.split("@")[0],
               avatar: profile.avatar,
             };
           } else {
-            // Fallback to user metadata if no profile (shouldn't happen in normal flow)
+            // Fallback to user data if profile fetch fails
             return {
-              id: data.user.id,
-              email: data.user.email,
-              name:
-                data.user.user_metadata?.name || data.user.email?.split("@")[0],
-              avatar: data.user.user_metadata?.avatar || null,
+              id: user.id,
+              email: user.email,
+              name: user.fullName || user.email?.split("@")[0],
+              avatar: user.avatarUrl,
             };
           }
         } catch (error: any) {
@@ -221,35 +245,38 @@ export const authConfig: NextAuthOptions = {
       // For OAuth providers (Google), handle profile creation
       if (account?.provider === "google" && user.email) {
         try {
-          const supabase = await createClient();
-
           // Check if user already exists in our users table
-          const { data: existingUser } = await supabase
-            .from("users")
-            .select("id")
-            .eq("email", user.email)
-            .single();
+          const existingUser = await prisma.user.findUnique({
+            where: { email: user.email },
+          });
 
           if (!existingUser) {
             // Create user profile manually for OAuth users
             console.log("Creating profile for OAuth user:", user.email);
 
-            const { error: profileError } = await supabase
-              .from("users")
-              .insert({
+            await prisma.user.create({
+              data: {
                 id: user.id,
                 email: user.email,
-                full_name:
+                fullName:
                   user.name || user.email?.split("@")[0] || "Unknown User",
+                emailVerified: true, // OAuth providers verify email
+                avatarUrl: user.image || null,
+              },
+            });
+          } else {
+            // Update last sign in time for existing OAuth user
+            await prisma.user
+              .update({
+                where: { id: user.id },
+                data: {
+                  lastSignInAt: new Date(),
+                  avatarUrl: user.image || existingUser.avatarUrl,
+                },
+              })
+              .catch((err: unknown) => {
+                console.warn("Failed to update OAuth user:", err);
               });
-
-            if (profileError) {
-              console.error(
-                "Failed to create OAuth user profile:",
-                profileError
-              );
-              return false;
-            }
           }
 
           return true;

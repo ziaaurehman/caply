@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
@@ -13,35 +13,55 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = await createClient();
   const listId = params.id;
 
   // Check if user has access to the list
-  const { data: list, error } = await supabase
-    .from("lists")
-    .select(
-      `
-      *,
-      boards!inner (
-        id,
-        projects!inner (
-          organization_members!inner (
-            user_id
-          )
-        )
-      )
-    `
-    )
-    .eq("id", listId)
-    .eq("boards.projects.organization_members.user_id", session.user.id)
-    .eq("boards.projects.organization_members.status", "active")
-    .single();
+  const list = await prisma.list.findFirst({
+    where: {
+      id: listId,
+      board: {
+        project: {
+          projectMembers: {
+            some: {
+              organizationMember: {
+                userId: session.user.id,
+                status: "active",
+              },
+            },
+          },
+        },
+      },
+    },
+    include: {
+      board: {
+        include: {
+          project: {
+            select: {
+              id: true,
+              organizationId: true,
+            },
+          },
+        },
+      },
+    },
+  });
 
-  if (error || !list) {
+  if (!list) {
     return NextResponse.json({ error: "List not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ list });
+  // Transform to match expected format
+  const transformedList = {
+    id: list.id,
+    board_id: list.boardId,
+    name: list.name,
+    position: list.position,
+    is_archived: list.isArchived,
+    created_at: list.createdAt,
+    updated_at: list.updatedAt,
+  };
+
+  return NextResponse.json({ list: transformedList });
 }
 
 export async function PATCH(
@@ -76,120 +96,130 @@ export async function PATCH(
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
 
     // Get the existing list and verify it belongs to this organization
-    const { data: existingList, error: listError } = await supabase
-      .from("lists")
-      .select(
-        `
-        *,
-        boards!inner (
-          id,
-          project_id,
-          projects!inner (
-            id,
-            organization_id
-          )
-        )
-      `
-      )
-      .eq("id", listId)
-      .eq("boards.projects.organization_id", organizationId)
-      .single();
+    const existingList = await prisma.list.findFirst({
+      where: {
+        id: listId,
+        board: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+      include: {
+        board: {
+          select: {
+            id: true,
+            projectId: true,
+          },
+        },
+      },
+    });
 
-    if (listError || !existingList) {
-      console.error("List not found error:", listError);
+    if (!existingList) {
       return NextResponse.json({ error: "List not found" }, { status: 404 });
     }
 
-    // Update list
-    const { data: list, error } = await supabase
-      .from("lists")
-      .update({
-        name,
-        position,
-        is_archived,
-      })
-      .eq("id", listId)
-      .select()
-      .single();
+    // Update list and handle card archiving in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update list
+      const list = await tx.list.update({
+        where: { id: listId },
+        data: {
+          name: name !== undefined ? name : undefined,
+          position: position !== undefined ? position : undefined,
+          isArchived: is_archived !== undefined ? is_archived : undefined,
+        },
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+      // *** CRITICAL: When archiving/unarchiving a list, also archive/unarchive all its cards ***
+      if (
+        typeof is_archived === "boolean" &&
+        is_archived !== existingList.isArchived
+      ) {
+        try {
+          // Update all cards in this list to match the list's archive status
+          const updatedCards = await tx.card.updateMany({
+            where: { listId },
+            data: { isArchived: is_archived },
+          });
 
-    // *** CRITICAL: When archiving/unarchiving a list, also archive/unarchive all its cards ***
-    if (
-      typeof is_archived === "boolean" &&
-      is_archived !== existingList.is_archived
-    ) {
-      try {
-        // Update all cards in this list to match the list's archive status
-        const { data: updatedCards, error: cardsError } = await supabase
-          .from("cards")
-          .update({ is_archived })
-          .eq("list_id", listId)
-          .select("id, title");
-
-        if (cardsError) {
-          console.error("Error updating cards archive status:", cardsError);
-        } else {
           console.log(
-            `🔄 ${is_archived ? "Archived" : "Unarchived"} ${updatedCards?.length || 0} cards in list: ${list.name}`
+            `🔄 ${is_archived ? "Archived" : "Unarchived"} ${updatedCards.count} cards in list: ${list.name}`
           );
 
+          // Get card details for activity logs
+          const cards = await tx.card.findMany({
+            where: { listId },
+            select: { id: true, title: true },
+          });
+
           // Create activity logs for card updates
-          if (updatedCards && updatedCards.length > 0) {
-            const cardActivities = updatedCards.map((card) => ({
-              user_id: userContext!.userId,
-              board_id: existingList.board_id,
-              action_type: is_archived ? "archive" : "unarchive",
-              entity_type: "card",
-              entity_id: card.id,
-              details: {
-                card_title: card.title,
-                reason: `List ${is_archived ? "archived" : "unarchived"}`,
-                list_name: list.name,
-              },
-            }));
-
-            await supabase.from("activities").insert(cardActivities);
+          if (cards.length > 0) {
+            await tx.activity.createMany({
+              data: cards.map((card) => ({
+                userId: userContext!.userId,
+                boardId: existingList.board.id,
+                cardId: card.id,
+                actionType: is_archived ? "archive" : "unarchive",
+                entityType: "card",
+                entityId: card.id,
+                details: {
+                  card_title: card.title,
+                  reason: `List ${is_archived ? "archived" : "unarchived"}`,
+                  list_name: list.name,
+                },
+              })),
+            });
           }
+        } catch (cardsUpdateError) {
+          console.error(
+            "Error updating cards when archiving/unarchiving list:",
+            cardsUpdateError
+          );
         }
-      } catch (cardsUpdateError) {
-        console.error(
-          "Error updating cards when archiving/unarchiving list:",
-          cardsUpdateError
-        );
       }
-    }
 
-    // Create activity log for list update
-    await supabase.from("activities").insert([
-      {
-        user_id: userContext!.userId,
-        board_id: existingList.board_id,
-        action_type: is_archived
-          ? "archive"
-          : is_archived === false
-            ? "unarchive"
-            : "update",
-        entity_type: "list",
-        entity_id: listId,
-        details: {
-          changes: body,
-          cards_affected:
-            is_archived !== undefined
-              ? "Cards " +
-                (is_archived ? "archived" : "unarchived") +
-                " with list"
-              : undefined,
+      // Create activity log for list update
+      await tx.activity.create({
+        data: {
+          userId: userContext!.userId,
+          boardId: existingList.board.id,
+          actionType: is_archived
+            ? "archive"
+            : is_archived === false
+              ? "unarchive"
+              : "update",
+          entityType: "list",
+          entityId: listId,
+          details: {
+            changes: body,
+            cards_affected:
+              is_archived !== undefined
+                ? "Cards " +
+                  (is_archived ? "archived" : "unarchived") +
+                  " with list"
+                : undefined,
+          },
         },
-      },
-    ]);
+      });
 
-    return NextResponse.json({ list });
+      return list;
+    });
+
+    // Transform to match expected format
+    const transformedList = {
+      id: result.id,
+      board_id: result.boardId,
+      name: result.name,
+      position: result.position,
+      is_archived: result.isArchived,
+      created_at: result.createdAt,
+      updated_at: result.updatedAt,
+    };
+
+    return NextResponse.json({ list: transformedList });
   } catch (error: any) {
     console.error("Error in PATCH /api/kanban/lists/[id]:", error);
     return NextResponse.json(
@@ -233,50 +263,47 @@ export async function DELETE(
     }
 
     const { context: userContext } = validation;
-    const supabase = await createClient();
 
     // Get the existing list and verify it belongs to this organization
-    const { data: existingList, error: listError } = await supabase
-      .from("lists")
-      .select(
-        `
-        *,
-        boards!inner (
-          id,
-          project_id,
-          projects!inner (
-            id,
-            organization_id
-          )
-        )
-      `
-      )
-      .eq("id", listId)
-      .eq("boards.projects.organization_id", organizationId)
-      .single();
+    const existingList = await prisma.list.findFirst({
+      where: {
+        id: listId,
+        board: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        boardId: true,
+      },
+    });
 
-    if (listError || !existingList) {
+    if (!existingList) {
       return NextResponse.json({ error: "List not found" }, { status: 404 });
     }
 
-    // Delete list (CASCADE will handle related cards)
-    const { error } = await supabase.from("lists").delete().eq("id", listId);
+    // Delete list and create activity log in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Delete list (CASCADE will handle related cards)
+      await tx.list.delete({
+        where: { id: listId },
+      });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Create activity log
-    await supabase.from("activities").insert([
-      {
-        user_id: userContext!.userId,
-        board_id: existingList.board_id,
-        action_type: "delete",
-        entity_type: "list",
-        entity_id: listId,
-        details: { list_name: existingList.name },
-      },
-    ]);
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: userContext!.userId,
+          boardId: existingList.boardId,
+          actionType: "delete",
+          entityType: "list",
+          entityId: listId,
+          details: { list_name: existingList.name },
+        },
+      });
+    });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

@@ -1,8 +1,8 @@
 // src/app/api/timesheets/get-draft/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-// COMMENTED OUT: Import no longer needed after commenting out verification
-// import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -19,39 +19,25 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // COMMENTED OUT: Verification that was causing 403 errors
-  // const validation = await validateOrganizationAccessWithId(organizationId, {
-  //   resource: "timesheets",
-  //   action: "read",
-  // });
-
-  // if (!validation.success) {
-  //   return NextResponse.json(
-  //     {
-  //       error: validation.error,
-  //     },
-  //     { status: validation.status }
-  //   );
-  // }
-
-  const supabase = await createClient();
-
-  // Get user ID from session directly (bypassing verification)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  // Get user ID from session
+  const session = await getServerSession(authConfig);
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get organization membership directly
-  const { data: membership } = await supabase
-    .from("organization_members")
-    .select("id, user_id, organization_id")
-    .eq("user_id", user.id)
-    .eq("organization_id", organizationId)
-    .eq("status", "active")
-    .maybeSingle();
+  // Get organization membership
+  const membership = await prisma.organizationMember.findFirst({
+    where: {
+      userId: session.user.id,
+      organizationId,
+      status: "active",
+    },
+    select: {
+      id: true,
+      userId: true,
+      organizationId: true,
+    },
+  });
 
   if (!membership) {
     return NextResponse.json(
@@ -60,35 +46,30 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Create a minimal userContext object for compatibility
-  const userContext = {
-    userId: user.id,
-    membership: {
-      id: membership.id,
-    },
-  };
+  const userId = session.user.id;
 
   try {
     // Get or create draft submission for the week
-    let { data: submission, error: submissionError } = await supabase
-      .from("timesheet_submissions")
-      .select(
-        `
-        *,
-        timesheet_entries (
-          *,
-          projects (
-            id,
-            name,
-            code
-          )
-        )
-      `
-      )
-      .eq("organization_id", organizationId)
-      .eq("user_id", userContext.userId)
-      .eq("week_start_date", weekStart)
-      .maybeSingle();
+    let submission = await prisma.timesheetSubmission.findFirst({
+      where: {
+        organizationId,
+        userId,
+        weekStartDate: new Date(weekStart),
+      },
+      include: {
+        entries: {
+          include: {
+            project: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+              },
+            },
+          },
+        },
+      },
+    });
 
     // If no submission exists, create a draft one
     if (!submission) {
@@ -96,47 +77,74 @@ export async function GET(req: NextRequest) {
       const weekEndDate = new Date(weekStartDate);
       weekEndDate.setDate(weekStartDate.getDate() + 4);
 
-      const { data: projectMember } = await supabase
-        .from("project_members")
-        .select("id")
-        .eq("organization_members.user_id", userContext.userId)
-        .eq("project_members.organization_id", organizationId)
-        .single();
-
-      const { data: newSubmission, error: createError } = await supabase
-        .from("timesheet_submissions")
-        .insert({
-          organization_id: organizationId,
-          user_id: userContext.userId,
-          project_member_id: projectMember?.id,
-          week_start_date: weekStart,
-          week_end_date: weekEndDate.toISOString().split("T")[0],
+      submission = await prisma.timesheetSubmission.create({
+        data: {
+          organizationId,
+          userId,
+          organizationMemberId: membership.id, // Use the actual OrganizationMember ID
+          weekStartDate: new Date(weekStart),
+          weekEndDate,
           status: "draft",
-          total_hours: 0,
-        })
-        .select(
-          `
-          *,
-          timesheet_entries (
-            *,
-            projects (
-              id,
-              name,
-              code
-            )
-          )
-        `
-        )
-        .single();
-
-      if (createError) {
-        throw createError;
-      }
-      submission = newSubmission;
+          totalHours: 0,
+        },
+        include: {
+          entries: {
+            include: {
+              project: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                },
+              },
+            },
+          },
+        },
+      });
     }
 
+    // Transform to match expected format
+    const transformedSubmission = {
+      id: submission.id,
+      organization_id: submission.organizationId,
+      user_id: submission.userId,
+      organization_member_id: submission.organizationMemberId,
+      week_start_date: submission.weekStartDate,
+      week_end_date: submission.weekEndDate,
+      status: submission.status,
+      total_hours: submission.totalHours,
+      submitted_at: submission.submittedAt,
+      created_at: submission.createdAt,
+      updated_at: submission.updatedAt,
+      timesheet_entries: submission.entries.map((entry) => ({
+        id: entry.id,
+        submission_id: entry.timesheetSubmissionId,
+        project_id: entry.projectId,
+        task_description: entry.taskDescription,
+        monday_hours: entry.mondayHours,
+        tuesday_hours: entry.tuesdayHours,
+        wednesday_hours: entry.wednesdayHours,
+        thursday_hours: entry.thursdayHours,
+        friday_hours: entry.fridayHours,
+        monday_notes: entry.mondayNotes,
+        tuesday_notes: entry.tuesdayNotes,
+        wednesday_notes: entry.wednesdayNotes,
+        thursday_notes: entry.thursdayNotes,
+        friday_notes: entry.fridayNotes,
+        created_at: entry.createdAt,
+        updated_at: entry.updatedAt,
+        projects: entry.project
+          ? {
+              id: entry.project.id,
+              name: entry.project.name,
+              code: entry.project.code,
+            }
+          : null,
+      })),
+    };
+
     return NextResponse.json({
-      submission: submission || null,
+      submission: transformedSubmission,
       success: true,
     });
   } catch (error) {

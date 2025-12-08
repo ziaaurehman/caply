@@ -1,160 +1,213 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { validateOrganizationAccessWithId } from '@/utils/organizationUtils';
-import { getServerSession } from 'next-auth';
-import { authConfig } from '@/auth';
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
 
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
     const body = await req.json();
-    const { checklist_id, content, due_date, assigned_to_project_member_id, organizationId } = body;
-    const orgId = organizationId || req.headers.get('x-organization-id');
+    const {
+      checklist_id,
+      content,
+      due_date,
+      assigned_to_project_member_id,
+      organizationId,
+    } = body;
+    const orgId = organizationId || req.headers.get("x-organization-id");
 
     if (!checklist_id || !content) {
-      return NextResponse.json({ error: 'Checklist ID and content are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Checklist ID and content are required" },
+        { status: 400 }
+      );
     }
 
     if (!orgId) {
-      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
     }
 
     // Validate organization access and permissions
-    const validation = await validateOrganizationAccessWithId(
-      orgId,
-      { resource: 'projects', action: 'update' }
-    );
+    const validation = await validateOrganizationAccessWithId(orgId, {
+      resource: "projects",
+      action: "update",
+    });
 
     if (!validation.success) {
-      return NextResponse.json({ 
-        error: validation.error 
-      }, { status: validation.status });
+      return NextResponse.json(
+        {
+          error: validation.error,
+        },
+        { status: validation.status }
+      );
     }
 
     // Verify checklist exists and user has access through project organization
-    const { data: checklist, error: checklistError } = await supabase
-      .from('checklists')
-      .select(`
-        id,
-        name,
-        card_id,
-        cards!inner (
-          id,
-          title,
-          list_id,
-          lists!inner (
-            id,
-            board_id,
-            boards!inner (
-              id,
-              project_id,
-              projects!inner (
-                id,
-                organization_id
-              )
-            )
-          )
-        )
-      `)
-      .eq('id', checklist_id)
-      .eq('cards.lists.boards.projects.organization_id', orgId)
-      .single();
+    const checklist = await prisma.checklist.findFirst({
+      where: {
+        id: checklist_id,
+        card: {
+          list: {
+            board: {
+              project: {
+                organizationId: orgId,
+              },
+            },
+          },
+        },
+      },
+      include: {
+        card: {
+          include: {
+            list: {
+              select: {
+                boardId: true,
+              },
+            },
+          },
+        },
+      },
+    });
 
-    if (checklistError || !checklist) {
-      return NextResponse.json({ error: 'Checklist not found' }, { status: 404 });
+    if (!checklist) {
+      return NextResponse.json(
+        { error: "Checklist not found" },
+        { status: 404 }
+      );
     }
 
-  // If assigned_to_project_member_id is provided, verify the project member exists
-  if (assigned_to_project_member_id) {
-    const organizationId = (checklist.cards as any).lists.boards.projects.organization_id;
-    const { data: projectMember, error: memberError } = await supabase
-      .from('project_members')
-      .select(`
-        id,
-        organization_member_id,
-        projects!inner(id, organization_id)
-      `)
-      .eq('id', assigned_to_project_member_id)
-      .eq('projects.organization_id', organizationId)
-      .single();
+    // If assigned_to_project_member_id is provided, verify the project member exists
+    if (assigned_to_project_member_id) {
+      const projectMember = await prisma.projectMember.findFirst({
+        where: {
+          id: assigned_to_project_member_id,
+          project: {
+            organizationId: orgId,
+          },
+        },
+      });
 
-    if (memberError || !projectMember) {
-      return NextResponse.json({ error: 'Assigned project member not found' }, { status: 404 });
-    }
-  }
-
-  // Get next position
-  const { data: lastItem } = await supabase
-    .from('checklist_items')
-    .select('position')
-    .eq('checklist_id', checklist_id)
-    .order('position', { ascending: false })
-    .limit(1)
-    .single();
-
-  const position = lastItem ? lastItem.position + 1 : 0;
-
-  // Create checklist item
-  const { data: checklistItem, error } = await supabase
-    .from('checklist_items')
-    .insert([{
-      checklist_id,
-      content,
-      position,
-      due_date,
-      assigned_to_project_member_id
-    }])
-          .select(`
-        *,
-        assigned_to_project_member_id,
-        project_members (
-          id,
-          organization_member_id,
-          role,
-          joined_at,
-          organization_members!inner (
-            id,
-            user_id,
-            users!organization_members_user_id_fkey!inner (
-              id,
-              full_name,
-              email,
-              avatar_url
-            )
-          )
-        )
-      `)
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Create activity log
-  await supabase
-    .from('activities')
-    .insert([{
-      user_id: session.user.id,
-      board_id: (checklist.cards as any).lists.board_id,
-      card_id: checklist.card_id,
-      action_type: 'create',
-      entity_type: 'checklist_item',
-      entity_id: checklistItem.id,
-      details: { 
-        item_content: content,
-        checklist_name: checklist.name,
-        card_title: (checklist.cards as any).title
+      if (!projectMember) {
+        return NextResponse.json(
+          { error: "Assigned project member not found" },
+          { status: 404 }
+        );
       }
-    }]);
+    }
 
-    return NextResponse.json({ checklist_item: checklistItem });
+    // Get next position
+    const lastItem = await prisma.checklistItem.findFirst({
+      where: {
+        checklistId: checklist_id,
+      },
+      orderBy: {
+        position: "desc",
+      },
+      select: {
+        position: true,
+      },
+    });
+
+    const position = lastItem ? lastItem.position + 1 : 0;
+
+    // Create checklist item and activity log in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create checklist item
+      const checklistItem = await tx.checklistItem.create({
+        data: {
+          checklistId: checklist_id,
+          content,
+          position,
+          dueDate: due_date ? new Date(due_date) : null,
+          assignedToProjectMemberId: assigned_to_project_member_id || null,
+        },
+        include: {
+          projectMember: {
+            include: {
+              organizationMember: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      fullName: true,
+                      email: true,
+                      avatarUrl: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: session.user.id,
+          boardId: checklist.card.list.boardId,
+          cardId: checklist.cardId,
+          actionType: "create",
+          entityType: "checklist_item",
+          entityId: checklistItem.id,
+          details: {
+            item_content: content,
+            checklist_name: checklist.name,
+            card_title: checklist.card.title,
+          },
+        },
+      });
+
+      return checklistItem;
+    });
+
+    // Transform to match expected format
+    const transformedItem = {
+      id: result.id,
+      checklist_id: result.checklistId,
+      content: result.content,
+      is_completed: result.isCompleted,
+      position: result.position,
+      due_date: result.dueDate,
+      assigned_to_project_member_id: result.assignedToProjectMemberId,
+      created_at: result.createdAt,
+      updated_at: result.updatedAt,
+      project_members: result.projectMember
+        ? {
+            id: result.projectMember.id,
+            organization_member_id: result.projectMember.organizationMemberId,
+            role: result.projectMember.role,
+            joined_at: result.projectMember.joinedAt,
+            organization_members: {
+              id: result.projectMember.organizationMember.id,
+              user_id: result.projectMember.organizationMember.userId,
+              users: {
+                id: result.projectMember.organizationMember.user.id,
+                full_name:
+                  result.projectMember.organizationMember.user.fullName,
+                email: result.projectMember.organizationMember.user.email,
+                avatar_url:
+                  result.projectMember.organizationMember.user.avatarUrl,
+              },
+            },
+          }
+        : null,
+    };
+
+    return NextResponse.json({ checklist_item: transformedItem });
   } catch (error) {
-    console.error('Error creating checklist item:', error);
-    return NextResponse.json({ error: 'Failed to create checklist item' }, { status: 500 });
+    console.error("Error creating checklist item:", error);
+    return NextResponse.json(
+      { error: "Failed to create checklist item" },
+      { status: 500 }
+    );
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 // GET /api/capacity/monthly?organizationId=...&month=YYYY-MM
@@ -31,8 +31,6 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Compute the first day of month and ISO week starts within that month (Mon dates)
     const monthStart = new Date(`${month}-01T00:00:00Z`);
     if (Number.isNaN(monthStart.getTime())) {
@@ -63,35 +61,28 @@ export async function GET(req: NextRequest) {
     }
 
     // 1) Get resources (resource_allocations) and member/user info
-    let resourcesQuery = supabase
-      .from("resource_allocations")
-      .select(
-        `
-        id,
-        organization_member_id,
-        weekly_capacity_hours,
-        is_active,
-        organization_members:organization_member_id (
-          id,
-          users:user_id (
-            id,
-            full_name,
-            email,
-            avatar_url,
-            position
-          )
-        )
-      `
-      )
-      .eq("organization_id", organizationId);
-    if (onlyActive) resourcesQuery = resourcesQuery.eq("is_active", true);
-    const { data: resources, error: resourcesError } = await resourcesQuery;
-    if (resourcesError) {
-      return NextResponse.json(
-        { error: resourcesError.message },
-        { status: 500 }
-      );
-    }
+    const resources = await prisma.resourceAllocation.findMany({
+      where: {
+        organizationId,
+        ...(onlyActive ? { isActive: true } : {}),
+      },
+      include: {
+        organizationMember: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                avatarUrl: true,
+                position: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
     if (!resources || resources.length === 0) {
       return NextResponse.json({ resources: [], weeks: weekStarts });
     }
@@ -99,55 +90,72 @@ export async function GET(req: NextRequest) {
     const resourceIds = resources.map((r) => r.id);
 
     // 2) Fetch weekly plans for all resources for the target weeks
-    const { data: weeklyPlans, error: plansError } = await supabase
-      .from("project_weekly_plans")
-      .select(
-        `
-        id,
-        organization_id,
-        resource_allocation_id,
-        project_id,
-        week_start_date,
-        default_hours_per_day,
-        allow_weekends,
-        is_linked,
-        projects:project_id ( id, name, code, status )
-      `
-      )
-      .in("resource_allocation_id", resourceIds)
-      .in("week_start_date", weekStarts);
-    if (plansError) {
-      return NextResponse.json({ error: plansError.message }, { status: 500 });
-    }
+    const weeklyPlans = await prisma.projectWeeklyPlan.findMany({
+      where: {
+        resourceAllocationId: {
+          in: resourceIds,
+        },
+        weekStartDate: {
+          in: weekStarts.map((ws) => new Date(ws)),
+        },
+      },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
+      },
+    });
 
-    const planIds = (weeklyPlans || []).map((p) => p.id);
+    const planIds = weeklyPlans.map((p) => p.id);
 
     // 3) Fetch daily overrides for these weekly plans
-    let overridesByPlan = new Map<string, any[]>();
+    const overridesByPlan = new Map<string, any[]>();
     if (planIds.length > 0) {
-      const { data: overrides, error: overridesError } = await supabase
-        .from("project_daily_overrides")
-        .select(`id, weekly_plan_id, day_of_week, actual_hours`)
-        .in("weekly_plan_id", planIds);
-      if (overridesError) {
-        return NextResponse.json(
-          { error: overridesError.message },
-          { status: 500 }
-        );
-      }
-      (overrides || []).forEach((o) => {
-        const arr = overridesByPlan.get(o.weekly_plan_id) || [];
-        arr.push(o);
-        overridesByPlan.set(o.weekly_plan_id, arr);
+      const overrides = await prisma.projectDailyOverride.findMany({
+        where: {
+          weeklyPlanId: {
+            in: planIds,
+          },
+        },
+        select: {
+          id: true,
+          weeklyPlanId: true,
+          dayOfWeek: true,
+          actualHours: true,
+        },
+      });
+
+      overrides.forEach((o) => {
+        const arr = overridesByPlan.get(o.weeklyPlanId) || [];
+        arr.push({
+          id: o.id,
+          weekly_plan_id: o.weeklyPlanId,
+          day_of_week: o.dayOfWeek,
+          actual_hours: Number(o.actualHours),
+        });
+        overridesByPlan.set(o.weeklyPlanId, arr);
       });
     }
 
     // 4) Build response per resource with weekly totals and per-project breakdown
     const weeksMeta = weekStarts.map((ws) => ({ week_start_date: ws }));
-    const byResource: any[] = resources.map((res: any) => {
-      const memberUser = (res.organization_members as any)?.users;
-      const resPlans = (weeklyPlans || []).filter(
-        (p) => p.resource_allocation_id === res.id
+    const byResource = resources.map((res) => {
+      const memberUser = res.organizationMember?.user
+        ? {
+            id: res.organizationMember.user.id,
+            full_name: res.organizationMember.user.fullName,
+            email: res.organizationMember.user.email,
+            avatar_url: res.organizationMember.user.avatarUrl,
+            position: res.organizationMember.user.position,
+          }
+        : null;
+      const resPlans = weeklyPlans.filter(
+        (p) => p.resourceAllocationId === res.id
       );
 
       // Aggregate weekly totals and per-project breakdown
@@ -159,17 +167,17 @@ export async function GET(req: NextRequest) {
         projectsByWeek[ws] = [];
       });
 
-      resPlans.forEach((plan: any) => {
-        const ws = plan.week_start_date;
-        const allowWeekends = !!plan.allow_weekends;
-        const defaultPerDay = Number(plan.default_hours_per_day || 0);
+      resPlans.forEach((plan) => {
+        const ws = plan.weekStartDate.toISOString().slice(0, 10);
+        const allowWeekends = !!plan.allowWeekends;
+        const defaultPerDay = Number(plan.defaultHoursPerDay || 0);
         const dayMax = allowWeekends ? 7 : 5;
         const ovrs = overridesByPlan.get(plan.id) || [];
         // Build day map 1..7
         const dayHours: Record<number, number> = {} as any;
         for (let d = 1; d <= dayMax; d++) dayHours[d] = defaultPerDay;
         // Apply overrides
-        ovrs.forEach((o) => {
+        ovrs.forEach((o: any) => {
           if (o.day_of_week >= 1 && o.day_of_week <= 7) {
             // respect weekends flag: if weekend not allowed and override is 6/7, still count it explicitly
             dayHours[o.day_of_week] = Number(o.actual_hours || 0);
@@ -182,7 +190,14 @@ export async function GET(req: NextRequest) {
         }
         weekTotals[ws] = (weekTotals[ws] || 0) + total;
         projectsByWeek[ws].push({
-          project: plan.projects,
+          project: plan.project
+            ? {
+                id: plan.project.id,
+                name: plan.project.name,
+                code: plan.project.code,
+                status: plan.project.status,
+              }
+            : null,
           weekly_hours: total,
           default_hours_per_day: defaultPerDay,
           allow_weekends: allowWeekends,
@@ -190,7 +205,7 @@ export async function GET(req: NextRequest) {
       });
 
       // Compute status per week relative to resource weekly capacity
-      const weeklyCapacity = Number(res.weekly_capacity_hours || 40);
+      const weeklyCapacity = Number(res.weeklyCapacityHours || 40);
       const weeks = weekStarts.map((ws) => {
         const used = Number(weekTotals[ws] || 0);
         const total = weeklyCapacity;
@@ -211,7 +226,7 @@ export async function GET(req: NextRequest) {
 
       return {
         resource_allocation_id: res.id,
-        organization_member_id: res.organization_member_id,
+        organization_member_id: res.organizationMemberId,
         user: memberUser,
         weekly_capacity_hours: weeklyCapacity,
         weeks,

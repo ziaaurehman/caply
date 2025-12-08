@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function PATCH(
@@ -31,8 +31,6 @@ export async function PATCH(
       );
     }
 
-    const supabase = await createClient();
-
     // Validate color format if provided
     if (color && !/^#[0-9A-F]{6}$/i.test(color)) {
       return NextResponse.json(
@@ -42,59 +40,52 @@ export async function PATCH(
     }
 
     // Check if label exists and belongs to the organization
-    const { data: existingLabel, error: labelError } = await supabase
-      .from("labels")
-      .select(
-        `
-        *,
-        boards!inner (
-          id,
-          project_id,
-          projects!inner (
-            id,
-            organization_id
-          )
-        )
-      `
-      )
-      .eq("id", labelId)
-      .eq("boards.projects.organization_id", organizationId)
-      .single();
+    const existingLabel = await prisma.label.findFirst({
+      where: {
+        id: labelId,
+        board: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+      select: {
+        id: true,
+        boardId: true,
+      },
+    });
 
-    if (labelError || !existingLabel) {
-      console.error("Label query error:", labelError);
+    if (!existingLabel) {
       return NextResponse.json({ error: "Label not found" }, { status: 404 });
     }
 
-    // Update label
-    const { data: label, error } = await supabase
-      .from("labels")
-      .update({
-        name,
-        color,
-      })
-      .eq("id", labelId)
-      .select()
-      .single();
+    // Update label and create activity log in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update label
+      const label = await tx.label.update({
+        where: { id: labelId },
+        data: {
+          name: name !== undefined ? name : undefined,
+          color: color !== undefined ? color : undefined,
+        },
+      });
 
-    if (error) {
-      console.error("Label update error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: validation.context!.userId,
+          boardId: existingLabel.boardId,
+          actionType: "update",
+          entityType: "label",
+          entityId: labelId,
+          details: { changes: { name, color } },
+        },
+      });
 
-    // Create activity log
-    await supabase.from("activities").insert([
-      {
-        user_id: validation.context!.userId,
-        board_id: existingLabel.board_id,
-        action_type: "update",
-        entity_type: "label",
-        entity_id: labelId,
-        details: { changes: { name, color } },
-      },
-    ]);
+      return label;
+    });
 
-    return NextResponse.json({ label });
+    return NextResponse.json({ label: result });
   } catch (error) {
     console.error("Error in PATCH /api/kanban/labels/[id]:", error);
     return NextResponse.json(
@@ -133,55 +124,50 @@ export async function DELETE(
       );
     }
 
-    const supabase = await createClient();
-
     // Check if label exists and belongs to the organization
-    const { data: existingLabel, error: labelError } = await supabase
-      .from("labels")
-      .select(
-        `
-        *,
-        boards!inner (
-          id,
-          project_id,
-          projects!inner (
-            id,
-            organization_id
-          )
-        )
-      `
-      )
-      .eq("id", labelId)
-      .eq("boards.projects.organization_id", organizationId)
-      .single();
+    const existingLabel = await prisma.label.findFirst({
+      where: {
+        id: labelId,
+        board: {
+          project: {
+            organizationId,
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        boardId: true,
+      },
+    });
 
-    if (labelError || !existingLabel) {
-      console.error("Label query error:", labelError);
+    if (!existingLabel) {
       return NextResponse.json({ error: "Label not found" }, { status: 404 });
     }
 
-    // Delete label (CASCADE will handle card_labels)
-    const { error } = await supabase.from("labels").delete().eq("id", labelId);
+    // Delete label and create activity log in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Delete label (CASCADE will handle card_labels)
+      await tx.label.delete({
+        where: { id: labelId },
+      });
 
-    if (error) {
-      console.error("Label delete error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Create activity log
-    await supabase.from("activities").insert([
-      {
-        user_id: validation.context!.userId,
-        board_id: existingLabel.board_id,
-        action_type: "delete",
-        entity_type: "label",
-        entity_id: labelId,
-        details: {
-          label_name: existingLabel.name,
-          label_color: existingLabel.color,
+      // Create activity log
+      await tx.activity.create({
+        data: {
+          userId: validation.context!.userId,
+          boardId: existingLabel.boardId,
+          actionType: "delete",
+          entityType: "label",
+          entityId: labelId,
+          details: {
+            label_name: existingLabel.name,
+            label_color: existingLabel.color,
+          },
         },
-      },
-    ]);
+      });
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

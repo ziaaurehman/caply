@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/utils/supabase/server";
 import { startOfWeek, getWeek, getMonth, getYear } from "date-fns";
 
 export async function GET(req: NextRequest) {
@@ -31,8 +30,6 @@ export async function GET(req: NextRequest) {
         { status: validation.status }
       );
     }
-
-    const supabase = await createClient();
 
     // Build where clause
     const where: any = {};
@@ -67,19 +64,33 @@ export async function GET(req: NextRequest) {
           organizationId,
           ...(resourceAllocationId ? { resourceAllocationId } : {}),
         },
+        include: {
+          dailyOverrides: {
+            orderBy: {
+              dayOfWeek: "asc",
+            },
+          },
+        },
       });
     }
 
-    // Fetch project names from Supabase
+    // Fetch project names
     const projectIds = Array.from(
       new Set(projectAssignments.map((pa) => pa.projectId))
     );
-    const { data: projects } = await supabase
-      .from("projects")
-      .select("id, name")
-      .in("id", projectIds);
+    const projects = await prisma.project.findMany({
+      where: {
+        id: {
+          in: projectIds,
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
 
-    const projectMap = new Map((projects || []).map((p) => [p.id, p.name]));
+    const projectMap = new Map(projects.map((p) => [p.id, p.name]));
 
     // Combine assignments with weekly plans and project names
     const enrichedAssignments = projectAssignments.map((assignment) => {
@@ -87,16 +98,32 @@ export async function GET(req: NextRequest) {
         (wp) => wp.projectAssignmentId === assignment.id
       );
 
+      // Calculate daily hours from daily overrides if they exist, otherwise use defaults
       const dailyHours = weeklyPlan
-        ? [
-            Number(weeklyPlan.hoursSunday || 0),
-            Number(weeklyPlan.hoursMonday || 0),
-            Number(weeklyPlan.hoursTuesday || 0),
-            Number(weeklyPlan.hoursWednesday || 0),
-            Number(weeklyPlan.hoursThursday || 0),
-            Number(weeklyPlan.hoursFriday || 0),
-            Number(weeklyPlan.hoursSaturday || 0),
-          ]
+        ? (() => {
+            const defaultHours = Number(weeklyPlan.defaultHoursPerDay || 0);
+            const weekendHours = weeklyPlan.allowWeekends ? defaultHours : 0;
+            
+            // Start with default hours for all days
+            const hours = [
+              weekendHours, // Sunday (0)
+              defaultHours, // Monday (1)
+              defaultHours, // Tuesday (2)
+              defaultHours, // Wednesday (3)
+              defaultHours, // Thursday (4)
+              defaultHours, // Friday (5)
+              weekendHours, // Saturday (6)
+            ];
+            
+            // Override with actual values from dailyOverrides if they exist
+            if (weeklyPlan.dailyOverrides && weeklyPlan.dailyOverrides.length > 0) {
+              weeklyPlan.dailyOverrides.forEach((override: any) => {
+                hours[override.dayOfWeek] = Number(override.actualHours || 0);
+              });
+            }
+            
+            return hours;
+          })()
         : null;
 
       return {
@@ -170,8 +197,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Verify the resource allocation belongs to this organization (using Prisma)
     const resourceAllocation = await prisma.resourceAllocation.findUnique({
       where: { id: resourceAllocationId },
@@ -197,18 +222,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify the project belongs to this organization (using Supabase)
-    const { data: project, error: projectError } = await supabase
-      .from("projects")
-      .select("id, organization_id")
-      .eq("id", projectId)
-      .single();
+    // Verify the project belongs to this organization (using Prisma)
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, organizationId: true },
+    });
 
-    if (
-      projectError ||
-      !project ||
-      project.organization_id !== organizationId
-    ) {
+    if (!project || project.organizationId !== organizationId) {
       return NextResponse.json({ error: "Invalid project" }, { status: 400 });
     }
 
@@ -230,12 +250,6 @@ export async function POST(req: NextRequest) {
     let projectWeeklyPlan = null;
     if (weekStartDate) {
       const weekStart = new Date(weekStartDate);
-      const year = getYear(weekStart);
-      const month = getMonth(weekStart) + 1; // getMonth returns 0-11
-      const weekNumber = getWeek(weekStart);
-
-      const dailyHours = allowWeekends ? defaultHoursPerDay : 0;
-      const weekdayHours = defaultHoursPerDay;
 
       projectWeeklyPlan = await prisma.projectWeeklyPlan.create({
         data: {
@@ -244,19 +258,9 @@ export async function POST(req: NextRequest) {
           projectId,
           projectAssignmentId: projectAssignment.id,
           weekStartDate: weekStart,
-          year,
-          month,
-          weekNumber,
           defaultHoursPerDay,
           allowWeekends,
           isLinked: true,
-          hoursSunday: allowWeekends ? dailyHours : 0,
-          hoursMonday: weekdayHours,
-          hoursTuesday: weekdayHours,
-          hoursWednesday: weekdayHours,
-          hoursThursday: weekdayHours,
-          hoursFriday: weekdayHours,
-          hoursSaturday: allowWeekends ? dailyHours : 0,
         },
       });
     }

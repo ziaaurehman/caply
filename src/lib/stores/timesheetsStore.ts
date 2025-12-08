@@ -552,7 +552,8 @@ export const useUpdateTimesheetEntry = () => {
       return timesheetsAPI.updateTimesheetEntry(organizationId, entryId, data);
     },
     onSuccess: (data, variables) => {
-      // Invalidate and refetch the timesheet data
+      // Invalidate queries but don't immediately refetch
+      // The component will handle refetching when needed (e.g., on save or week change)
       queryClient.invalidateQueries({
         queryKey: ["timesheet", variables.organizationId],
       });

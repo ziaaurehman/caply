@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 
 export async function GET(req: NextRequest) {
@@ -51,221 +51,102 @@ export async function GET(req: NextRequest) {
         (p) => p.resource === "projects" && p.action === "manage"
       );
 
-    const supabase = await createClient();
     console.log("✅ Organization access validated for:", organizationId);
 
     // Calculate offset for pagination
-    const offset = (page - 1) * limit;
+    const skip = (page - 1) * limit;
+
+    // Build where clause
+    const where: any = {
+      organizationId,
+    };
+
+    // Add search filter if search term provided
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
+        { code: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    // Add status filter if status provided
+    if (status) {
+      where.status = status;
+    }
 
     let totalCount = 0;
     let projects: any[] = [];
 
     if (hasFullAccess) {
       // User with full access can see all projects in organization
+      totalCount = await prisma.project.count({ where });
 
-      // First, get total count for pagination
-      let countQuery = supabase
-        .from("projects")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organizationId);
-
-      // Add search filter to count query if search term provided
-      if (search) {
-        countQuery = countQuery.or(
-          `name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`
-        );
-      }
-
-      // Add status filter to count query if status provided
-      if (status) {
-        countQuery = countQuery.eq("status", status);
-      }
-
-      const { count, error: countError } = await countQuery;
-
-      if (countError) {
-        console.error("Error counting projects:", countError);
-        return NextResponse.json(
-          { error: "Failed to count projects" },
-          { status: 500 }
-        );
-      }
-
-      totalCount = count || 0;
-
-      // Build main query for project data
-      let projectsQuery = supabase
-        .from("projects")
-        .select(
-          `
-          id,
-          name,
-          code,
-          description,
-          project_type,
-          billing_rate,
-          budget_hours,
-          budget_amount,
-          start_date,
-          end_date,
-          status,
-          created_at,
-          updated_at,
-          kanban_enabled,
-          timesheet_enabled,
-          team_availability_enabled,
-          capacity_planning_enabled,
-          state,
-          organization_id,
-          client_id,
-          created_by
-        `
-        )
-        .eq("organization_id", organizationId);
-
-      // Add search filter if search term provided
-      if (search) {
-        projectsQuery = projectsQuery.or(
-          `name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`
-        );
-      }
-
-      // Add status filter if status provided
-      if (status) {
-        projectsQuery = projectsQuery.eq("status", status);
-      }
-
-      // Add pagination and ordering
-      const { data: projectsData, error: projectsError } = await projectsQuery
-        .order("created_at", { ascending: false })
-        .range(offset, offset + limit - 1);
-
-      if (projectsError) {
-        console.error("Error fetching projects:", projectsError);
-        return NextResponse.json(
-          { error: projectsError.message },
-          { status: 500 }
-        );
-      }
-
-      projects = projectsData || [];
+      projects = await prisma.project.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+      });
     } else {
       // Regular users can only see projects they are members of
-
       // First get the project IDs where user is a member
-      const { data: memberProjectIds, error: memberError } = await supabase
-        .from("project_members")
-        .select("project_id")
-        .eq("organization_member_id", userContext.membership.id);
+      const memberProjects = await prisma.projectMember.findMany({
+        where: {
+          organizationMemberId: userContext.membership.id,
+        },
+        select: {
+          projectId: true,
+        },
+      });
 
-      if (memberError) {
-        console.error("Error fetching member projects:", memberError);
-        return NextResponse.json(
-          { error: memberError.message },
-          { status: 500 }
-        );
-      }
-
-      if (!memberProjectIds || memberProjectIds.length === 0) {
+      if (memberProjects.length === 0) {
         totalCount = 0;
         projects = [];
       } else {
-        const projectIds = memberProjectIds.map((p) => p.project_id);
+        const projectIds = memberProjects.map((p) => p.projectId);
+        where.id = { in: projectIds };
 
-        // Get count for user's projects with search
-        let countQuery = supabase
-          .from("projects")
-          .select("id", { count: "exact", head: true })
-          .eq("organization_id", organizationId)
-          .in("id", projectIds);
+        totalCount = await prisma.project.count({ where });
 
-        if (search) {
-          countQuery = countQuery.or(
-            `name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`
-          );
-        }
-
-        // Add status filter to count query if status provided
-        if (status) {
-          countQuery = countQuery.eq("status", status);
-        }
-
-        const { count, error: countError } = await countQuery;
-        totalCount = count || 0;
-
-        if (countError) {
-          console.error("Error counting member projects:", countError);
-          return NextResponse.json(
-            { error: "Failed to count projects" },
-            { status: 500 }
-          );
-        }
-
-        // Get paginated projects data
-        let projectsQuery = supabase
-          .from("projects")
-          .select(
-            `
-            id,
-            name,
-            code,
-            description,
-            project_type,
-            billing_rate,
-            budget_hours,
-            budget_amount,
-            start_date,
-            end_date,
-            status,
-            created_at,
-            updated_at,
-            kanban_enabled,
-            timesheet_enabled,
-            team_availability_enabled,
-            capacity_planning_enabled,
-            state,
-            organization_id,
-            client_id,
-            created_by
-          `
-          )
-          .eq("organization_id", organizationId)
-          .in("id", projectIds);
-
-        if (search) {
-          projectsQuery = projectsQuery.or(
-            `name.ilike.%${search}%,description.ilike.%${search}%,code.ilike.%${search}%`
-          );
-        }
-
-        // Add status filter if status provided
-        if (status) {
-          projectsQuery = projectsQuery.eq("status", status);
-        }
-
-        const { data: projectsData, error: projectsError } = await projectsQuery
-          .order("created_at", { ascending: false })
-          .range(offset, offset + limit - 1);
-
-        if (projectsError) {
-          console.error("Error fetching member projects:", projectsError);
-          return NextResponse.json(
-            { error: projectsError.message },
-            { status: 500 }
-          );
-        }
-
-        projects = projectsData || [];
+        projects = await prisma.project.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: "desc" },
+        });
       }
     }
 
-    // Return projects without progress calculation
-    const projectsWithProgress = projects;
+    // Transform projects to match expected format
+    const transformedProjects = projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      code: project.code,
+      description: project.description,
+      project_type: project.projectType,
+      billing_rate: project.billingRate,
+      budget_hours: project.budgetHours,
+      budget_amount: project.budgetAmount,
+      start_date: project.startDate,
+      end_date: project.endDate,
+      status: project.status,
+      created_at: project.createdAt,
+      updated_at: project.updatedAt,
+      kanban_enabled: project.kanbanEnabled,
+      timesheet_enabled: project.timesheetEnabled,
+      team_availability_enabled: project.teamAvailabilityEnabled,
+      capacity_planning_enabled: project.capacityPlanningEnabled,
+      state: project.state,
+      organization_id: project.organizationId,
+      client_id: project.clientId,
+      created_by: project.createdBy,
+    }));
 
     const totalPages = Math.ceil(totalCount / limit);
 
     const result = {
-      projects: projectsWithProgress,
+      projects: transformedProjects,
       user_role: hasFullAccess ? "admin" : "member",
       total_projects: totalCount,
       access_level: hasFullAccess
@@ -322,7 +203,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
   const userContext = validation.context!;
 
   // Accept all fields from migration, set org/user context
@@ -351,109 +231,107 @@ export async function POST(req: NextRequest) {
   // Set default status if not provided
   const projectStatus = status || "active";
 
-  try {
-    // Create the project
-    const { data: project, error } = await supabase
-      .from("projects")
-      .insert([
-        {
-          organization_id: organizationId,
-          client_id,
-          name,
-          code,
-          description,
-          project_type,
-          billing_rate,
-          budget_hours,
-          budget_amount,
-          start_date,
-          end_date,
-          status: projectStatus,
-          task_categories,
-          kanban_enabled,
-          timesheet_enabled,
-          team_availability_enabled,
-          capacity_planning_enabled,
-          state,
-          documents,
-          created_by: userContext.userId,
-        },
-      ])
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error creating project:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+  // Convert date strings to DateTime objects
+  // Prisma expects ISO-8601 DateTime, so we need to convert date-only strings
+  const parseDate = (dateString: string | null | undefined): Date | null => {
+    if (!dateString) return null;
+    // If it's already a Date object, return it
+    if (dateString instanceof Date) return dateString;
+    // If it's an ISO-8601 string with time, parse it directly
+    if (dateString.includes('T') || dateString.includes(' ')) {
+      return new Date(dateString);
     }
+    // If it's a date-only string (YYYY-MM-DD), convert to DateTime at midnight UTC
+    return new Date(dateString + 'T00:00:00.000Z');
+  };
 
-    // Add team members if provided
-    if (
-      team_member_ids &&
-      Array.isArray(team_member_ids) &&
-      team_member_ids.length > 0
-    ) {
-      // Validate that all team_member_ids are valid organization members
-      const { data: validMembers, error: membersError } = await supabase
-        .from("organization_members")
-        .select("id, user_id")
-        .eq("organization_id", organizationId)
-        .eq("status", "active")
-        .in("id", team_member_ids);
+  try {
+    // Create the project with members and kanban board in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create the project
+      const project = await tx.project.create({
+        data: {
+          organizationId,
+          clientId: client_id || null,
+          name,
+          code: code || null,
+          description: description || null,
+          projectType: project_type || "time_materials",
+          billingRate: billing_rate ? parseFloat(billing_rate) : null,
+          budgetHours: budget_hours || null,
+          budgetAmount: budget_amount ? parseFloat(budget_amount) : null,
+          startDate: parseDate(start_date),
+          endDate: parseDate(end_date),
+          status: projectStatus,
+          taskCategories: task_categories || [],
+          kanbanEnabled: kanban_enabled !== undefined ? kanban_enabled : true,
+          timesheetEnabled:
+            timesheet_enabled !== undefined ? timesheet_enabled : true,
+          teamAvailabilityEnabled:
+            team_availability_enabled !== undefined
+              ? team_availability_enabled
+              : true,
+          capacityPlanningEnabled:
+            capacity_planning_enabled !== undefined
+              ? capacity_planning_enabled
+              : true,
+          state: state || "draft",
+          documents: documents || [],
+          createdBy: userContext.userId,
+        },
+      });
 
-      if (membersError) {
-        console.error("Error validating team members:", membersError);
-        // Continue without failing - just log the error
-      } else if (validMembers && validMembers.length > 0) {
-        // Create project_members entries
-        const projectMembersData = validMembers.map((member) => ({
-          project_id: project.id,
-          organization_member_id: member.id,
-          added_by: userContext.userId,
-        }));
+      // Add team members if provided
+      if (
+        team_member_ids &&
+        Array.isArray(team_member_ids) &&
+        team_member_ids.length > 0
+      ) {
+        // Validate that all team_member_ids are valid organization members
+        const validMembers = await tx.organizationMember.findMany({
+          where: {
+            id: { in: team_member_ids },
+            organizationId,
+            status: "active",
+          },
+          select: {
+            id: true,
+          },
+        });
 
-        const { error: projectMembersError } = await supabase
-          .from("project_members")
-          .insert(projectMembersData);
+        if (validMembers.length > 0) {
+          // Create project_members entries
+          await tx.projectMember.createMany({
+            data: validMembers.map((member) => ({
+              projectId: project.id,
+              organizationMemberId: member.id,
+              addedBy: userContext.userId,
+            })),
+          });
 
-        if (projectMembersError) {
-          console.error(
-            "Error adding team members to project:",
-            projectMembersError
-          );
-          // Continue without failing - project is created, just members weren't added
-        } else {
-          // Log the successful project creation
           console.log(
             `Project ${project.name} created successfully by user ${userContext.userId}`
           );
+        } else {
+          console.log(
+            "No valid team members found or no team members provided"
+          );
         }
-      } else {
-        console.log("No valid team members found or no team members provided");
       }
-    }
 
-    // Create default Kanban board if kanban is enabled
-    if (kanban_enabled) {
-      console.log("Creating default Kanban board for project:", project.id);
+      // Create default Kanban board if kanban is enabled
+      if (kanban_enabled) {
+        console.log("Creating default Kanban board for project:", project.id);
 
-      const { data: board, error: boardError } = await supabase
-        .from("boards")
-        .insert([
-          {
-            project_id: project.id,
+        const board = await tx.board.create({
+          data: {
+            projectId: project.id,
             name: `${name} Board`,
             description: `Default Kanban board for ${name}`,
-            created_by: userContext.userId,
+            createdBy: userContext.userId,
           },
-        ])
-        .select()
-        .single();
+        });
 
-      if (boardError) {
-        console.error("Error creating Kanban board:", boardError);
-        // Continue without failing - project is created, just board wasn't created
-      } else {
         console.log("Successfully created Kanban board:", board.id);
 
         // Create default lists (To Do, In Progress, Done)
@@ -463,28 +341,46 @@ export async function POST(req: NextRequest) {
           { name: "Done", position: 2 },
         ];
 
-        const listsData = defaultLists.map((list) => ({
-          board_id: board.id,
-          name: list.name,
-          position: list.position,
-        }));
+        await tx.list.createMany({
+          data: defaultLists.map((list) => ({
+            boardId: board.id,
+            name: list.name,
+            position: list.position,
+          })),
+        });
 
-        const { error: listsError } = await supabase
-          .from("lists")
-          .insert(listsData);
-
-        if (listsError) {
-          console.error("Error creating default lists:", listsError);
-        } else {
-          console.log("Successfully created default lists for board");
-        }
+        console.log("Successfully created default lists for board");
       }
-    }
+
+      return project;
+    });
 
     return NextResponse.json({
       success: true,
       project: {
-        ...project,
+        id: result.id,
+        name: result.name,
+        code: result.code,
+        description: result.description,
+        project_type: result.projectType,
+        billing_rate: result.billingRate,
+        budget_hours: result.budgetHours,
+        budget_amount: result.budgetAmount,
+        start_date: result.startDate,
+        end_date: result.endDate,
+        status: result.status,
+        task_categories: result.taskCategories,
+        kanban_enabled: result.kanbanEnabled,
+        timesheet_enabled: result.timesheetEnabled,
+        team_availability_enabled: result.teamAvailabilityEnabled,
+        capacity_planning_enabled: result.capacityPlanningEnabled,
+        state: result.state,
+        documents: result.documents,
+        organization_id: result.organizationId,
+        client_id: result.clientId,
+        created_by: result.createdBy,
+        created_at: result.createdAt,
+        updated_at: result.updatedAt,
         team_members: team_member_ids || [],
       },
     });
@@ -539,18 +435,22 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const supabase = await createClient();
   const userContext = validation.context!;
 
   // Check if project exists and belongs to the organization
-  const { data: existingProject, error: projectError } = await supabase
-    .from("projects")
-    .select("id, organization_id, kanban_enabled, name")
-    .eq("id", projectId)
-    .eq("organization_id", organizationId)
-    .single();
+  const existingProject = await prisma.project.findFirst({
+    where: {
+      id: projectId,
+      organizationId,
+    },
+    select: {
+      id: true,
+      kanbanEnabled: true,
+      name: true,
+    },
+  });
 
-  if (projectError || !existingProject) {
+  if (!existingProject) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
@@ -568,127 +468,162 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    // Update project data (excluding team_member_ids which we handle separately)
-    const { data: updatedProject, error: updateError } = await supabase
-      .from("projects")
-      .update(updateData)
-      .eq("id", projectId)
-      .select()
-      .single();
+    // Transform update data to Prisma format
+    const prismaUpdateData: any = {};
+    if (updateData.project_type !== undefined)
+      prismaUpdateData.projectType = updateData.project_type;
+    if (updateData.billing_rate !== undefined)
+      prismaUpdateData.billingRate = updateData.billing_rate
+        ? parseFloat(updateData.billing_rate)
+        : null;
+    if (updateData.budget_hours !== undefined)
+      prismaUpdateData.budgetHours = updateData.budget_hours;
+    if (updateData.budget_amount !== undefined)
+      prismaUpdateData.budgetAmount = updateData.budget_amount
+        ? parseFloat(updateData.budget_amount)
+        : null;
+    if (updateData.start_date !== undefined)
+      prismaUpdateData.startDate = updateData.start_date;
+    if (updateData.end_date !== undefined)
+      prismaUpdateData.endDate = updateData.end_date;
+    if (updateData.status !== undefined)
+      prismaUpdateData.status = updateData.status;
+    if (updateData.task_categories !== undefined)
+      prismaUpdateData.taskCategories = updateData.task_categories;
+    if (updateData.kanban_enabled !== undefined)
+      prismaUpdateData.kanbanEnabled = updateData.kanban_enabled;
+    if (updateData.timesheet_enabled !== undefined)
+      prismaUpdateData.timesheetEnabled = updateData.timesheet_enabled;
+    if (updateData.team_availability_enabled !== undefined)
+      prismaUpdateData.teamAvailabilityEnabled =
+        updateData.team_availability_enabled;
+    if (updateData.capacity_planning_enabled !== undefined)
+      prismaUpdateData.capacityPlanningEnabled =
+        updateData.capacity_planning_enabled;
+    if (updateData.state !== undefined)
+      prismaUpdateData.state = updateData.state;
+    if (updateData.documents !== undefined)
+      prismaUpdateData.documents = updateData.documents;
+    if (updateData.name !== undefined) prismaUpdateData.name = updateData.name;
+    if (updateData.code !== undefined) prismaUpdateData.code = updateData.code;
+    if (updateData.description !== undefined)
+      prismaUpdateData.description = updateData.description;
+    if (updateData.client_id !== undefined)
+      prismaUpdateData.clientId = updateData.client_id || null;
 
-    if (updateError) {
-      console.error("Error updating project:", updateError);
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
-    }
+    // Update project and handle team members/kanban in a transaction
+    const updatedProject = await prisma.$transaction(async (tx) => {
+      // Update project data
+      const project = await tx.project.update({
+        where: { id: projectId },
+        data: prismaUpdateData,
+      });
 
-    // Handle team member updates if provided
-    if (team_member_ids !== undefined && Array.isArray(team_member_ids)) {
-      // Remove existing team members
-      const { error: removeError } = await supabase
-        .from("project_members")
-        .delete()
-        .eq("project_id", projectId);
+      // Handle team member updates if provided
+      if (team_member_ids !== undefined && Array.isArray(team_member_ids)) {
+        // Remove existing team members
+        await tx.projectMember.deleteMany({
+          where: { projectId },
+        });
 
-      if (removeError) {
-        console.error("Error removing existing team members:", removeError);
-        // Continue without failing
-      }
+        // Add new team members if any provided
+        if (team_member_ids.length > 0) {
+          // Validate that all team_member_ids are valid organization members
+          const validMembers = await tx.organizationMember.findMany({
+            where: {
+              id: { in: team_member_ids },
+              organizationId,
+              status: "active",
+            },
+            select: {
+              id: true,
+            },
+          });
 
-      // Add new team members if any provided
-      if (team_member_ids.length > 0) {
-        // Validate that all team_member_ids are valid organization members
-        const { data: validMembers, error: membersError } = await supabase
-          .from("organization_members")
-          .select("id, user_id")
-          .eq("organization_id", organizationId)
-          .eq("status", "active")
-          .in("id", team_member_ids);
+          if (validMembers.length > 0) {
+            // Create project_members entries
+            await tx.projectMember.createMany({
+              data: validMembers.map((member) => ({
+                projectId,
+                organizationMemberId: member.id,
+                addedBy: userContext.userId,
+              })),
+            });
 
-        if (membersError) {
-          console.error("Error validating team members:", membersError);
-          // Continue without failing - just log the error
-        } else if (validMembers && validMembers.length > 0) {
-          // Create project_members entries
-          const projectMembersData = validMembers.map((member) => ({
-            project_id: projectId,
-            organization_member_id: member.id,
-            added_by: userContext.userId,
-          }));
-
-          const { error: projectMembersError } = await supabase
-            .from("project_members")
-            .insert(projectMembersData);
-
-          if (projectMembersError) {
-            console.error(
-              "Error adding team members to project:",
-              projectMembersError
-            );
-            // Continue without failing - project is updated, just members weren't added
-          } else {
-            console.log(
-              `Team members updated for project ${updatedProject.name}`
-            );
+            console.log(`Team members updated for project ${project.name}`);
           }
         }
       }
-    }
 
-    // Handle Kanban board creation/deletion based on kanban_enabled changes
-    if (updateData.kanban_enabled !== undefined) {
-      if (updateData.kanban_enabled && !existingProject.kanban_enabled) {
-        // Kanban was enabled, create default board
-        console.log("Creating default Kanban board for project:", projectId);
+      // Handle Kanban board creation based on kanban_enabled changes
+      if (updateData.kanban_enabled !== undefined) {
+        if (updateData.kanban_enabled && !existingProject.kanbanEnabled) {
+          // Kanban was enabled, create default board
+          console.log("Creating default Kanban board for project:", projectId);
 
-        const { data: kanbanBoard, error: kanbanError } = await supabase
-          .from("kanban_boards")
-          .insert({
-            project_id: projectId,
-            name: `${updatedProject.name} Board`,
-            created_by: userContext.userId,
-          })
-          .select()
-          .single();
+          const kanbanBoard = await tx.board.create({
+            data: {
+              projectId,
+              name: `${project.name} Board`,
+              createdBy: userContext.userId,
+            },
+          });
 
-        if (kanbanError) {
-          console.error("Error creating Kanban board:", kanbanError);
-        } else {
-          // Create default columns
-          const defaultColumns = [
-            { name: "To Do", position: 0, color: "#e2e8f0" },
-            { name: "In Progress", position: 1, color: "#fbbf24" },
-            { name: "Review", position: 2, color: "#f59e0b" },
-            { name: "Done", position: 3, color: "#10b981" },
+          // Create default lists
+          const defaultLists = [
+            { name: "To Do", position: 0 },
+            { name: "In Progress", position: 1 },
+            { name: "Review", position: 2 },
+            { name: "Done", position: 3 },
           ];
 
-          const columnsData = defaultColumns.map((col) => ({
-            board_id: kanbanBoard.id,
-            name: col.name,
-            position: col.position,
-            color: col.color,
-          }));
-
-          const { error: columnsError } = await supabase
-            .from("kanban_columns")
-            .insert(columnsData);
-
-          if (columnsError) {
-            console.error(
-              "Error creating default Kanban columns:",
-              columnsError
-            );
-          }
+          await tx.list.createMany({
+            data: defaultLists.map((list) => ({
+              boardId: kanbanBoard.id,
+              name: list.name,
+              position: list.position,
+            })),
+          });
+        } else if (
+          !updateData.kanban_enabled &&
+          existingProject.kanbanEnabled
+        ) {
+          // Kanban was disabled, optionally clean up boards
+          console.log("Kanban disabled for project:", projectId);
+          // Note: We might want to soft-delete or archive boards instead of hard delete
         }
-      } else if (!updateData.kanban_enabled && existingProject.kanban_enabled) {
-        // Kanban was disabled, optionally clean up boards
-        console.log("Kanban disabled for project:", projectId);
-        // Note: We might want to soft-delete or archive boards instead of hard delete
       }
-    }
+
+      return project;
+    });
 
     return NextResponse.json({
       success: true,
-      project: updatedProject,
+      project: {
+        id: updatedProject.id,
+        name: updatedProject.name,
+        code: updatedProject.code,
+        description: updatedProject.description,
+        project_type: updatedProject.projectType,
+        billing_rate: updatedProject.billingRate,
+        budget_hours: updatedProject.budgetHours,
+        budget_amount: updatedProject.budgetAmount,
+        start_date: updatedProject.startDate,
+        end_date: updatedProject.endDate,
+        status: updatedProject.status,
+        task_categories: updatedProject.taskCategories,
+        kanban_enabled: updatedProject.kanbanEnabled,
+        timesheet_enabled: updatedProject.timesheetEnabled,
+        team_availability_enabled: updatedProject.teamAvailabilityEnabled,
+        capacity_planning_enabled: updatedProject.capacityPlanningEnabled,
+        state: updatedProject.state,
+        documents: updatedProject.documents,
+        organization_id: updatedProject.organizationId,
+        client_id: updatedProject.clientId,
+        created_by: updatedProject.createdBy,
+        created_at: updatedProject.createdAt,
+        updated_at: updatedProject.updatedAt,
+      },
     });
   } catch (error) {
     console.error("Error in project update:", error);

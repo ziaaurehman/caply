@@ -61,48 +61,63 @@ export async function GET(req: NextRequest) {
     }
 
     // Step 2: Get organization members info
-    const { data: orgMembers, error: membersError } = await supabase
-      .from("organization_members")
-      .select(
-        `
-        id,
-        user_id,
-        status,
-        roles:role_id (
-          id,
-          name
-        ),
-        users!user_id (
-          id,
-          full_name,
-          email,
-          avatar_url,
-          position
-        )
-      `
-      )
-      .in(
-        "id",
-        resources.map((r) => r.organizationMemberId)
-      );
-
-    if (membersError) {
-      console.error("Error fetching organization members:", membersError);
-      return NextResponse.json(
-        { error: membersError.message },
-        { status: 500 }
-      );
-    }
+    const orgMembers = await prisma.organizationMember.findMany({
+      where: {
+        id: {
+          in: resources.map((r) => r.organizationMemberId),
+        },
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+            position: true,
+          },
+        },
+      },
+    });
 
     // Step 3: Combine data (in memory - fast)
-    const memberMap = new Map((orgMembers || []).map((m) => [m.id, m]));
+    const memberMap = new Map(orgMembers.map((m) => [m.id, m]));
 
-    let enrichedResources = resources.map((resource) => ({
-      ...resource,
-      organization_id: organizationId, // Add back for compatibility
-      organization_members:
-        memberMap.get(resource.organizationMemberId) || null,
-    }));
+    let enrichedResources = resources.map((resource) => {
+      const member = memberMap.get(resource.organizationMemberId);
+      return {
+        ...resource,
+        organization_id: organizationId, // Add back for compatibility
+        organization_members: member
+          ? {
+              id: member.id,
+              user_id: member.userId,
+              status: member.status,
+              roles: member.role
+                ? {
+                    id: member.role.id,
+                    name: member.role.name,
+                  }
+                : null,
+              users: member.user
+                ? {
+                    id: member.user.id,
+                    full_name: member.user.fullName,
+                    email: member.user.email,
+                    avatar_url: member.user.avatarUrl,
+                    position: member.user.position,
+                  }
+                : null,
+            }
+          : null,
+      };
+    });
 
     // Filter by user IDs if specified
     if (filterUserIds.length > 0) {
@@ -157,16 +172,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
-
     // Verify the org member belongs to this organization
-    const { data: om, error: omErr } = await supabase
-      .from("organization_members")
-      .select("id, organization_id")
-      .eq("id", organization_member_id)
-      .single();
+    const om = await prisma.organizationMember.findFirst({
+      where: {
+        id: organization_member_id,
+        organizationId,
+      },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+    });
 
-    if (omErr || !om || (om as any).organization_id !== organizationId) {
+    if (!om) {
       return NextResponse.json(
         { error: "Invalid organization member" },
         { status: 400 }
