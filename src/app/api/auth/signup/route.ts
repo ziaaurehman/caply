@@ -189,6 +189,9 @@ export async function POST(
       },
     });
 
+    // Note: Email verification code will be sent by the frontend
+    // after successful signup to avoid blocking the signup process
+    
     return NextResponse.json({
       success: true,
       user: {
@@ -198,6 +201,7 @@ export async function POST(
         email_verified: userData?.emailVerified,
       },
       organization: organizationResult.organization,
+      requires_verification: true, // Indicate that email verification is required
     });
   } catch (error: any) {
     console.error("Signup error:", error);

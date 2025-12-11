@@ -74,26 +74,27 @@ export default function SignUpForm() {
 
       console.log("User registration successful:", result);
 
-      // Sign in with NextAuth after successful registration
-      console.log("Proceeding to NextAuth login");
-
-      const signInResult = await signIn("credentials", {
-        redirect: false,
-        email: formData.email,
-        password: formData.password,
+      // Send verification code
+      console.log("Sending verification code...");
+      const verificationResponse = await fetch("/api/auth/send-verification-code", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: formData.email,
+        }),
       });
 
-      if (signInResult?.error) {
-        console.error("NextAuth sign in error:", signInResult.error);
-        setError(
-          `Registration successful, but couldn't log in automatically. Please try logging in.`
-        );
-        setIsLoading(false);
-        return;
+      const verificationResult = await verificationResponse.json();
+
+      if (!verificationResult.success) {
+        console.error("Failed to send verification code:", verificationResult.error);
+        // Still redirect to verification page, user can request a new code there
       }
 
-      // Use window.location instead of router.push for a clean page reload
-      window.location.href = "/dashboard";
+      // Redirect to email verification page
+      router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`);
     } catch (error: any) {
       console.error("Registration error:", error);
       setError(

@@ -131,6 +131,13 @@ export const authConfig: NextAuthOptions = {
             throw new Error("Account is inactive. Please contact support.");
           }
 
+          // Check if email is verified
+          if (!user.emailVerified) {
+            console.log("User email not verified:", credentials.email);
+            // Throw error - frontend will handle sending verification code
+            throw new Error("EMAIL_NOT_VERIFIED");
+          }
+
           console.log("User authenticated successfully:", user.id);
 
           // Update last sign in time

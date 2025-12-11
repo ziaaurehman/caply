@@ -15,6 +15,7 @@ import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { capacityStore } from "@/lib/stores/capacityStore";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMonthlyCapacity } from "@/lib/hooks/useCapacity";
 import {
   startOfWeek,
   startOfDay,
@@ -250,23 +251,66 @@ export default function MonthlyCapacityTable({
     return `${startStr} - ${endStr}`;
   };
 
-  // Generate weeks for the selected month
+  // Use the monthly capacity API instead of separate queries
+  const monthStr = `${String(selectedYear)}-${String(selectedMonth + 1).padStart(2, "0")}`;
+  const {
+    data: monthlyCapacityData,
+    isLoading: monthlyLoading,
+    error: monthlyError,
+  } = useMonthlyCapacity(currentOrganization?.id || "", monthStr, {
+    only_active: true,
+  });
+
+  // Generate weeks for the selected month - use data from API if available
   const weeksData: WeekData[] = useMemo(() => {
+    // If we have monthly data, use the weeks from the API
+    if (monthlyCapacityData?.weeks && monthlyCapacityData.weeks.length > 0) {
+      return monthlyCapacityData.weeks.map(
+        (week: { week_start_date: string }, index: number) => {
+          const weekStart = new Date(week.week_start_date);
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekStart.getDate() + 6); // Sunday
+
+          const monthNames = [
+            "JAN",
+            "FEB",
+            "MAR",
+            "APR",
+            "MAY",
+            "JUN",
+            "JUL",
+            "AUG",
+            "SEP",
+            "OCT",
+            "NOV",
+            "DEC",
+          ];
+          const startDateStr = `${String(weekStart.getDate()).padStart(2, "0")} ${monthNames[weekStart.getMonth()]}`;
+
+          return {
+            weekNumber: `W${String(index + 1).padStart(2, "0")}`,
+            startDate: weekStart.toISOString(),
+            endDate: weekEnd.toISOString(),
+            label: startDateStr,
+          };
+        }
+      );
+    }
+
+    // Fallback: generate weeks manually if API data not available
     const weeks: WeekData[] = [];
     const monthStart = new Date(selectedYear, selectedMonth, 1);
     const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
 
-    const firstDayOfWeek = monthStart.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-    const daysToMonday = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1; // Days to subtract to get Monday
+    const firstDayOfWeek = monthStart.getDay();
+    const daysToMonday = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
 
     let currentWeekStart = new Date(monthStart);
     currentWeekStart.setDate(monthStart.getDate() - daysToMonday);
     let weekCount = 0;
     while (currentWeekStart <= monthEnd && weekCount < 6) {
       const dayOfWeek = currentWeekStart.getDay();
-
       const mondayBasedDay = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-
       const daysUntilSunday = 6 - mondayBasedDay;
 
       const weekEnd = new Date(currentWeekStart);
@@ -297,11 +341,9 @@ export default function MonthlyCapacityTable({
         label: startDateStr,
       });
 
-      // Next week starts on the Monday after this week's Sunday
       const nextWeekStart = new Date(actualWeekEnd);
       nextWeekStart.setDate(actualWeekEnd.getDate() + 1);
 
-      // If next week start is beyond month end, break
       if (nextWeekStart > monthEnd) {
         break;
       }
@@ -311,26 +353,7 @@ export default function MonthlyCapacityTable({
     }
 
     return weeks;
-  }, [selectedMonth, selectedYear]);
-
-  const {
-    data: resources,
-    isLoading: resourcesLoading,
-    error: resourcesError,
-  } = useQuery({
-    queryKey: ["resources", currentOrganization?.id],
-    queryFn: () => fetchResources(currentOrganization?.id || ""),
-    enabled: !!currentOrganization?.id,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const { data: projectAssignments = [], isLoading: assignmentsLoading } =
-    useQuery({
-      queryKey: ["project-assignments", currentOrganization?.id],
-      queryFn: () => fetchProjectAssignments(currentOrganization?.id || ""),
-      enabled: !!currentOrganization?.id,
-      staleTime: 5 * 60 * 1000,
-    });
+  }, [selectedMonth, selectedYear, monthlyCapacityData]);
 
   const addProjectMutation = useMutation({
     mutationFn: async (projectData: any) => {
@@ -348,10 +371,8 @@ export default function MonthlyCapacityTable({
       return response.json();
     },
     onSuccess: () => {
-      // Refresh the queries to show the new assignment
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
-      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+      // Refresh the monthly capacity query
+      queryClient.invalidateQueries({ queryKey: ["capacity", "monthly"] });
       toast.success("Project assignment added successfully!");
       setAddForm({
         projectId: "",
@@ -393,9 +414,7 @@ export default function MonthlyCapacityTable({
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      queryClient.invalidateQueries({ queryKey: ["capacity", "monthly"] });
     },
     onError: (error: Error) => {
       console.error("Update weekly plan error:", error);
@@ -422,10 +441,8 @@ export default function MonthlyCapacityTable({
       return response.json();
     },
     onSuccess: () => {
-      // Refresh both queries to reflect the deletion
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
-      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+      // Refresh the monthly capacity query
+      queryClient.invalidateQueries({ queryKey: ["capacity", "monthly"] });
       toast.success("Project assignment deleted successfully!");
       setDeletingTarget(null);
     },
@@ -466,9 +483,7 @@ export default function MonthlyCapacityTable({
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      queryClient.invalidateQueries({ queryKey: ["capacity", "monthly"] });
     },
     onError: (error: Error) => {
       console.error("Create weekly plan error:", error);
@@ -604,10 +619,8 @@ export default function MonthlyCapacityTable({
       // Wait for all weekly plans to be created
       await Promise.all(weeklyPlanPromises);
 
-      // Refresh queries
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
-      queryClient.invalidateQueries({ queryKey: ["weekly-plans"] });
+      // Refresh the monthly capacity query
+      queryClient.invalidateQueries({ queryKey: ["capacity", "monthly"] });
 
       toast.success(
         "Project assignment and weekly plans created successfully!"
@@ -625,22 +638,7 @@ export default function MonthlyCapacityTable({
     }
   };
 
-  const { data: weeklyPlans = [], isLoading: plansLoading } = useQuery({
-    queryKey: [
-      "weekly-plans",
-      currentOrganization?.id,
-      selectedMonth,
-      selectedYear,
-    ],
-    queryFn: () =>
-      fetchWeeklyPlansForMonth(
-        currentOrganization?.id || "",
-        selectedMonth,
-        selectedYear
-      ),
-    enabled: !!currentOrganization?.id,
-    staleTime: 5 * 60 * 1000,
-  });
+  // Weekly plans are now included in monthlyCapacityData
 
   const handleSaveWeeklyHours = async () => {
     if (!savingTarget) return;
@@ -656,13 +654,17 @@ export default function MonthlyCapacityTable({
       return;
     }
 
-    // Find the project assignment
-    const assignment = projectAssignments.find(
-      (pa: ProjectAssignment) =>
-        pa.resourceAllocationId === memberId && pa.projectId === projectId
+    // Find the project assignment from monthly data
+    const resource = monthlyCapacityData?.resources?.find(
+      (r: any) => r.resource_allocation_id === memberId
     );
 
-    if (!assignment) {
+    const weekData = resource?.weeks?.[0];
+    const projectData = weekData?.projects?.find(
+      (p: any) => p.project?.id === projectId
+    );
+
+    if (!projectData || !resource) {
       toast.error("Project assignment not found");
       setSavingTarget(null);
       setConfirmationText("");
@@ -680,30 +682,17 @@ export default function MonthlyCapacityTable({
         const weekStart = startOfDay(parseISO(week.startDate));
         const weekMonday = startOfWeek(weekStart, { weekStartsOn: 1 });
 
-        // Find existing weekly plan
-        const existingPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
-          let planDate: Date;
-          try {
-            planDate = parseISO(wp.weekStartDate);
-            if (!isValid(planDate)) {
-              planDate = new Date(wp.weekStartDate);
-            }
-          } catch {
-            planDate = new Date(wp.weekStartDate);
-          }
-          planDate = startOfDay(planDate);
-          const planMonday = startOfWeek(planDate, { weekStartsOn: 1 });
-
-          return (
-            wp.resourceAllocationId === memberId &&
-            wp.projectAssignmentId === assignment.id &&
-            isSameDay(weekMonday, planMonday)
-          );
-        });
+        // Find existing weekly plan from monthly data
+        const weekDataForWeek = resource.weeks?.find(
+          (w: any) => w.week_start_date === week.startDate.split("T")[0]
+        );
+        const existingPlan = weekDataForWeek?.projects?.find(
+          (p: any) => p.project?.id === projectId
+        );
 
         // Calculate hours per day (distribute evenly)
-        // Check if weekends are allowed
-        const allowWeekends = assignment.allowWeekends || false;
+        // Check if weekends are allowed from project data
+        const allowWeekends = projectData.allow_weekends || false;
         const daysPerWeek = allowWeekends ? 7 : 5;
         const hoursPerDay = weeklyHours / daysPerWeek;
 
@@ -715,26 +704,14 @@ export default function MonthlyCapacityTable({
         const hoursFriday = hoursPerDay;
         const hoursSaturday = allowWeekends ? hoursPerDay : 0;
 
-        if (existingPlan) {
-          // Update existing weekly plan
-          await updateWeeklyPlanMutation.mutateAsync({
-            weeklyPlanId: existingPlan.id,
-            hoursSunday,
-            hoursMonday,
-            hoursTuesday,
-            hoursWednesday,
-            hoursThursday,
-            hoursFriday,
-            hoursSaturday,
-            isLinked: false, // Unlink to preserve daily allocations
-          });
-        } else {
-          // Create new weekly plan
-          await createWeeklyPlanMutation.mutateAsync({
+        // Use the upsert API which handles both create and update
+        const response = await fetch("/api/capacity/weekly-plans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             organizationId: currentOrganization?.id || "",
             resourceAllocationId: memberId,
             projectId: projectId,
-            projectAssignmentId: assignment.id,
             weekStartDate: weekMonday.toISOString(),
             defaultHoursPerDay: hoursPerDay,
             allowWeekends: allowWeekends,
@@ -745,7 +722,12 @@ export default function MonthlyCapacityTable({
             hoursThursday,
             hoursFriday,
             hoursSaturday,
-          });
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to save weekly plan");
         }
       });
 
@@ -861,115 +843,74 @@ export default function MonthlyCapacityTable({
   };
 
   const members: Member[] = useMemo(() => {
-    if (!resources) return [];
+    if (!monthlyCapacityData?.resources) return [];
 
-    return resources.map((resource: ResourceAllocation) => {
-      const memberInfo = resource.organization_members;
-      const userInfo = memberInfo?.users;
+    return monthlyCapacityData.resources.map((resource: any) => {
+      const userInfo = resource.user;
 
-      // Get project assignments for this resource
-      const assignments = projectAssignments.filter(
-        (pa: ProjectAssignment) => pa.resourceAllocationId === resource.id
-      );
+      // Get all projects across all weeks for this resource
+      const projectMap = new Map<
+        string,
+        {
+          projectId: string;
+          projectName: string;
+          weeklyHours: number[];
+        }
+      >();
 
-      // Transform assignments with weekly hours
-      const allocations = assignments.map((assignment: ProjectAssignment) => {
-        const key = `${resource.id}:${assignment.projectId}`;
-        const editedHours = editedWeeklyHours[key];
+      // Process each week's projects
+      resource.weeks.forEach((week: any, weekIndex: number) => {
+        week.projects.forEach((projectData: any) => {
+          if (!projectData.project) return;
 
-        // Calculate weekly hours for each week in the month
-        const weeklyHours = weeksData.map(
-          (week: WeekData, weekIndex: number) => {
-            // If we have edited hours for this week, use them
-            if (editedHours && editedHours[weekIndex] !== undefined) {
-              return editedHours[weekIndex];
-            }
+          const projectId = projectData.project.id;
+          const key = `${resource.resource_allocation_id}:${projectId}`;
+          const editedHours = editedWeeklyHours[key];
 
-            // Normalize dates for comparison
-            let weekStartDate: Date;
-            try {
-              weekStartDate = parseISO(week.startDate);
-              if (!isValid(weekStartDate)) {
-                weekStartDate = new Date(week.startDate);
-              }
-            } catch {
-              weekStartDate = new Date(week.startDate);
-            }
-            weekStartDate = startOfDay(weekStartDate);
+          // Use edited hours if available, otherwise use API data
+          const weeklyHours =
+            editedHours && editedHours[weekIndex] !== undefined
+              ? editedHours[weekIndex]
+              : projectData.weekly_hours || 0;
 
-            const weekMonday = startOfWeek(weekStartDate, { weekStartsOn: 1 }); // 1 = Monday
-
-            const weeklyPlan = weeklyPlans.find((wp: ProjectWeeklyPlan) => {
-              let planDate: Date;
-              try {
-                planDate = parseISO(wp.weekStartDate);
-                if (!isValid(planDate)) {
-                  planDate = new Date(wp.weekStartDate);
-                }
-              } catch {
-                planDate = new Date(wp.weekStartDate);
-              }
-
-              // Normalize to start of day
-              planDate = startOfDay(planDate);
-
-              const planMonday = startOfWeek(planDate, { weekStartsOn: 1 });
-
-              const datesMatch = isSameDay(weekMonday, planMonday);
-
-              const idsMatch =
-                wp.resourceAllocationId === resource.id &&
-                wp.projectAssignmentId === assignment.id;
-
-              return idsMatch && datesMatch;
+          if (!projectMap.has(projectId)) {
+            projectMap.set(projectId, {
+              projectId,
+              projectName: projectData.project.name || "Unknown Project",
+              weeklyHours: new Array(weeksData.length).fill(0),
             });
-
-            if (weeklyPlan) {
-              // Sum all daily hours for this week
-              const totalHours =
-                (Number(weeklyPlan.hoursSunday) || 0) +
-                (Number(weeklyPlan.hoursMonday) || 0) +
-                (Number(weeklyPlan.hoursTuesday) || 0) +
-                (Number(weeklyPlan.hoursWednesday) || 0) +
-                (Number(weeklyPlan.hoursThursday) || 0) +
-                (Number(weeklyPlan.hoursFriday) || 0) +
-                (Number(weeklyPlan.hoursSaturday) || 0);
-              return totalHours;
-            }
-
-            // If no weekly plan exists, return 0
-            return 0;
           }
-        );
 
-        // Calculate average hours for display
+          const project = projectMap.get(projectId)!;
+          if (weekIndex < project.weeklyHours.length) {
+            project.weeklyHours[weekIndex] = weeklyHours;
+          }
+        });
+      });
+
+      // Convert map to array
+      const allocations = Array.from(projectMap.values()).map((project) => {
         const avgHours =
-          weeklyHours.reduce((sum, h) => sum + h, 0) / weeklyHours.length || 0;
-
+          project.weeklyHours.reduce((sum, h) => sum + h, 0) /
+            project.weeklyHours.length || 0;
         return {
-          projectId: assignment.projectId,
-          projectName: assignment.projectName,
+          projectId: project.projectId,
+          projectName: project.projectName,
           hours: avgHours,
-          weeklyHours,
+          weeklyHours: project.weeklyHours,
         };
       });
 
       return {
-        id: resource.id,
+        id: resource.resource_allocation_id,
         fullName: userInfo?.full_name || "Unknown User",
         jobTitle: userInfo?.position || "No Position",
         avatarUrl: userInfo?.avatar_url,
-        capacity: resource.weeklyCapacityHours / 5, // Daily capacity
+        capacity: resource.weekly_capacity_hours / 5, // Daily capacity
         allocations,
       };
     });
-  }, [
-    resources,
-    projectAssignments,
-    weeklyPlans,
-    weeksData,
-    editedWeeklyHours,
-  ]);
+  }, [monthlyCapacityData, weeksData, editedWeeklyHours]);
 
   console.log("members", members);
 
@@ -987,6 +928,23 @@ export default function MonthlyCapacityTable({
   }, [members, selectedMonth, selectedYear]);
 
   const totalMonthlyAllocated = useMemo(() => {
+    if (monthlyCapacityData?.resources) {
+      // Use API data - sum all used hours across all resources and weeks
+      return monthlyCapacityData.resources.reduce(
+        (sum: number, resource: any) => {
+          const resourceTotal = resource.weeks.reduce(
+            (weekSum: number, week: any) => {
+              return weekSum + (week.used || 0);
+            },
+            0
+          );
+          return sum + resourceTotal;
+        },
+        0
+      );
+    }
+
+    // Fallback to members calculation
     return members.reduce((sum, member) => {
       const memberAllocated = member.allocations.reduce(
         (allocSum, allocation) => {
@@ -1003,11 +961,11 @@ export default function MonthlyCapacityTable({
       );
       return sum + memberAllocated;
     }, 0);
-  }, [members]);
+  }, [members, monthlyCapacityData]);
 
   const totalMonthlyAvailable = totalMonthlyCapacity - totalMonthlyAllocated;
 
-  if (resourcesLoading || assignmentsLoading || plansLoading) {
+  if (monthlyLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-lg text-gray-600">Loading capacity data...</div>
@@ -1015,11 +973,14 @@ export default function MonthlyCapacityTable({
     );
   }
 
-  if (resourcesError) {
+  if (monthlyError) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-lg text-red-600">
-          Error: {resourcesError.message}
+          Error:{" "}
+          {monthlyError instanceof Error
+            ? monthlyError.message
+            : "Failed to load capacity data"}
         </div>
       </div>
     );
@@ -1402,24 +1363,26 @@ export default function MonthlyCapacityTable({
                                 </button>
                                 <button
                                   onClick={() => {
-                                    const assignment = projectAssignments.find(
-                                      (pa: ProjectAssignment) =>
-                                        pa.resourceAllocationId === memberId &&
-                                        pa.projectId === allocation.projectId
-                                    );
-
-                                    if (assignment) {
-                                      setDeletingTarget({
-                                        memberId,
-                                        projectId: allocation.projectId,
-                                        assignmentId: assignment.id,
-                                        projectName: allocation.projectName,
-                                      });
-                                    } else {
-                                      toast.error(
-                                        "Project assignment not found"
+                                    // Find assignment from monthly data
+                                    const resource =
+                                      monthlyCapacityData?.resources?.find(
+                                        (r: any) =>
+                                          r.resource_allocation_id === memberId
                                       );
-                                    }
+                                    const assignment =
+                                      resource?.weeks?.[0]?.projects?.find(
+                                        (p: any) =>
+                                          p.project?.id === allocation.projectId
+                                      );
+
+                                    // For deletion, we need to find the project assignment
+                                    // We'll need to fetch it or use the project ID directly
+                                    // The API can handle deletion by project and resource
+                                    setDeletingTarget({
+                                      memberId,
+                                      projectId: allocation.projectId,
+                                      projectName: allocation.projectName,
+                                    });
                                   }}
                                   className="text-red-600 hover:text-red-800"
                                   title="Delete project assignment"

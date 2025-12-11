@@ -167,6 +167,11 @@ export async function GET(req: NextRequest) {
         wednesday_hours: entry.wednesdayHours,
         thursday_hours: entry.thursdayHours,
         friday_hours: entry.fridayHours,
+        monday_notes: entry.mondayNotes || null,
+        tuesday_notes: entry.tuesdayNotes || null,
+        wednesday_notes: entry.wednesdayNotes || null,
+        thursday_notes: entry.thursdayNotes || null,
+        friday_notes: entry.fridayNotes || null,
         created_at: entry.createdAt,
         updated_at: entry.updatedAt,
         projects: entry.project

@@ -53,6 +53,27 @@ export default function LoginForm() {
       console.log("Sign in result:", result);
 
       if (result?.error) {
+        // Check if email is not verified
+        if (result.error === "EMAIL_NOT_VERIFIED" || result.error?.includes("EMAIL_NOT_VERIFIED")) {
+          // Send verification code
+          try {
+            await fetch("/api/auth/send-verification-code", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                email: email,
+              }),
+            });
+          } catch (error) {
+            console.error("Failed to send verification code:", error);
+          }
+          // Redirect to verification page
+          router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+          return;
+        }
+        
         setError(
           result.error === "CredentialsSignin"
             ? "Invalid email or password"

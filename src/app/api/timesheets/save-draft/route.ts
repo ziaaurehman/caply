@@ -56,7 +56,9 @@ export async function POST(req: NextRequest) {
     weekEndDate.setDate(weekStartDate.getDate() + 4);
 
     // Use a transaction to handle all operations atomically
-    const result = await prisma.$transaction(async (tx) => {
+    // Increase timeout to 10 seconds to handle large batches of entries
+    const result = await prisma.$transaction(
+      async (tx) => {
       let currentSubmission;
 
       // If submissionId is provided, use it directly
@@ -186,7 +188,7 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        // Insert new entries (only non-empty ones)
+        // Insert new entries (only non-empty ones) and calculate total hours at the same time
         const entriesToInsert = entries
           .filter(
             (entry: any) =>
@@ -214,27 +216,8 @@ export async function POST(req: NextRequest) {
             fridayNotes: entry.friday_notes || null,
           }));
 
-        if (entriesToInsert.length > 0) {
-          await tx.timesheetEntry.createMany({
-            data: entriesToInsert,
-          });
-        }
-
-        // Recalculate total hours from all entries (convert to Number first)
-        const allEntries = await tx.timesheetEntry.findMany({
-          where: {
-            timesheetSubmissionId: currentSubmission.id,
-          },
-          select: {
-            mondayHours: true,
-            tuesdayHours: true,
-            wednesdayHours: true,
-            thursdayHours: true,
-            fridayHours: true,
-          },
-        });
-
-        const calculatedTotalHours = allEntries.reduce(
+        // Calculate total hours from entries we're about to insert (avoid extra query)
+        const calculatedTotalHours = entriesToInsert.reduce(
           (sum, e) =>
             sum +
             Number(e.mondayHours || 0) +
@@ -244,6 +227,12 @@ export async function POST(req: NextRequest) {
             Number(e.fridayHours || 0),
           0
         );
+
+        if (entriesToInsert.length > 0) {
+          await tx.timesheetEntry.createMany({
+            data: entriesToInsert,
+          });
+        }
 
         // Update the submission with the calculated total
         await tx.timesheetSubmission.update({
@@ -255,49 +244,51 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Fetch updated submission with entries
-      const submission = await tx.timesheetSubmission.findUnique({
-        where: { id: currentSubmission.id },
-        include: {
-          entries: {
-            include: {
-              project: {
-                select: {
-                  id: true,
-                  name: true,
-                  code: true,
-                },
+      // Return the submission ID - we'll fetch the full data outside the transaction
+      return currentSubmission.id;
+    },
+    {
+      maxWait: 10000, // Maximum time to wait for a transaction slot
+      timeout: 10000, // Maximum time the transaction can run (10 seconds)
+    }
+    );
+
+    // Fetch the full submission data outside the transaction to avoid timeout
+    const submission = await prisma.timesheetSubmission.findUnique({
+      where: { id: result },
+      include: {
+        entries: {
+          include: {
+            project: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
               },
             },
           },
         },
-      });
-
-      if (!submission) {
-        throw new Error("Failed to fetch submission after update");
-      }
-
-      return submission;
+      },
     });
 
-    if (!result) {
-      throw new Error("Failed to process submission");
+    if (!submission) {
+      throw new Error("Failed to fetch submission after update");
     }
 
     // Transform to match expected format
     const transformedSubmission = {
-      id: result.id,
-      organization_id: result.organizationId,
-      user_id: result.userId,
-      organization_member_id: result.organizationMemberId,
-      week_start_date: result.weekStartDate,
-      week_end_date: result.weekEndDate,
-      status: result.status,
-      total_hours: result.totalHours,
-      submitted_at: result.submittedAt,
-      created_at: result.createdAt,
-      updated_at: result.updatedAt,
-      timesheet_entries: result.entries.map((entry: any) => ({
+      id: submission.id,
+      organization_id: submission.organizationId,
+      user_id: submission.userId,
+      organization_member_id: submission.organizationMemberId,
+      week_start_date: submission.weekStartDate,
+      week_end_date: submission.weekEndDate,
+      status: submission.status,
+      total_hours: submission.totalHours,
+      submitted_at: submission.submittedAt,
+      created_at: submission.createdAt,
+      updated_at: submission.updatedAt,
+      timesheet_entries: submission.entries.map((entry: any) => ({
         id: entry.id,
         submission_id: entry.timesheetSubmissionId,
         project_id: entry.projectId,
