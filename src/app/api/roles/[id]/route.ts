@@ -5,16 +5,15 @@ import {
   validateOrganizationAccessWithId,
 } from "@/utils/organizationUtils";
 
-interface Params {
-  id: string;
-}
-
 // GET /api/roles/[id] - Get specific role details
 export async function GET(
   request: NextRequest,
-  { params }: { params: Params }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Await params in Next.js 15
+    const { id: roleId } = await params;
+
     // Get organization ID from headers or use session-based validation
     const headerOrgId = request.headers.get("x-organization-id");
 
@@ -41,8 +40,6 @@ export async function GET(
         { status: validation.status }
       );
     }
-
-    const roleId = params.id;
     const organizationId = validation.context!.organizationId;
 
     // Get role details
@@ -89,9 +86,12 @@ export async function GET(
 // PUT /api/roles/[id] - Update role
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Params }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Await params in Next.js 15
+    const { id: roleId } = await params;
+
     // Get organization ID from headers or use session-based validation
     const headerOrgId = request.headers.get("x-organization-id");
 
@@ -118,20 +118,32 @@ export async function PUT(
         { status: validation.status }
       );
     }
-
-    const roleId = params.id;
     const organizationId = validation.context!.organizationId;
 
     const body = await request.json();
     const { display_name, description, permission_ids } = body;
 
+    // First, verify the role exists and belongs to the organization
+    const existingRole = await prisma.role.findFirst({
+      where: {
+        id: roleId,
+        organizationId,
+      },
+    });
+
+    if (!existingRole) {
+      return NextResponse.json(
+        { error: "Role not found or does not belong to this organization" },
+        { status: 404 }
+      );
+    }
+
     // Update role and permissions in a transaction
     await prisma.$transaction(async (tx) => {
-      // Update role basic info
+      // Update role basic info (use only id in where clause as it's the unique identifier)
       await tx.role.update({
         where: {
           id: roleId,
-          organizationId,
         },
         data: {
           displayName: display_name,
@@ -171,9 +183,12 @@ export async function PUT(
 // DELETE /api/roles/[id] - Delete role
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Params }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Await params in Next.js 15
+    const { id: roleId } = await params;
+
     // Get organization ID from headers or use session-based validation
     const headerOrgId = request.headers.get("x-organization-id");
 
@@ -200,8 +215,6 @@ export async function DELETE(
         { status: validation.status }
       );
     }
-
-    const roleId = params.id;
     const organizationId = validation.context!.organizationId;
 
     // Check if role exists and belongs to the organization

@@ -57,10 +57,30 @@ model User {
   projectWeeklyPlans           ProjectWeeklyPlan[]      @relation("WeeklyPlanCreator")
   projectDailyOverrides        ProjectDailyOverride[]   @relation("DailyOverrideCreator")
   projectMembers               ProjectMember[]
+  emailVerificationCodes       EmailVerificationCode[]
 
   @@index([email])
   @@index([isActive])
   @@map("users")
+}
+
+model EmailVerificationCode {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  email     String
+  code      String   // 6-digit verification code
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([email])
+  @@index([code])
+  @@index([expiresAt])
+  @@map("email_verification_codes")
 }
 
 // =====================================================

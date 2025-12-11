@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { validateOrganizationAccessWithId, hasPermission } from "@/utils/organizationUtils";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/auth";
 
 export async function GET(
   req: NextRequest,
@@ -315,11 +317,14 @@ export async function PATCH(
       );
     }
 
-    // Validate organization access and permissions
-    const validation = await validateOrganizationAccessWithId(organizationId, {
-      resource: "projects",
-      action: "update",
-    });
+    // Get session to check user
+    const session = await getServerSession(authConfig);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Validate organization access (without requiring specific permissions)
+    const validation = await validateOrganizationAccessWithId(organizationId);
 
     if (!validation.success) {
       return NextResponse.json(
@@ -332,7 +337,7 @@ export async function PATCH(
 
     const { context: userContext } = validation;
 
-    // Verify card exists and user has access through project organization
+    // Verify card exists and get project information
     const existingCard = await prisma.card.findFirst({
       where: {
         id: cardId,
@@ -346,10 +351,17 @@ export async function PATCH(
       },
       include: {
         list: {
-          select: {
-            id: true,
-            name: true,
-            boardId: true,
+          include: {
+            board: {
+              include: {
+                project: {
+                  select: {
+                    id: true,
+                    organizationId: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -357,6 +369,29 @@ export async function PATCH(
 
     if (!existingCard) {
       return NextResponse.json({ error: "Card not found" }, { status: 404 });
+    }
+
+    // Check if user has projects:update permission OR is a project member
+    const hasUpdatePermission = hasPermission(userContext, "projects", "update");
+
+    if (!hasUpdatePermission) {
+      // If user doesn't have update permission, check if they're a project member
+      const projectMember = await prisma.projectMember.findFirst({
+        where: {
+          projectId: existingCard.list.board.project.id,
+          organizationMember: {
+            userId: session.user.id,
+            status: "active",
+          },
+        },
+      });
+
+      if (!projectMember) {
+        return NextResponse.json(
+          { error: "You don't have permission to update this card" },
+          { status: 403 }
+        );
+      }
     }
 
     // If moving to a different list, verify access to target list
