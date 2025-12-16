@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
 
     // Generate 6-digit verification code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
+    console.log(code)
 
     // Set expiration to 15 minutes from now
     const expiresAt = new Date();

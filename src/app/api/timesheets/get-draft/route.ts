@@ -80,6 +80,8 @@ export async function GET(req: NextRequest) {
       submission = await prisma.timesheetSubmission.create({
         data: {
           organizationId,
+          projectId: "",
+
           userId,
           organizationMemberId: membership.id, // Use the actual OrganizationMember ID
           weekStartDate: new Date(weekStart),

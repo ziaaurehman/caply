@@ -286,7 +286,13 @@ export default function MonthlyCapacityTable({
             "DEC",
           ];
           const startDateStr = `${String(weekStart.getDate()).padStart(2, "0")} ${monthNames[weekStart.getMonth()]}`;
+          const isValidDate = (d: Date) =>
+            d instanceof Date && !isNaN(d.getTime());
 
+          if (!isValidDate(weekStart) || !isValidDate(weekEnd)) {
+            console.error("Invalid week dates:", { weekStart, weekEnd });
+            return null; // or skip this week
+          }
           return {
             weekNumber: `W${String(index + 1).padStart(2, "0")}`,
             startDate: weekStart.toISOString(),

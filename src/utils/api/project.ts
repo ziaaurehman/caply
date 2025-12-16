@@ -133,6 +133,61 @@ interface ProjectsResponse {
 interface ProjectResponse {
   project: Project;
 }
+interface ProjectTimesheetEntry {
+  id: string;
+  task_description: string;
+  monday_hours: number;
+  tuesday_hours: number;
+  wednesday_hours: number;
+  thursday_hours: number;
+  friday_hours: number;
+  notes: {
+    monday?: string;
+    tuesday?: string;
+    wednesday?: string;
+    thursday?: string;
+    friday?: string;
+  };
+  project: {
+    id: string;
+    name: string;
+    code?: string;
+  };
+}
+
+interface ProjectTimesheet {
+  id: string;
+  week_start_date: string;
+  week_end_date: string;
+  total_hours: number;
+  status: string;
+  approved_at?: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  entries: ProjectTimesheetEntry[];
+}
+
+interface ProjectInfo {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  budgetHours?: number;
+  startDate?: string;
+  endDate?: string;
+  billingRate?: number;
+  status?: string;
+}
+interface ProjectTimesheetsResponse {
+  success: boolean;
+  project_id: string;
+  project: ProjectInfo;
+  approved_timesheets: ProjectTimesheet[];
+}
+
 
 // Projects API
 export const projectAPI = {
@@ -429,6 +484,31 @@ export const projectAPI = {
 
     return await response.json();
   },
+    // ===== PROJECT TIMESHEETS =====
+
+  getProjectTimesheets: async (
+    projectId: string,
+    organizationId: string
+  ): Promise<ProjectTimesheetsResponse> => {
+    debugger
+    const response = await fetch(
+      `/api/projects/timesheets/${projectId}`,
+      {
+        headers: {
+          "x-organization-id": organizationId,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(
+        errorData.error || "Failed to fetch approved project timesheets"
+      );
+    }
+
+    return await response.json();
+  }
 };
 
 export type {
@@ -442,4 +522,5 @@ export type {
   ProjectDocumentsResponse,
   ProjectDocumentResponse,
   ProjectDocumentDownloadResponse,
+  ProjectTimesheetsResponse
 };
