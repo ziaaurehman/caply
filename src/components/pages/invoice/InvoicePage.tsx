@@ -25,7 +25,6 @@ import {
 import { InvoiceList } from "./components/invoice-list";
 import { InvoiceFormContainer } from "./components/invoice-form-container";
 import { InvoicePreview } from "./components/invoice-preview";
-import html2pdf from "html2pdf.js";
 import { ArrowLeft, Eye } from "lucide-react";
 import { DeleteModal } from "./components/delete-model";
 
@@ -360,7 +359,7 @@ const InvoicePage: React.FC = () => {
       }
 
       setView("list");
-      
+
       setEditingInvoice(null);
       toast.success(
         status ? "Invoice sent successfully!" : "Invoice saved successfully!"
@@ -393,8 +392,9 @@ const InvoicePage: React.FC = () => {
     }
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!previewRef) return;
+    const { default: html2pdf } = await import("html2pdf.js");
 
     const element = previewRef;
     const actionButtons = element.querySelector(".no-print-buttons");
@@ -490,7 +490,7 @@ const InvoicePage: React.FC = () => {
             className="flex items-center gap-2 px-4 py-2 mb-3 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
           >
             <Eye className="h-4 w-4" />
-            {showPreviewIcons ? "Hide" : "Show"} Preview 
+            {showPreviewIcons ? "Hide" : "Show"} Preview
           </button>
         )}
       </div>
