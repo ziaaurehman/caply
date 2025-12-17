@@ -9,10 +9,24 @@ export const formatCurrency = (amount: number, currency = "USD"): string => {
   }).format(amount);
 };
 
-export const generateInvoiceNumber = (invoiceCount: number): string => {
-  const nextNumber = String(invoiceCount + 1).padStart(3, "0");
-  return `INV-${nextNumber}`;
+export const generateInvoiceNumber = (count: number = 0) => {
+  const now = new Date();
+
+  const date = now
+    .toISOString()
+    .slice(0, 10)
+    .replace(/-/g, ""); // YYYYMMDD
+
+  const time = now
+    .toTimeString()
+    .slice(0, 8)
+    .replace(/:/g, ""); // HHMMSS
+
+  const counter = String(count + 1).padStart(3, "0");
+
+  return `INV-${date}-${time}-${counter}`;
 };
+
 
 export const generatePONumber = (): string => {
   return `PO-${Date.now()}`;
