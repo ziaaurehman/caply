@@ -36,6 +36,7 @@ export const ClientInfoForm: React.FC<ClientInfoFormProps> = ({
                 clientId: selected?.id || "",
                 clientName: selected?.name || "",
                 clientAddress: selected?.address || "",
+                clientEmail: selected?.email || "",
               }));
             }}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
