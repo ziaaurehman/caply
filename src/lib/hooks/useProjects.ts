@@ -36,6 +36,9 @@ export const projectKeys = {
   capacity: () => [...projectKeys.all, "capacity"] as const,
   capacityAll: (organizationId: string) =>
     [...projectKeys.capacity(), "all", organizationId] as const,
+    timesheets: () => [...projectKeys.all, "timesheets"] as const,
+  timesheetsByProject: (projectId: string, organizationId: string) =>
+    [...projectKeys.timesheets(), projectId, organizationId] as const,
 };
 
 // Types for filters
@@ -90,6 +93,22 @@ export function useProject(projectId: string, organizationId: string) {
     enabled: !!projectId && !!organizationId,
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+// ===== Project Approve TimeSHEETS ====
+// ===== PROJECT TIMESHEETS =====
+
+export function useProjectTimesheets(
+  projectId: string,
+  organizationId: string
+) {
+  return useQuery({
+    queryKey: projectKeys.timesheetsByProject(projectId, organizationId),
+    queryFn: () => projectAPI.getProjectTimesheets(projectId, organizationId),
+    enabled: !!projectId && !!organizationId, // Don't fire until IDs exist
+    staleTime: 5 * 60 * 1000, // Fresh for 5 minutes
+    gcTime: 10 * 60 * 1000, // Keep cache for 10 minutes
+    refetchOnWindowFocus: false,
   });
 }
 

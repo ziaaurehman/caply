@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -271,6 +272,11 @@ export default function Sidebar({
     icon: <Users size={18} />,
     label: "Team",
   };
+  const invoiceManagementMenuItem = {
+    href: "/invoice",
+    icon: <FileText size={18} />,
+    label: "Invoice",
+  };
 
   const capacityMenuItem = {
     href: "/capacity",
@@ -418,6 +424,15 @@ export default function Sidebar({
                   icon={capacityMenuItem.icon}
                   label={capacityMenuItem.label}
                   active={pathname === capacityMenuItem.href}
+                  isCollapsed={sidebarCollapsed}
+                />
+              )}
+              {userCanViewTeamMembers && (
+                <NavItem
+                  href={invoiceManagementMenuItem.href}
+                  icon={invoiceManagementMenuItem.icon}
+                  label={invoiceManagementMenuItem.label}
+                  active={pathname === invoiceManagementMenuItem.href}
                   isCollapsed={sidebarCollapsed}
                 />
               )}

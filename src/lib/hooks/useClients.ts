@@ -17,6 +17,8 @@ export const clientKeys = {
   details: () => [...clientKeys.all, "detail"] as const,
   detail: (id: string, organizationId: string) =>
     [...clientKeys.details(), id, organizationId] as const,
+    projects: (clientId: string, organizationId: string) =>
+    [...clientKeys.detail(clientId, organizationId), "projects"] as const,
 };
 
 // ===== CLIENTS LIST =====
@@ -41,6 +43,17 @@ export function useClient(clientId: string, organizationId: string) {
     enabled: !!clientId && !!organizationId,
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+// ====== Client All Projects
+export function useClientProjects(clientId: string, organizationId: string) {
+  return useQuery({
+    queryKey: clientKeys.projects(clientId, organizationId),
+    queryFn: () => clientAPI.ClientProjects(clientId, organizationId),
+    enabled: !!clientId && !!organizationId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 }
 

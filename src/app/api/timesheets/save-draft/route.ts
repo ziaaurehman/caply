@@ -59,198 +59,205 @@ export async function POST(req: NextRequest) {
     // Increase timeout to 10 seconds to handle large batches of entries
     const result = await prisma.$transaction(
       async (tx) => {
-      let currentSubmission;
+        let currentSubmission;
 
-      // If submissionId is provided, use it directly
-      if (submissionId) {
-        const existingSubmission = await tx.timesheetSubmission.findFirst({
-          where: {
-            id: submissionId,
-            userId,
-            organizationId,
-          },
-          select: {
-            id: true,
-            status: true,
-          },
-        });
+        // If submissionId is provided, use it directly
+        if (submissionId) {
+          const existingSubmission = await tx.timesheetSubmission.findFirst({
+            where: {
+              id: submissionId,
+              userId,
+              organizationId,
+            },
+            select: {
+              id: true,
+              status: true,
+            },
+          });
 
-        if (!existingSubmission) {
-          throw new Error("Submission not found");
-        }
+          if (!existingSubmission) {
+            throw new Error("Submission not found");
+          }
 
-        // Only allow updates to draft submissions
-        if (existingSubmission.status !== "draft") {
-          throw new Error("Cannot update a submitted timesheet");
-        }
-
-        // Update existing submission
-        currentSubmission = await tx.timesheetSubmission.update({
-          where: { id: submissionId },
-          data: {
-            totalHours,
-            weekStartDate: new Date(weekStart),
-            weekEndDate,
-            updatedAt: new Date(),
-          },
-        });
-      } else {
-        // Check for existing submission
-        const prevSubmission = await tx.timesheetSubmission.findFirst({
-          where: {
-            organizationId,
-            userId,
-            weekStartDate: new Date(weekStart),
-          },
-          select: {
-            id: true,
-            status: true,
-          },
-        });
-
-        if (prevSubmission) {
           // Only allow updates to draft submissions
-          if (prevSubmission.status !== "draft") {
+          if (existingSubmission.status !== "draft") {
             throw new Error("Cannot update a submitted timesheet");
           }
 
           // Update existing submission
           currentSubmission = await tx.timesheetSubmission.update({
-            where: { id: prevSubmission.id },
+            where: { id: submissionId },
             data: {
               totalHours,
+              weekStartDate: new Date(weekStart),
               weekEndDate,
               updatedAt: new Date(),
             },
           });
         } else {
-          // Create new submission using the organizationMemberId we fetched earlier
-          // Note: organizationMemberId is optional, so we can use the membership.id we found
-          try {
-            currentSubmission = await tx.timesheetSubmission.create({
+          // Check for existing submission
+          const prevSubmission = await tx.timesheetSubmission.findFirst({
+            where: {
+              organizationId,
+              userId,
+              weekStartDate: new Date(weekStart),
+            },
+            select: {
+              id: true,
+              status: true,
+            },
+          });
+
+          if (prevSubmission) {
+            // Only allow updates to draft submissions
+            if (prevSubmission.status !== "draft") {
+              throw new Error("Cannot update a submitted timesheet");
+            }
+
+            // Update existing submission
+            currentSubmission = await tx.timesheetSubmission.update({
+              where: { id: prevSubmission.id },
               data: {
-                organizationId,
-                userId,
-                organizationMemberId: membership.id, // Use the actual OrganizationMember ID
-                weekStartDate: new Date(weekStart),
-                weekEndDate,
-                status: "draft",
                 totalHours,
+                weekEndDate,
+                updatedAt: new Date(),
               },
             });
-          } catch (createError: any) {
-            // If creation fails, check if it's due to unique constraint or foreign key
-            console.error("Error creating timesheet submission:", createError);
-            
-            // If it's a foreign key error, the membership might not exist
-            if (createError.code === 'P2003') {
-              throw new Error("Invalid organization membership. Please refresh and try again.");
-            }
-            
-            // If creation fails due to unique constraint, fetch and update
-            if (createError.code === 'P2002') {
-              const existing = await tx.timesheetSubmission.findFirst({
-                where: {
+          } else {
+            // Create new submission using the organizationMemberId we fetched earlier
+            // Note: organizationMemberId is optional, so we can use the membership.id we found
+            try {
+              currentSubmission = await tx.timesheetSubmission.create({
+                data: {
                   organizationId,
+                  projectId: entries[0].project_id,
+
                   userId,
+                  organizationMemberId: membership.id, // Use the actual OrganizationMember ID
                   weekStartDate: new Date(weekStart),
+                  weekEndDate,
+                  status: "draft",
+                  totalHours,
                 },
               });
+            } catch (createError: any) {
+              // If creation fails, check if it's due to unique constraint or foreign key
+              console.error(
+                "Error creating timesheet submission:",
+                createError
+              );
 
-              if (!existing) throw createError;
-
-              if (existing.status !== "draft") {
-                throw new Error("Cannot update a submitted timesheet");
+              // If it's a foreign key error, the membership might not exist
+              if (createError.code === "P2003") {
+                throw new Error(
+                  "Invalid organization membership. Please refresh and try again."
+                );
               }
 
-              currentSubmission = await tx.timesheetSubmission.update({
-                where: { id: existing.id },
-                data: {
-                  totalHours,
-                  weekEndDate,
-                  updatedAt: new Date(),
-                },
-              });
-            } else {
-              // Re-throw other errors
-              throw createError;
+              // If creation fails due to unique constraint, fetch and update
+              if (createError.code === "P2002") {
+                const existing = await tx.timesheetSubmission.findFirst({
+                  where: {
+                    organizationId,
+                    userId,
+                    weekStartDate: new Date(weekStart),
+                  },
+                });
+
+                if (!existing) throw createError;
+
+                if (existing.status !== "draft") {
+                  throw new Error("Cannot update a submitted timesheet");
+                }
+
+                currentSubmission = await tx.timesheetSubmission.update({
+                  where: { id: existing.id },
+                  data: {
+                    totalHours,
+                    weekEndDate,
+                    updatedAt: new Date(),
+                  },
+                });
+              } else {
+                // Re-throw other errors
+                throw createError;
+              }
             }
           }
         }
-      }
 
-      // Update or create entries
-      if (currentSubmission && entries.length > 0) {
-        // Delete existing entries
-        await tx.timesheetEntry.deleteMany({
-          where: {
-            timesheetSubmissionId: currentSubmission.id,
-          },
-        });
+        // Update or create entries
+        if (currentSubmission && entries.length > 0) {
+          // Delete existing entries
+          await tx.timesheetEntry.deleteMany({
+            where: {
+              timesheetSubmissionId: currentSubmission.id,
+            },
+          });
 
-        // Insert new entries (only non-empty ones) and calculate total hours at the same time
-        const entriesToInsert = entries
-          .filter(
-            (entry: any) =>
-              entry.project_id &&
-              ((entry.monday_hours || 0) > 0 ||
-                (entry.tuesday_hours || 0) > 0 ||
-                (entry.wednesday_hours || 0) > 0 ||
-                (entry.thursday_hours || 0) > 0 ||
-                (entry.friday_hours || 0) > 0 ||
-                (entry.task_description && entry.task_description.trim()))
-          )
-          .map((entry: any) => ({
-            timesheetSubmissionId: currentSubmission.id,
-            projectId: entry.project_id,
-            taskDescription: entry.task_description || "",
-            mondayHours: entry.monday_hours || 0,
-            tuesdayHours: entry.tuesday_hours || 0,
-            wednesdayHours: entry.wednesday_hours || 0,
-            thursdayHours: entry.thursday_hours || 0,
-            fridayHours: entry.friday_hours || 0,
-            mondayNotes: entry.monday_notes || null,
-            tuesdayNotes: entry.tuesday_notes || null,
-            wednesdayNotes: entry.wednesday_notes || null,
-            thursdayNotes: entry.thursday_notes || null,
-            fridayNotes: entry.friday_notes || null,
-          }));
+          // Insert new entries (only non-empty ones) and calculate total hours at the same time
+          const entriesToInsert = entries
+            .filter(
+              (entry: any) =>
+                entry.project_id &&
+                ((entry.monday_hours || 0) > 0 ||
+                  (entry.tuesday_hours || 0) > 0 ||
+                  (entry.wednesday_hours || 0) > 0 ||
+                  (entry.thursday_hours || 0) > 0 ||
+                  (entry.friday_hours || 0) > 0 ||
+                  (entry.task_description && entry.task_description.trim()))
+            )
+            .map((entry: any) => ({
+              timesheetSubmissionId: currentSubmission.id,
+              projectId: entry.project_id,
+              taskDescription: entry.task_description || "",
+              mondayHours: entry.monday_hours || 0,
+              tuesdayHours: entry.tuesday_hours || 0,
+              wednesdayHours: entry.wednesday_hours || 0,
+              thursdayHours: entry.thursday_hours || 0,
+              fridayHours: entry.friday_hours || 0,
+              mondayNotes: entry.monday_notes || null,
+              tuesdayNotes: entry.tuesday_notes || null,
+              wednesdayNotes: entry.wednesday_notes || null,
+              thursdayNotes: entry.thursday_notes || null,
+              fridayNotes: entry.friday_notes || null,
+            }));
 
-        // Calculate total hours from entries we're about to insert (avoid extra query)
-        const calculatedTotalHours = entriesToInsert.reduce(
-          (sum, e) =>
-            sum +
-            Number(e.mondayHours || 0) +
-            Number(e.tuesdayHours || 0) +
-            Number(e.wednesdayHours || 0) +
-            Number(e.thursdayHours || 0) +
-            Number(e.fridayHours || 0),
-          0
-        );
+          // Calculate total hours from entries we're about to insert (avoid extra query)
+          const calculatedTotalHours = entriesToInsert.reduce(
+            (sum, e) =>
+              sum +
+              Number(e.mondayHours || 0) +
+              Number(e.tuesdayHours || 0) +
+              Number(e.wednesdayHours || 0) +
+              Number(e.thursdayHours || 0) +
+              Number(e.fridayHours || 0),
+            0
+          );
 
-        if (entriesToInsert.length > 0) {
-          await tx.timesheetEntry.createMany({
-            data: entriesToInsert,
+          if (entriesToInsert.length > 0) {
+            await tx.timesheetEntry.createMany({
+              data: entriesToInsert,
+            });
+          }
+
+          // Update the submission with the calculated total
+          await tx.timesheetSubmission.update({
+            where: { id: currentSubmission.id },
+            data: {
+              totalHours: calculatedTotalHours,
+              updatedAt: new Date(),
+            },
           });
         }
 
-        // Update the submission with the calculated total
-        await tx.timesheetSubmission.update({
-          where: { id: currentSubmission.id },
-          data: {
-            totalHours: calculatedTotalHours,
-            updatedAt: new Date(),
-          },
-        });
+        // Return the submission ID - we'll fetch the full data outside the transaction
+        return currentSubmission.id;
+      },
+      {
+        maxWait: 10000, // Maximum time to wait for a transaction slot
+        timeout: 10000, // Maximum time the transaction can run (10 seconds)
       }
-
-      // Return the submission ID - we'll fetch the full data outside the transaction
-      return currentSubmission.id;
-    },
-    {
-      maxWait: 10000, // Maximum time to wait for a transaction slot
-      timeout: 10000, // Maximum time the transaction can run (10 seconds)
-    }
     );
 
     // Fetch the full submission data outside the transaction to avoid timeout
