@@ -53,6 +53,7 @@ export default function LoginForm() {
       console.log("Sign in result:", result);
 
       if (result?.error) {
+        debugger
         // Check if email is not verified
         if (result.error === "EMAIL_NOT_VERIFIED" || result.error?.includes("EMAIL_NOT_VERIFIED")) {
           // Send verification code
