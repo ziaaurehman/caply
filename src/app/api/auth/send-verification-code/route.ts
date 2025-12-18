@@ -10,6 +10,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { email } = body;
+    console.log("email received",email)
 
     if (!email) {
       return NextResponse.json(

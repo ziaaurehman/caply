@@ -92,10 +92,9 @@ export default function SignUpForm() {
         console.error("Failed to send verification code:", verificationResult.error);
         // Still redirect to verification page, user can request a new code there
       }
-      debugger
-      console.log("Comes Here")
+      
       // Redirect to email verification page
-      return router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`);
+     return router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`);
     } catch (error: any) {
       console.error("Registration error:", error);
       setError(

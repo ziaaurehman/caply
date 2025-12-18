@@ -49,9 +49,9 @@ export default function LoginForm() {
         email,
         password,
       });
-
+      
       console.log("Sign in result:", result);
-
+      
       if (result?.error) {
         debugger
         // Check if email is not verified
