@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-
+ 
 import { useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";

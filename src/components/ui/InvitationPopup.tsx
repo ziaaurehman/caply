@@ -1,101 +1,110 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Mail, X, Check, Clock, Shield } from 'lucide-react'
-import { useInvitations } from '@/lib/hooks/useInvitations'
-import { toast } from 'sonner'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from "react";
+import { Mail, X, Check, Clock, Shield } from "lucide-react";
+import { useInvitations } from "@/lib/hooks/useInvitations";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
 
 export default function InvitationPopup() {
-  const { invitations, isLoading, acceptInvitation, removeInvitation } = useInvitations()
-  const router = useRouter()
-  const [showPopup, setShowPopup] = useState(false)
-  const [currentInvitationIndex, setCurrentInvitationIndex] = useState(0)
-  const [isAccepting, setIsAccepting] = useState(false)
+  const { invitations, isLoading, acceptInvitation, removeInvitation } =
+    useInvitations();
+  const router = useRouter();
+  const handleInvitationAccepted = useOrganizationStore(
+    (state) => state.handleInvitationAccepted
+  );
+  const [showPopup, setShowPopup] = useState(false);
+  const [currentInvitationIndex, setCurrentInvitationIndex] = useState(0);
+  const [isAccepting, setIsAccepting] = useState(false);
 
   // Show popup when there are pending invitations
   useEffect(() => {
     if (invitations.length > 0 && !isLoading) {
-      setShowPopup(true)
-      setCurrentInvitationIndex(0)
+      setShowPopup(true);
+      setCurrentInvitationIndex(0);
     } else {
-      setShowPopup(false)
+      setShowPopup(false);
     }
-  }, [invitations.length, isLoading])
+  }, [invitations.length, isLoading]);
 
   const handleAccept = async () => {
-    if (currentInvitationIndex >= invitations.length) return
+    if (currentInvitationIndex >= invitations.length) return;
 
-    const invitation = invitations[currentInvitationIndex]
-    setIsAccepting(true)
+    const invitation = invitations[currentInvitationIndex];
+    setIsAccepting(true);
 
     try {
-      const result = await acceptInvitation(invitation.token)
-      toast.success(`Successfully joined ${invitation.organizations.name}! You can now access the organization dashboard.`)
-      
+      const result = await acceptInvitation(invitation.token);
+      toast.success(
+        `Successfully joined ${invitation.organizations.name}! You can now access the organization dashboard.`
+      );
+     // Clear User Organization Previous
+      await handleInvitationAccepted(invitation.organization_id);
+
       // Close popup and navigate to dashboard
-      setShowPopup(false)
-      
+      setShowPopup(false);
+
       // Navigate to dashboard to show the new organization
       setTimeout(() => {
-        router.push('/dashboard')
-      }, 500)
+        router.push("/dashboard");
+      }, 500);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to accept invitation')
+      toast.error(error.message || "Failed to accept invitation");
     } finally {
-      setIsAccepting(false)
+      setIsAccepting(false);
     }
-  }
+  };
 
   const handleDecline = () => {
-    if (currentInvitationIndex >= invitations.length) return
+    if (currentInvitationIndex >= invitations.length) return;
 
-    const invitation = invitations[currentInvitationIndex]
-    removeInvitation(invitation.id)
-    
+    const invitation = invitations[currentInvitationIndex];
+    removeInvitation(invitation.id);
+
     // Move to next invitation or close popup
     if (currentInvitationIndex + 1 < invitations.length) {
-      setCurrentInvitationIndex(currentInvitationIndex + 1)
+      setCurrentInvitationIndex(currentInvitationIndex + 1);
     } else {
-      setShowPopup(false)
+      setShowPopup(false);
     }
-  }
-
-
+  };
 
   const handleClose = () => {
-    setShowPopup(false)
-  }
+    setShowPopup(false);
+  };
 
-  if (!showPopup || invitations.length === 0) return null
+  if (!showPopup || invitations.length === 0) return null;
 
-  const invitation = invitations[currentInvitationIndex]
-  if (!invitation) return null
+  const invitation = invitations[currentInvitationIndex];
+  if (!invitation) return null;
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
+    return new Date(dateString).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   const getRoleBadge = (role: any) => {
     const colors: any = {
-      admin: 'bg-red-100 text-red-800',
-      manager: 'bg-blue-100 text-blue-800',
-      member: 'bg-green-100 text-green-800',
-      guest: 'bg-gray-100 text-gray-800'
-    }
-    
+      admin: "bg-red-100 text-red-800",
+      manager: "bg-blue-100 text-blue-800",
+      member: "bg-green-100 text-green-800",
+      guest: "bg-gray-100 text-gray-800",
+    };
+
     return (
-      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${colors[role.name] || 'bg-purple-100 text-purple-800'}`}>
+      <span
+        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${colors[role.name] || "bg-purple-100 text-purple-800"}`}
+      >
         <Shield className="w-3 h-3 mr-1" />
         {role.display_name || role.name}
       </span>
-    )
-  }
+    );
+  };
 
   return (
     <div className="fixed top-4 right-4 z-50 w-96">
@@ -106,7 +115,9 @@ export default function InvitationPopup() {
             <div className="p-1 rounded-full bg-blue-100">
               <Mail className="w-4 h-4 text-blue-600" />
             </div>
-            <h3 className="font-semibold text-gray-900">Organization Invitation</h3>
+            <h3 className="font-semibold text-gray-900">
+              Organization Invitation
+            </h3>
           </div>
           <button
             onClick={handleClose}
@@ -150,7 +161,8 @@ export default function InvitationPopup() {
             {/* Inviter Info */}
             <div className="text-sm text-gray-600">
               <p>
-                <span className="font-medium">Invited by:</span> {invitation.invited_by_user.full_name}
+                <span className="font-medium">Invited by:</span>{" "}
+                {invitation.invited_by_user.full_name}
               </p>
             </div>
 
@@ -158,7 +170,8 @@ export default function InvitationPopup() {
             {invitation.message && (
               <div className="bg-blue-50 rounded-lg p-3">
                 <p className="text-sm text-blue-800">
-                  <span className="font-medium">Message:</span> {invitation.message}
+                  <span className="font-medium">Message:</span>{" "}
+                  {invitation.message}
                 </p>
               </div>
             )}
@@ -202,5 +215,5 @@ export default function InvitationPopup() {
         </div>
       </div>
     </div>
-  )
-} 
+  );
+}
