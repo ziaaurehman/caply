@@ -11,12 +11,18 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Public paths that don't require authentication
-  const publicPaths = ["/", "/login", "/signup", "/invite", ""];
+  const publicPaths = [
+    "/",
+    "/login",
+    "/signup",
+    "/invite",
+    "/verify-email", // ✅ ADD THIS
+    "/forgot-password", // (recommended)
+  ];
   const isPublicPath =
     publicPaths.some((path) => pathname === path) ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/auth/callback") ||
-    pathname.startsWith("/verify-email") || // ✅ ADD THIS
     pathname.startsWith("/demo");
 
   // Redirect authenticated users away from login/signup to dashboard
