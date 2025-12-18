@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/utils/supabase/server"; // Keep for file storage
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { supabaseAdmin } from "@/utils/supabase/admin";
 
 export async function GET(
   req: NextRequest,
@@ -148,7 +149,8 @@ export async function POST(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const supabase = await createClient(); // For file storage
+    const supabase = supabaseAdmin;
+    // const supabase = await createClient(); // For file storage
 
     // Parse form data
     const formData = await req.formData();
