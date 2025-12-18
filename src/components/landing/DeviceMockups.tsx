@@ -1,5 +1,4 @@
 "use client";
-import Image from "next/image";
 export default function DeviceMockups() {
   return (
     <div className="relative z-40 -mt-24 md:-mt-56 lg:-mt-64">
@@ -7,7 +6,7 @@ export default function DeviceMockups() {
         <div className="flex justify-center">
           <div className="bg-white rounded-2xl md:rounded-3xl p-1 md:p-1 lg:p-1 max-w-6xl relative shadow-2xl ">
             
-            <Image
+            <img
               src="/dashboard.webp"
               alt="Device Mockup"
               width={1000}
