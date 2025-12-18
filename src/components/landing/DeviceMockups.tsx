@@ -1,5 +1,6 @@
 "use client";
 import Image from "next/image";
+import webbanner from "@/assets/dashboard.webp"
 export default function DeviceMockups() {
   return (
     <div className="relative z-40 -mt-24 md:-mt-56 lg:-mt-64">
@@ -8,7 +9,7 @@ export default function DeviceMockups() {
           <div className="bg-white rounded-2xl md:rounded-3xl p-1 md:p-1 lg:p-1 max-w-6xl relative shadow-2xl ">
             
             <Image
-              src="/dashboard.webp"
+              src={webbanner}
               alt="Device Mockup"
               width={1000}
               height={1000}

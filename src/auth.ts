@@ -137,6 +137,7 @@ export const authConfig: NextAuthOptions = {
             // Throw error - frontend will handle sending verification code
             throw new Error("EMAIL_NOT_VERIFIED");
           }
+          
 
           console.log("User authenticated successfully:", user.id);
 

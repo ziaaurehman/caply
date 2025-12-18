@@ -387,7 +387,11 @@ export async function sendVerificationCodeEmail(
     if (process.env.SENDGRID_API_KEY) {
       try {
         const transporter = createSendGridTransporter();
-
+        console.log("Comes Here")
+        console.log({  from: fromEmail,
+          to: data.email,
+          subject: "Verify your email address",
+          html: emailHtml,})
         const info = await transporter.sendMail({
           from: fromEmail,
           to: data.email,

@@ -200,13 +200,15 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                         {invoice.status !== "paid" && (
                           <>
-                            <button
-                              onClick={() => onMarkAsPaid(invoice)}
-                              className="text-green-600 hover:text-green-900 mr-3"
-                              title="Mark as Paid"
-                            >
-                              <CheckCircle className="h-4 w-4" />
-                            </button>
+                            {activeTab !== "draft" && (
+                              <button
+                                onClick={() => onMarkAsPaid(invoice)}
+                                className="text-green-600 hover:text-green-900 mr-3"
+                                title="Mark as Paid"
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                              </button>
+                            )}
 
                             <button
                               onClick={() => onEdit(invoice)}
