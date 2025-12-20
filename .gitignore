@@ -52,3 +52,6 @@ Thumbs.db
 *.key
 
 /generated/prisma
+
+# Project documentation (prevent uploading to GitHub)
+projectOverview.md

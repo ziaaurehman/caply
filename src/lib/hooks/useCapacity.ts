@@ -14,6 +14,7 @@ export const capacityKeys = {
   monthly: () => [...capacityKeys.all, "monthly"] as const,
   monthlyByOrg: (
     organizationId: string,
+    
     month: string,
     params?: { only_active?: boolean }
   ) => [...capacityKeys.monthly(), organizationId, month, params] as const,
@@ -117,7 +118,7 @@ export function useMonthlyCapacity(
   params?: { only_active?: boolean }
 ) {
   return useQuery({
-    queryKey: capacityKeys.monthlyByOrg(organizationId, month, params),
+    queryKey: capacityKeys.monthlyByOrg(organizationId, "monthly", params),
     queryFn: () => capacityAPI.getMonthly(organizationId, month, params),
     enabled: !!organizationId && !!month,
     staleTime: 2 * 60 * 1000,

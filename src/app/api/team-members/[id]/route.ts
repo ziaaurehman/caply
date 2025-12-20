@@ -9,7 +9,9 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  try {
+  try { 
+    const paramas = await params;
+
     const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -45,18 +47,33 @@ export async function PUT(
     }
 
     const userContext = validation.context!;
+    // const result = await prisma.organizationMember.updateMany({
+    //   where: {
+    //     id: memberId,
+    //     organizationId: headerOrgId,
+    //   },
+    //   data: updateData,
+    // });
+    
+    // if (result.count === 0) {
+    //   return NextResponse.json(
+    //     { error: "Member not found or access denied" },
+    //     { status: 404 }
+    //   );
+    // }
+    
 
     // Get the member to update
-    const member = await prisma.organizationMember.findFirst({
-      where: {
-        id: memberId,
-        organizationId: headerOrgId,
-      },
-    });
+    // const member = await prisma.organizationMember.findFirst({
+    //   where: {
+    //     id: memberId,
+    //     organizationId: headerOrgId,
+    //   },
+    // });
 
-    if (!member) {
-      return NextResponse.json({ error: "Member not found" }, { status: 404 });
-    }
+    // if (!member) {
+    //   return NextResponse.json({ error: "Member not found" }, { status: 404 });
+    // }
 
     // Update the member
     const updateData: any = {};
@@ -65,6 +82,30 @@ export async function PUT(
     if (hourlyRate !== undefined) updateData.hourlyRate = hourlyRate;
     if (weeklyCapacity !== undefined)
       updateData.weeklyCapacity = weeklyCapacity;
+    // ✅ NOW it's safe to check
+if (Object.keys(updateData).length === 0) {
+  return NextResponse.json(
+    { error: "No valid fields provided for update" },
+    { status: 400 }
+  );
+}
+
+ /* ---------------- ATOMIC UPDATE ---------------- */
+
+ const result = await prisma.organizationMember.updateMany({
+  where: {
+    id: memberId,
+    organizationId: headerOrgId,
+  },
+  data: updateData,
+});
+
+if (result.count === 0) {
+  return NextResponse.json(
+    { error: "Member not found or access denied" },
+    { status: 404 }
+  );
+}
 
     const updatedMember = await prisma.organizationMember.update({
       where: { id: memberId },

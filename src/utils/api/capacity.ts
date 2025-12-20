@@ -401,6 +401,7 @@ export const capacityAPI = {
     const res = await fetch(`/api/capacity/monthly?${sp.toString()}`, {
       headers: { "x-organization-id": organizationId },
     });
+    debugger
     if (!res.ok) {
       const e = await res.json().catch(() => ({}));
       throw new Error(e.error || "Failed to fetch monthly capacity");
