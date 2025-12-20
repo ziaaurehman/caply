@@ -27,9 +27,10 @@ import { InvoiceFormContainer } from "./components/invoice-form-container";
 import { InvoicePreview } from "./components/invoice-preview";
 import { ArrowLeft, Eye } from "lucide-react";
 import { DeleteModal } from "./components/delete-model";
+import { SaveDraftModal } from "./components/save-draft-modal";
 
 const InvoicePage: React.FC = () => {
-  const [view, setView] = useState<"list" | "create">("list");
+  const [view, setView] = useState<"list" | "create" | "view">("list");
   const { currentOrganization } = useOrganizationStore();
   const organizationId = currentOrganization?.id || "";
 
@@ -43,10 +44,15 @@ const InvoicePage: React.FC = () => {
     "all" | "draft" | "sent" | "paid" | "overdue"
   >("all");
   const [showPreview, setShowPreview] = useState(false);
-  const [showPreviewIcons, setShowPreviewIcons] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<InvoiceType | null>(
     null
   );
+  const [viewingInvoice, setViewingInvoice] = useState<InvoiceType | null>(
+    null
+  );
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showSaveDraftModal, setShowSaveDraftModal] = useState(false);
+  const [originalInvoice, setOriginalInvoice] = useState<LocalInvoice | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{
     open: boolean;
     id: string | null;
@@ -153,7 +159,7 @@ const InvoicePage: React.FC = () => {
 
   useEffect(() => {
     if (editingInvoice) {
-      setCurrentInvoice({
+      const initialInvoice: LocalInvoice = {
         id: editingInvoice.id,
         invoiceNumber: editingInvoice.invoiceNumber,
         clientId: editingInvoice.clientId,
@@ -174,11 +180,11 @@ const InvoicePage: React.FC = () => {
         lineItems:
           editingInvoice.lineItems?.map((item) => ({
             id: item.id,
-            description: item.description,
-            quantity: Number(item.quantity),
-            unit: "Unit",
-            unitPrice: Number(item.unitPrice),
-            amount: Number(item.amount),
+            description: item.description || "",
+            quantity: Number(item.quantity || 0),
+            unit: "Unit" as string, // InvoiceLineItem doesn't have unit, default to "Unit"
+            unitPrice: Number(item.unitPrice || 0),
+            amount: Number(item.amount || 0),
           })) || [],
         discountType: editingInvoice.discounttype,
         discount:
@@ -188,10 +194,75 @@ const InvoicePage: React.FC = () => {
         notes: editingInvoice.notes || "",
         status: (editingInvoice.status as LocalInvoice["status"]) || "draft",
         poNumber: editingInvoice.poNumber || "",
-      });
-      setView("create");
+      };
+      setCurrentInvoice(initialInvoice);
+      setOriginalInvoice(JSON.parse(JSON.stringify(initialInvoice))); // Deep copy
+      setHasUnsavedChanges(false);
     }
   }, [editingInvoice]);
+
+  useEffect(() => {
+    if (viewingInvoice) {
+      setCurrentInvoice({
+        id: viewingInvoice.id,
+        invoiceNumber: viewingInvoice.invoiceNumber,
+        clientId: viewingInvoice.clientId,
+        clientName: viewingInvoice.client?.name || "",
+        clientEmail: viewingInvoice.client?.email || "",
+        clientAddress: viewingInvoice.client?.address || "",
+        companyName: viewingInvoice.companyName || "",
+        companyAddress: viewingInvoice.companyAddress || "",
+        companyPhone: viewingInvoice.companyPhone || "",
+        issueDate: viewingInvoice.issueDate.split("T")[0],
+        dueDate: viewingInvoice.dueDate.split("T")[0],
+        projectId: viewingInvoice.projectId || "",
+        projectName: viewingInvoice.project?.name || "",
+        paymentMethod: viewingInvoice.paymentMethod || "",
+        currency: viewingInvoice.currency,
+        isInternational: viewingInvoice.isInternational,
+        province: viewingInvoice.province || "",
+        lineItems:
+          viewingInvoice.lineItems?.map((item) => ({
+            id: item.id,
+            description: item.description,
+            quantity: Number(item.quantity),
+            unit: "Unit",
+            unitPrice: Number(item.unitPrice),
+            amount: Number(item.amount),
+          })) || [],
+        discountType: viewingInvoice.discounttype,
+        discount:
+          Number(viewingInvoice.discountPercentage) ||
+          Number(viewingInvoice.discountAmount) ||
+          0,
+        notes: viewingInvoice.notes || "",
+        status: (viewingInvoice.status as LocalInvoice["status"]) || "draft",
+        poNumber: viewingInvoice.poNumber || "",
+      });
+    }
+  }, [viewingInvoice]);
+
+  // Track changes to detect unsaved changes - only for editing existing invoices
+  useEffect(() => {
+    if (view === "create" && editingInvoice && originalInvoice) {
+      // Compare current invoice with original using the same normalization
+      const normalizedCurrent = normalizeInvoiceForComparison(currentInvoice);
+      const normalizedOriginal = normalizeInvoiceForComparison(originalInvoice);
+      
+      const hasChanges = JSON.stringify(normalizedCurrent) !== JSON.stringify(normalizedOriginal);
+      setHasUnsavedChanges(hasChanges);
+    } else if (view === "create" && !editingInvoice) {
+      // For new invoices, check if any meaningful data has been entered
+      const hasData = 
+        currentInvoice.clientId !== "" ||
+        currentInvoice.companyName !== "" ||
+        currentInvoice.lineItems.length > 0 ||
+        currentInvoice.clientEmail !== "";
+      setHasUnsavedChanges(hasData);
+    } else {
+      setHasUnsavedChanges(false);
+    }
+  }, [currentInvoice, view, editingInvoice, originalInvoice]);
 
   const calculations = React.useMemo(() => {
     const subtotal = currentInvoice.lineItems.reduce(
@@ -228,14 +299,27 @@ const InvoicePage: React.FC = () => {
     return { subtotal, discountAmount, federalTax, provincialTax, total };
   }, [currentInvoice]);
 
+  const resetStates = () => {
+    setShowPreview(false);
+    setHasUnsavedChanges(false);
+    setShowSaveDraftModal(false);
+    setOriginalInvoice(null);
+  };
+
   const handleCreateNew = () => {
+    resetStates();
     setEditingInvoice(null);
+    setViewingInvoice(null);
+    setOriginalInvoice(null);
     setView("create");
   };
 
   const handleEdit = (invoice: InvoiceType) => {
+    resetStates();
+    setViewingInvoice(null);
     setEditingInvoice(null);
     setTimeout(() => setEditingInvoice(invoice), 0);
+    setView("create");
   };
 
   const handleDeleteRequest = (id: string) => {
@@ -296,8 +380,11 @@ const InvoicePage: React.FC = () => {
   };
 
   const handleViewPDF = (invoice: InvoiceType) => {
-    setEditingInvoice(invoice);
-    setTimeout(() => setShowPreviewIcons(true), 100);
+    resetStates();
+    setEditingInvoice(null);
+    setViewingInvoice(invoice);
+    setShowPreview(true);
+    setView("view");
   };
 
   const handleSave = async (status?: string) => {
@@ -358,37 +445,208 @@ const InvoicePage: React.FC = () => {
         );
       }
 
+      resetStates();
       setView("list");
-
       setEditingInvoice(null);
-      toast.success(
-        status ? "Invoice sent successfully!" : "Invoice saved successfully!"
-      );
+      setViewingInvoice(null);
+      setOriginalInvoice(null);
+      setShowSaveDraftModal(false);
+      
+      // Show appropriate success message based on status
+      if (status === "sent") {
+        toast.success("Invoice sent successfully!");
+      } else if (status === "draft") {
+        toast.success("Invoice saved as draft successfully!");
+      } else {
+        toast.success("Invoice saved successfully!");
+      }
     } catch (error) {
       console.error("Error saving invoice:", error);
       alert("Failed to save invoice");
     }
   };
 
-  const handleSendInvoice = async () => {
-    try {
-      toast.loading("Sending invoice...");
+  const validateInvoiceForSending = (): { valid: boolean; error?: string } => {
+    if (!currentInvoice.clientId) {
+      return { valid: false, error: "Please select a client" };
+    }
+    if (!currentInvoice.clientEmail || !currentInvoice.clientEmail.trim()) {
+      return { valid: false, error: "Please enter client email address" };
+    }
+    if (!currentInvoice.companyName || !currentInvoice.companyName.trim()) {
+      return { valid: false, error: "Please enter company name" };
+    }
+    if (!currentInvoice.companyAddress || !currentInvoice.companyAddress.trim()) {
+      return { valid: false, error: "Please enter company address" };
+    }
+    if (!currentInvoice.companyPhone || !currentInvoice.companyPhone.trim()) {
+      return { valid: false, error: "Please enter company phone" };
+    }
+    if (currentInvoice.lineItems.length === 0) {
+      return { valid: false, error: "Please add at least one line item" };
+    }
+    if (!currentInvoice.invoiceNumber || !currentInvoice.invoiceNumber.trim()) {
+      return { valid: false, error: "Invoice number is required" };
+    }
+    if (!currentInvoice.issueDate) {
+      return { valid: false, error: "Issue date is required" };
+    }
+    if (!currentInvoice.dueDate) {
+      return { valid: false, error: "Due date is required" };
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(currentInvoice.clientEmail.trim())) {
+      return { valid: false, error: "Please enter a valid email address" };
+    }
 
+    return { valid: true };
+  };
+
+  const handlePreviewAndSend = () => {
+    // Validate before showing preview
+    const validation = validateInvoiceForSending();
+    if (!validation.valid) {
+      toast.error(validation.error || "Please fill all required fields");
+      return;
+    }
+    // Show preview first
+    setShowPreview(true);
+  };
+
+  // Helper function to normalize invoice for comparison
+  const normalizeInvoiceForComparison = (invoice: LocalInvoice) => {
+    const sortedLineItems = [...invoice.lineItems]
+      .map(item => ({
+        id: item.id,
+        description: String(item.description || ""),
+        quantity: Number(item.quantity || 0),
+        unit: String(item.unit || ""),
+        unitPrice: Number(item.unitPrice || 0),
+        amount: Number(item.amount || 0),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    
+    return {
+      id: invoice.id,
+      invoiceNumber: String(invoice.invoiceNumber || ""),
+      clientId: String(invoice.clientId || ""),
+      clientName: String(invoice.clientName || ""),
+      clientEmail: String(invoice.clientEmail || ""),
+      clientAddress: String(invoice.clientAddress || ""),
+      companyName: String(invoice.companyName || ""),
+      companyAddress: String(invoice.companyAddress || ""),
+      companyPhone: String(invoice.companyPhone || ""),
+      issueDate: String(invoice.issueDate || ""),
+      dueDate: String(invoice.dueDate || ""),
+      projectId: String(invoice.projectId || ""),
+      projectName: String(invoice.projectName || ""),
+      paymentMethod: String(invoice.paymentMethod || ""),
+      currency: String(invoice.currency || ""),
+      isInternational: Boolean(invoice.isInternational),
+      province: String(invoice.province || ""),
+      lineItems: sortedLineItems,
+      discountType: String(invoice.discountType || "none"),
+      discount: Number(invoice.discount || 0),
+      notes: String(invoice.notes || ""),
+      status: String(invoice.status || "draft"),
+      poNumber: String(invoice.poNumber || ""),
+    };
+  };
+
+  const handleBack = () => {
+    // Check if we're in create/edit mode
+    if (view === "create") {
+      // If editing an existing invoice, check for changes
+      if (editingInvoice && originalInvoice) {
+        // Direct comparison to ensure we catch changes
+        const normalizedCurrent = normalizeInvoiceForComparison(currentInvoice);
+        const normalizedOriginal = normalizeInvoiceForComparison(originalInvoice);
+        
+        const currentStr = JSON.stringify(normalizedCurrent);
+        const originalStr = JSON.stringify(normalizedOriginal);
+        
+        if (currentStr !== originalStr) {
+          setShowSaveDraftModal(true);
+          return;
+        }
+      } else if (!editingInvoice) {
+        // For new invoices, check if any meaningful data has been entered
+        const hasData = 
+          currentInvoice.clientId !== "" ||
+          currentInvoice.companyName !== "" ||
+          currentInvoice.lineItems.length > 0 ||
+          currentInvoice.clientEmail !== "";
+        
+        if (hasData) {
+          setShowSaveDraftModal(true);
+          return;
+        }
+      }
+    }
+    
+    // No changes, just go back
+    resetStates();
+    setView("list");
+    setEditingInvoice(null);
+    setViewingInvoice(null);
+    setOriginalInvoice(null);
+  };
+
+  const handleSaveDraftConfirm = async () => {
+    try {
+      await handleSave("draft");
+      setShowSaveDraftModal(false);
+    } catch (error) {
+      // Error is already handled in handleSave
+      console.error("Error saving draft:", error);
+    }
+  };
+
+  const handleSaveDraftCancel = () => {
+    setShowSaveDraftModal(false);
+    resetStates();
+    setView("list");
+    setEditingInvoice(null);
+    setViewingInvoice(null);
+    setOriginalInvoice(null);
+  };
+
+  const handleSendInvoice = async () => {
+    // Validate before sending
+    const validation = validateInvoiceForSending();
+    if (!validation.valid) {
+      toast.error(validation.error || "Please fill all required fields");
+      return;
+    }
+
+    const loadingToast = toast.loading("Sending invoice...");
+
+    try {
       const res = await fetch("/api/send-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentInvoice, calculations }),
       });
 
-      if (!res.ok) throw new Error("Email failed");
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to send invoice");
+      }
 
       await handleSave("sent");
-      toast.success("Invoice sent & marked as sent!");
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to send invoice. Try again.");
-    } finally {
-      toast.dismiss();
+      toast.dismiss(loadingToast);
+      toast.success("Invoice sent successfully!");
+      resetStates();
+      setView("list");
+      setEditingInvoice(null);
+      setViewingInvoice(null);
+    } catch (error: any) {
+      console.error("Send invoice error:", error);
+      toast.dismiss(loadingToast);
+      toast.error(error.message || "Failed to send invoice. Please try again.");
     }
   };
 
@@ -402,7 +660,7 @@ const InvoicePage: React.FC = () => {
       (actionButtons as HTMLElement).style.display = "none";
     }
 
-    const opt = {
+    const opt: any = {
       margin: 10,
       filename: `invoice-${currentInvoice.invoiceNumber || "draft"}.pdf`,
       image: { type: "jpeg", quality: 0.98 },
@@ -441,7 +699,46 @@ const InvoicePage: React.FC = () => {
           title="Delete Invoice"
           description="Are you sure you want to delete this invoice? This action cannot be undone."
         />
+        <SaveDraftModal
+          open={showSaveDraftModal}
+          onClose={handleSaveDraftCancel}
+          onConfirm={handleSaveDraftConfirm}
+          isLoading={createInvoiceMutation.isPending || updateInvoiceMutation.isPending}
+        />
       </>
+    );
+  }
+
+  if (view === "view") {
+    return (
+      <div className="bg-gray-50 p-4">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-6">
+            <button
+              onClick={handleBack}
+              className="flex items-center gap-2 text-orange-600 hover:text-orange-900 mb-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Invoices
+            </button>
+            <h1 className="text-2xl font-semibold text-gray-800">
+              View Invoice
+            </h1>
+          </div>
+          <InvoicePreview
+            currentInvoice={currentInvoice}
+            calculations={calculations}
+            onDownloadPDF={handleDownloadPDF}
+            setPreviewRef={setPreviewRef}
+            onSendInvoice={
+              viewingInvoice?.status !== "paid" ? handleSendInvoice : undefined
+            }
+            isLoading={
+              createInvoiceMutation.isPending || updateInvoiceMutation.isPending
+            }
+          />
+        </div>
+      </div>
     );
   }
 
@@ -449,31 +746,10 @@ const InvoicePage: React.FC = () => {
     <div className="bg-gray-50 p-4">
       <div className="mx-auto max-w-7xl">
         {/* Header */}
-        {!showPreviewIcons && (
+        {!showPreview && (
           <div className="mb-6">
             <button
-              onClick={() => {
-                setShowPreview(false);
-                setView("list");
-              }}
-              className="flex items-center gap-2 text-orange-600 hover:text-orange-900 mb-2"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Invoices this
-            </button>
-            <h1 className="text-2xl font-semibold text-gray-800">
-              {/* View Invoice */}
-              {editingInvoice ? "Edit Invoice" : "Create Invoice"}
-            </h1>
-          </div>
-        )}{" "}
-        {showPreviewIcons && !showPreview && (
-          <div className="mb-6">
-            <button
-              onClick={() => {
-                setShowPreviewIcons(false);
-                setView("list");
-              }}
+              onClick={handleBack}
               className="flex items-center gap-2 text-orange-600 hover:text-orange-900 mb-2"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -483,21 +759,41 @@ const InvoicePage: React.FC = () => {
               {editingInvoice ? "Edit Invoice" : "Create Invoice"}
             </h1>
           </div>
-        )}{" "}
-        {!showPreview && showPreviewIcons && (
-          <button
-            onClick={() => setShowPreviewIcons(!showPreviewIcons)}
-            className="flex items-center gap-2 px-4 py-2 mb-3 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            <Eye className="h-4 w-4" />
-            {showPreviewIcons ? "Hide" : "Show"} Preview
-          </button>
+        )}
+        {showPreview && (
+          <div className="mb-6">
+            <button
+              onClick={() => setShowPreview(false)}
+              className="flex items-center gap-2 text-orange-600 hover:text-orange-900 mb-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to {editingInvoice ? "Edit" : "Create"}
+            </button>
+            <h1 className="text-2xl font-semibold text-gray-800">
+              Preview Invoice
+            </h1>
+          </div>
         )}
       </div>
-      {!showPreviewIcons && (
+      {!showPreview ? (
         <InvoiceFormContainer
           currentInvoice={currentInvoice}
-          setCurrentInvoice={setCurrentInvoice}
+          setCurrentInvoice={(updater) => {
+            if (typeof updater === "function") {
+              setCurrentInvoice((prev) => {
+                const newInvoice = updater(prev);
+                if (view === "create") {
+                  setHasUnsavedChanges(true);
+                }
+                return newInvoice;
+              });
+            } else {
+              setCurrentInvoice(updater);
+              if (view === "create") {
+                setHasUnsavedChanges(true);
+              }
+            }
+          }}
           clientsData={clientsData}
           projectsData={projectsData}
           showPreview={showPreview}
@@ -505,33 +801,30 @@ const InvoicePage: React.FC = () => {
             createInvoiceMutation.isPending || updateInvoiceMutation.isPending
           }
           isEditing={!!editingInvoice}
-          onBack={() => {
-            setShowPreview(false);
-            setView("list");
-          }}
-          onTogglePreview={() => setShowPreviewIcons(!showPreviewIcons)}
+          onBack={handleBack}
+          onTogglePreview={() => setShowPreview(!showPreview)}
           onSaveDraft={() => handleSave("draft")}
           onSendInvoice={handleSendInvoice}
+          onPreviewAndSend={handlePreviewAndSend}
         />
-      )}
-
-      {showPreview && !showPreviewIcons && (
+      ) : (
         <InvoicePreview
           currentInvoice={currentInvoice}
           calculations={calculations}
           onDownloadPDF={handleDownloadPDF}
           setPreviewRef={setPreviewRef}
+          onSendInvoice={handleSendInvoice}
+          isLoading={
+            createInvoiceMutation.isPending || updateInvoiceMutation.isPending
+          }
         />
       )}
-
-      {showPreviewIcons && !showPreview && (
-        <InvoicePreview
-          currentInvoice={currentInvoice}
-          calculations={calculations}
-          onDownloadPDF={handleDownloadPDF}
-          setPreviewRef={setPreviewRef}
-        />
-      )}
+      <SaveDraftModal
+        open={showSaveDraftModal}
+        onClose={handleSaveDraftCancel}
+        onConfirm={handleSaveDraftConfirm}
+        isLoading={createInvoiceMutation.isPending || updateInvoiceMutation.isPending}
+      />
     </div>
   );
 };

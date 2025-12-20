@@ -91,12 +91,13 @@ export async function GET(
     console.log("here is the public url", publicUrl);
 
     // Transform to match expected format
+    // Convert BigInt to number for JSON serialization
     const transformedDocument = {
       id: document.id,
       project_id: document.projectId,
       filename: document.filename,
       original_filename: document.originalFilename,
-      file_size: document.fileSize,
+      file_size: Number(document.fileSize), // Convert BigInt to number
       mime_type: document.mimeType,
       file_path: document.filePath,
       uploaded_at: document.uploadedAt,

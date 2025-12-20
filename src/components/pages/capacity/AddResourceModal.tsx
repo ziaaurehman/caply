@@ -7,6 +7,7 @@ import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { teamAPI } from "@/utils/api/team";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { capacityKeys } from "@/lib/hooks/useCapacity";
 
 interface AddResourceModalProps {
   isOpen: boolean;
@@ -147,12 +148,20 @@ export default function AddResourceModal({
         queryKey: ["resources", currentOrganization.id],
       });
       queryClient.invalidateQueries({
-        queryKey: ["project-assignments"],
+        queryKey: ["project-assignments"], 
       });
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.monthlyByOrg(
+          currentOrganization.id,
+          "monthly",
+          { only_active: true }
+        ),
+      }),
 
       toast.success("Resource added successfully!");
 
       onResourceAdded();
+      
       onClose();
       resetForm();
     } catch (err) {

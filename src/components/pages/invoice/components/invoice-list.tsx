@@ -188,45 +188,48 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        {invoice.status === "paid" && (
+                        <div className="flex items-center justify-end gap-2">
+                          {/* View button - always show */}
                           <button
                             onClick={() => onViewPDF(invoice)}
-                            className="text-blue-600 hover:text-blue-900 mr-3"
-                            title="View PDF"
+                            className="text-blue-600 hover:text-blue-900"
+                            title="View Invoice"
                           >
                             <Eye className="h-4 w-4" />
                           </button>
-                        )}
 
-                        {invoice.status !== "paid" && (
-                          <>
-                            {activeTab !== "draft" && (
+                          {/* Mark as Paid - only for draft and sent invoices */}
+                          {(invoice.status === "draft" || invoice.status === "sent") && (
+                            <button
+                              onClick={() => onMarkAsPaid(invoice)}
+                              className="text-green-600 hover:text-green-900"
+                              title="Mark as Paid"
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                            </button>
+                          )}
+
+                          {/* Edit and Delete - only for draft invoices */}
+                          {invoice.status === "draft" && (
+                            <>
                               <button
-                                onClick={() => onMarkAsPaid(invoice)}
-                                className="text-green-600 hover:text-green-900 mr-3"
-                                title="Mark as Paid"
+                                onClick={() => onEdit(invoice)}
+                                className="text-orange-600 hover:text-orange-900"
+                                title="Edit Invoice"
                               >
-                                <CheckCircle className="h-4 w-4" />
+                                <Pencil className="h-4 w-4" />
                               </button>
-                            )}
 
-                            <button
-                              onClick={() => onEdit(invoice)}
-                              className="text-orange-600 hover:text-orange-900 mr-3"
-                              title="Edit Invoice"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-
-                            <button
-                              onClick={() => onDelete(invoice.id)}
-                              className="text-red-600 hover:text-red-900"
-                              title="Delete Invoice"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </>
-                        )}
+                              <button
+                                onClick={() => onDelete(invoice.id)}
+                                className="text-red-600 hover:text-red-900"
+                                title="Delete Invoice"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

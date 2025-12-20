@@ -52,6 +52,29 @@ export const ClientInfoForm: React.FC<ClientInfoFormProps> = ({
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
+            Client Email<span className="text-red-500">*</span>
+          </label>
+          <input
+            type="email"
+            value={currentInvoice.clientEmail}
+            onChange={(e) =>
+              setCurrentInvoice({
+                ...currentInvoice,
+                clientEmail: e.target.value,
+              })
+            }
+            placeholder="client@example.com"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+          />
+          {!currentInvoice.clientEmail && (
+            <p className="mt-1 text-xs text-red-500">
+              Email is required to send invoice
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
             Client Address
           </label>
           <textarea

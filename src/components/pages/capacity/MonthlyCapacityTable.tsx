@@ -183,7 +183,7 @@ const fetchProjects = async (organizationId: string): Promise<Project[]> => {
   return data.projects || [];
 };
 
-export default function MonthlyCapacityTable({
+export default function MonthlyCapacityTable({ 
   selectedMonth = new Date().getMonth(),
   selectedYear = new Date().getFullYear(),
   onAddResource,

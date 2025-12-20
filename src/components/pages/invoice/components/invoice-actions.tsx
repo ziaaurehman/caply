@@ -9,6 +9,7 @@ interface InvoiceActionsProps {
   onTogglePreview: () => void;
   onSaveDraft: () => void;
   onSendInvoice: () => void;
+  onPreviewAndSend?: () => void;
 }
 
 export const InvoiceActions: React.FC<InvoiceActionsProps> = ({
@@ -18,6 +19,7 @@ export const InvoiceActions: React.FC<InvoiceActionsProps> = ({
   onTogglePreview,
   onSaveDraft,
   onSendInvoice,
+  onPreviewAndSend,
 }) => {
   return (
     <div className="flex gap-3 mb-6 no-print-buttons">
@@ -47,6 +49,16 @@ export const InvoiceActions: React.FC<InvoiceActionsProps> = ({
         )}
         Save Draft
       </button>
+      {onPreviewAndSend && (
+        <button
+          onClick={onPreviewAndSend}
+          disabled={isLoading}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:opacity-50"
+        >
+          <Eye className="h-4 w-4" />
+          Preview & Send
+        </button>
+      )}
       <button
         onClick={onSendInvoice}
         disabled={isLoading}
@@ -62,3 +74,4 @@ export const InvoiceActions: React.FC<InvoiceActionsProps> = ({
     </div>
   );
 };
+

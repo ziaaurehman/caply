@@ -1,6 +1,6 @@
 // InvoicePreview.tsx
 import React from "react";
-import { Download } from "lucide-react";
+import { Download, Send } from "lucide-react";
 import { LocalInvoice, Calculations, TAX_RATES } from "./invoice-types";
 import { formatCurrency } from "./invoice-utils";
 
@@ -9,6 +9,8 @@ interface InvoicePreviewProps {
   calculations: Calculations;
   onDownloadPDF: () => void;
   setPreviewRef: (ref: HTMLDivElement | null) => void;
+  onSendInvoice?: () => void;
+  isLoading?: boolean;
 }
 
 export const InvoicePreview: React.FC<InvoicePreviewProps> = ({
@@ -16,6 +18,8 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({
   calculations,
   onDownloadPDF,
   setPreviewRef,
+  onSendInvoice,
+  isLoading = false,
 }) => {
   return (
     <>
@@ -239,6 +243,16 @@ export const InvoicePreview: React.FC<InvoicePreviewProps> = ({
               <Download className="h-4 w-4" />
               Download PDF
             </button>
+            {onSendInvoice && (
+              <button
+                onClick={onSendInvoice}
+                disabled={isLoading}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-50"
+              >
+                <Send className="h-4 w-4" />
+                {isLoading ? "Sending..." : "Send Invoice"}
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -23,6 +23,7 @@ interface InvoiceFormContainerProps {
   onTogglePreview: () => void;
   onSaveDraft: () => void;
   onSendInvoice: () => void;
+  onPreviewAndSend?: () => void;
 }
 
 export const InvoiceFormContainer: React.FC<InvoiceFormContainerProps> = ({
@@ -37,6 +38,7 @@ export const InvoiceFormContainer: React.FC<InvoiceFormContainerProps> = ({
   onTogglePreview,
   onSaveDraft,
   onSendInvoice,
+  onPreviewAndSend,
 }) => {
   const isClientSelected = Boolean(currentInvoice.clientId);
   const isProjectSelected = Boolean(currentInvoice.projectId);
@@ -93,6 +95,7 @@ export const InvoiceFormContainer: React.FC<InvoiceFormContainerProps> = ({
               onTogglePreview={onTogglePreview}
               onSaveDraft={onSaveDraft}
               onSendInvoice={onSendInvoice}
+              onPreviewAndSend={onPreviewAndSend}
             />
           </div>
         )}

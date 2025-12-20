@@ -75,11 +75,12 @@ export async function GET(
     });
 
     // Transform to match expected format
+    // Convert BigInt to number for JSON serialization
     const transformedDocuments = documents.map((doc) => ({
       id: doc.id,
       filename: doc.filename,
       original_filename: doc.originalFilename,
-      file_size: doc.fileSize,
+      file_size: Number(doc.fileSize), // Convert BigInt to number
       mime_type: doc.mimeType,
       file_path: doc.filePath,
       uploaded_at: doc.uploadedAt,
@@ -149,7 +150,7 @@ export async function POST(
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const supabase = supabaseAdmin;
+    const supabase = supabaseAdmin; 
     // const supabase = await createClient(); // For file storage
 
     // Parse form data
@@ -255,12 +256,13 @@ export async function POST(
       });
 
       // Transform to match expected format
+      // Convert BigInt to number for JSON serialization
       const transformedDocument = {
         id: document.id,
         project_id: document.projectId,
         filename: document.filename,
         original_filename: document.originalFilename,
-        file_size: document.fileSize,
+        file_size: Number(document.fileSize), // Convert BigInt to number
         mime_type: document.mimeType,
         file_path: document.filePath,
         uploaded_at: document.uploadedAt,
