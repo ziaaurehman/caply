@@ -649,6 +649,41 @@ const InvoicePage: React.FC = () => {
       toast.error(error.message || "Failed to send invoice. Please try again.");
     }
   };
+  const handleSendInvoicejust = async () => {
+    // Validate before sending
+    const validation = validateInvoiceForSending();
+    if (!validation.valid) {
+      toast.error(validation.error || "Please fill all required fields");
+      return;
+    }
+
+    const loadingToast = toast.loading("Sending invoice...");
+
+    try {
+      const res = await fetch("/api/send-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentInvoice, calculations }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to send invoice");
+      }
+
+      toast.success("Invoice sent successfully!");
+      toast.dismiss(loadingToast);
+      resetStates();
+      setView("list");
+      setEditingInvoice(null);
+      setViewingInvoice(null);
+    } catch (error: any) {
+      console.error("Send invoice error:", error);
+      toast.dismiss(loadingToast);
+      toast.error(error.message || "Failed to send invoice. Please try again.");
+    }
+  };
 
   const handleDownloadPDF = async () => {
     if (!previewRef) return;
@@ -731,7 +766,7 @@ const InvoicePage: React.FC = () => {
             onDownloadPDF={handleDownloadPDF}
             setPreviewRef={setPreviewRef}
             onSendInvoice={
-              viewingInvoice?.status !== "paid" ? handleSendInvoice : undefined
+              viewingInvoice?.status !== "paid" ? handleSendInvoicejust : handleSendInvoicejust
             }
             isLoading={
               createInvoiceMutation.isPending || updateInvoiceMutation.isPending
