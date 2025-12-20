@@ -7,30 +7,6 @@ export async function POST(req: Request) {
   try {
     const { currentInvoice, calculations } = await req.json();
 
-    // Validate required fields
-    if (!currentInvoice.clientEmail || !currentInvoice.clientEmail.trim()) {
-      return NextResponse.json(
-        { error: "Client email is required to send invoice" },
-        { status: 400 }
-      );
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(currentInvoice.clientEmail.trim())) {
-      return NextResponse.json(
-        { error: "Invalid email address format" },
-        { status: 400 }
-      );
-    }
-
-    if (!currentInvoice.invoiceNumber) {
-      return NextResponse.json(
-        { error: "Invoice number is required" },
-        { status: 400 }
-      );
-    }
-
     const html = generateInvoiceHTML(currentInvoice, calculations);
 
     const browser = await puppeteer.launch({
@@ -53,14 +29,12 @@ export async function POST(req: Request) {
     });
 
     await browser.close();
-
-    const totalAmount = calculations?.total || currentInvoice.totalAmount || 0;
     const emailText = `
-Hello ${currentInvoice.clientName || "Valued Client"},
+Hello ${currentInvoice.clientName},
 
 Please find attached the invoice #${currentInvoice.invoiceNumber}.
 
-Total Due: ${currentInvoice.currency} ${totalAmount.toFixed(2)}
+Total Due: ${currentInvoice.currency} ${currentInvoice.totalAmount}
 Due Date: ${new Date(currentInvoice.dueDate).toLocaleDateString()}
 
 Thank you for choosing ${currentInvoice.companyName}.
@@ -68,17 +42,18 @@ If you have any questions, feel free to reach out.
 
 Best regards,
 ${currentInvoice.companyName}
-${currentInvoice.companyPhone || ""}
+${currentInvoice.companyPhone}
+${currentInvoice.companyEmail}
     `;
 
     await sendEmail({
-      to: currentInvoice.clientEmail.trim(),
+      to: currentInvoice.clientEmail || currentInvoice.clientEmail1,
       subject: `Invoice #${currentInvoice.invoiceNumber}`,
-      html: emailText.replace(/\n/g, "<br>"),
+      html: emailText,
       attachments: [
         {
           filename: `Invoice-${currentInvoice.invoiceNumber}.pdf`,
-          content: Buffer.from(pdfBuffer).toString("base64"),
+          content: Buffer.from(pdfBuffer).toString("base64"), // ensure clean base64
           type: "application/pdf",
           disposition: "attachment",
         },
@@ -86,11 +61,10 @@ ${currentInvoice.companyPhone || ""}
     });
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err) {
     console.error("❌ Invoice Send Error:", err);
-    const errorMessage = err?.message || err?.response?.body?.errors?.[0]?.message || "Failed to send invoice";
     return NextResponse.json(
-      { error: errorMessage },
+      { error: "Failed to send invoice" },
       { status: 500 }
     );
   }
