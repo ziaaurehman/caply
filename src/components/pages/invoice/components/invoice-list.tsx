@@ -199,7 +199,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                           </button>
 
                           {/* Mark as Paid - only for draft and sent invoices */}
-                          {(invoice.status === "draft" || invoice.status === "sent") && (
+                          {(invoice.status === "sent") && (
+
                             <button
                               onClick={() => onMarkAsPaid(invoice)}
                               className="text-green-600 hover:text-green-900"
