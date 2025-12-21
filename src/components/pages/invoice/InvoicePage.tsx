@@ -25,7 +25,7 @@ import {
 import { InvoiceList } from "./components/invoice-list";
 import { InvoiceFormContainer } from "./components/invoice-form-container";
 import { InvoicePreview } from "./components/invoice-preview";
-import { ArrowLeft, Eye } from "lucide-react";
+import { ArrowLeft, Currency, Eye } from "lucide-react";
 import { DeleteModal } from "./components/delete-model";
 import { SaveDraftModal } from "./components/save-draft-modal";
 
@@ -264,40 +264,61 @@ const InvoicePage: React.FC = () => {
     }
   }, [currentInvoice, view, editingInvoice, originalInvoice]);
 
-  const calculations = React.useMemo(() => {
-    const subtotal = currentInvoice.lineItems.reduce(
-      (sum, item) => sum + item.amount,
-      0
-    );
-    let discountAmount = 0;
+const calculations = React.useMemo(() => {
+  const subtotal = currentInvoice.lineItems.reduce(
+    (sum, item) => sum + item.amount,
+    0
+  );
 
-    if (currentInvoice.discountType === "percentage") {
-      discountAmount = subtotal * (currentInvoice.discount / 100);
-    } else if (currentInvoice.discountType === "fixed") {
-      discountAmount = currentInvoice.discount;
-    }
-    discountAmount = Math.min(discountAmount, subtotal);
+  let discountAmount = 0;
 
-    let federalTax = 0;
-    let provincialTax = 0;
+  if (currentInvoice.discountType === "percentage") {
+    discountAmount = subtotal * (currentInvoice.discount / 100);
+  } else if (currentInvoice.discountType === "fixed") {
+    discountAmount = currentInvoice.discount;
+  }
 
-    if (!currentInvoice.isInternational && currentInvoice.province) {
-      const TAX_RATES: any = {
-        ON: { federal: 5, provincial: 8 },
-        QC: { federal: 5, provincial: 9.975 },
-        BC: { federal: 5, provincial: 5 },
-        AB: { federal: 5, provincial: 0 },
-      };
-      const taxRate = TAX_RATES[currentInvoice.province];
+  discountAmount = Math.min(discountAmount, subtotal);
+
+  let federalTax = 0;
+  let provincialTax = 0;
+
+  // ✅ store applied tax rate
+  let appliedTaxRate: { federal: number; provincial: number } | null = null;
+
+  if (!currentInvoice.isInternational && currentInvoice.province) {
+    const TAX_RATES: Record<
+      string,
+      { federal: number; provincial: number }
+    > = {
+      ON: { federal: 5, provincial: 8 },
+      QC: { federal: 5, provincial: 9.975 },
+      BC: { federal: 5, provincial: 5 },
+      AB: { federal: 5, provincial: 0 },
+    };
+
+    appliedTaxRate = TAX_RATES[currentInvoice.province] ?? null;
+
+    if (appliedTaxRate) {
       const taxableAmount = subtotal - discountAmount;
-      federalTax = taxableAmount * (taxRate.federal / 100);
-      provincialTax = taxableAmount * (taxRate.provincial / 100);
+      federalTax = taxableAmount * (appliedTaxRate.federal / 100);
+      provincialTax = taxableAmount * (appliedTaxRate.provincial / 100);
     }
+  }
 
-    const total = subtotal - discountAmount + federalTax + provincialTax;
+  const total = subtotal - discountAmount + federalTax + provincialTax;
 
-    return { subtotal, discountAmount, federalTax, provincialTax, total };
-  }, [currentInvoice]);
+  return {
+    subtotal,
+    discountAmount,
+    federalTax,
+    provincialTax,
+    total,
+    taxRate: appliedTaxRate, // ✅ returned
+    Currency : currentInvoice.currency
+  };
+}, [currentInvoice]);
+
 
   const resetStates = () => {
     setShowPreview(false);

@@ -1,6 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import avatarlogo1  from "@/assets/bruce-mars-8YG31Xn4dSw-unsplash.jpg"
+import avatarlogo2  from "@/assets/docusign-7RWBSYA9Rro-unsplash.jpg"
+import avatarlogo3  from "@/assets/seo-galaxy-X6UPL_NWNtk-unsplash.jpg"
+import Image from "next/image"
 
 export default function TestimonialsSection() {
   const [currentSlide, setCurrentSlide] = useState(0)
@@ -12,7 +16,7 @@ export default function TestimonialsSection() {
         "Caply has transformed how we manage our team's capacity. The time tracking and project planning features have increased our productivity by at least 30%.",
       name: "Sarah Johnson",
       company: "TechSolutions Inc.",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo1,
     },
     {
       id: 2,
@@ -20,14 +24,14 @@ export default function TestimonialsSection() {
         "The invoice generation and expense tracking in Caply saved us countless hours each month. It's an essential tool for our growing business.",
       name: "Michael Chen",
       company: "InnovateCorp",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo2,
     },
     {
       id: 3,
       quote: "Caply's leave management system is hands down the most intuitive I've ever used. Our HR team loves it!",
       name: "Emma Rodriguez",
       company: "CreativeWorks",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo3,
     },
     {
       id: 4,
@@ -35,14 +39,14 @@ export default function TestimonialsSection() {
         "We switched to Caply last year and our project delivery times improved by 25%. The capacity planning tools are a game-changer for our agency.",
       name: "David Kim",
       company: "DesignForward",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo1,
     },
     {
       id: 5,
       quote: "Caply gets better every month with new features. The team behind it clearly understands what businesses like ours need.",
       name: "Jessica Taylor",
       company: "GrowthPartners",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo2,
     },
     {
       id: 6,
@@ -50,7 +54,7 @@ export default function TestimonialsSection() {
         "The client management features in Caply are exceptional. We can track everything from initial contact to final payment in one place.",
       name: "Robert Patel",
       company: "ConsultPro",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo3,
     },
     {
       id: 7,
@@ -58,7 +62,7 @@ export default function TestimonialsSection() {
         "Started using Caply last quarter & I'm blown away. The reporting features give us insights we never had before about our team's productivity.",
       name: "Olivia Martinez",
       company: "DataDriven",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo1,
     },
     {
       id: 8,
@@ -66,7 +70,7 @@ export default function TestimonialsSection() {
         "Caply helped us scale from 5 to 50 employees without hiring additional administrative staff. The automation is incredible.",
       name: "James Wilson",
       company: "ScaleUp Solutions",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo2,
     },
     {
       id: 9,
@@ -74,7 +78,7 @@ export default function TestimonialsSection() {
         "The most useful business tool we've implemented this year is, without question, Caply. The ROI was evident within the first month.",
       name: "Sophia Lee",
       company: "ROI Maximizers",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo3,
     },
     {
       id: 10,
@@ -82,7 +86,7 @@ export default function TestimonialsSection() {
         "Our team adoption of Caply was immediate. The intuitive interface meant minimal training and maximum productivity from day one.",
       name: "Thomas Brown",
       company: "EfficientWorks",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo1,
     },
     {
       id: 11,
@@ -90,14 +94,14 @@ export default function TestimonialsSection() {
         "After trying multiple project management tools, we finally found Caply. It's the only solution that handles both resource planning and financial tracking effectively.",
       name: "Natalie Garcia",
       company: "ProjectMasters",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo2,
     },
     {
       id: 12,
       quote: "Caply's timesheet system is the best we've ever used. Simple for employees, powerful for management.",
       name: "Daniel Thompson",
       company: "TimeWise Consulting",
-      avatar: "/placeholder.svg?height=52&width=52",
+      avatar: avatarlogo3,
     },
   ]
 
@@ -216,8 +220,8 @@ function TestimonialCard({ testimonial }: { testimonial: any }) {
 
         {/* Author */}
         <div className="flex items-center space-x-3">
-          <img
-            src={testimonial.avatar || "/placeholder.svg"}
+          <Image
+            src={testimonial.avatar}
             alt={testimonial.name}
             className="w-11 h-11 lg:w-13 lg:h-13 rounded-full object-cover"
           />

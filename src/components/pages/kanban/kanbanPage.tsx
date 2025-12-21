@@ -812,49 +812,101 @@ export default function KanbanBoard({ projectId }: KanbanPageProps) {
   };
 
   const handleSaveList = async (listName: string) => {
-    if (!currentBoard || !currentOrganization?.id) return;
+  if (!currentBoard || !currentOrganization?.id) return;
 
-    try {
-      // Create a temporary list for optimistic update
-      const tempList = {
-        id: `temp-${Date.now()}`, // Temporary ID
-        board_id: currentBoard.id,
-        name: listName,
-        position: lists.length,
-        is_archived: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        cards: [],
-      };
+  const tempId = `temp-${Date.now()}`;
 
-      // OPTIMISTIC UPDATE: Add the temporary list immediately
-      updateBoardData((prev) => ({
-        ...prev,
-        lists: [...prev.lists, tempList],
-      }));
-
-      // Make API call in the background
-      setTimeout(async () => {
-        try {
-          const response = await kanbanAPI.createList({
-            board_id: currentBoard!.id,
-            name: listName,
-            organizationId: currentOrganization.id,
-          });
-
-          toast.success("List created successfully!");
-          // Invalidate query to refresh data
-          // invalidateBoard();
-        } catch (error) {
-          console.error("Error creating list:", error);
-          toast.error("Failed to create list");
-        }
-      }, 0);
-    } catch (error) {
-      console.error("Error in add list logic:", error);
-      toast.error("Failed to create list");
-    }
+  const tempList = {
+    id: tempId,
+    board_id: currentBoard.id,
+    name: listName,
+    position: lists.length,
+    is_archived: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    cards: [],
   };
+
+  // 1️⃣ OPTIMISTIC UPDATE
+  updateBoardData((prev) => ({
+    ...prev,
+    lists: [...prev.lists, tempList],
+  }));
+
+  try {
+    // 2️⃣ API CALL
+    const response = await kanbanAPI.createList({
+      board_id: currentBoard.id,
+      name: listName,
+      organizationId: currentOrganization.id,
+    });
+
+    toast.success("List created successfully!");
+
+    // 3️⃣ REPLACE TEMP LIST WITH REAL ONE
+    updateBoardData((prev) => ({
+      ...prev,
+      lists: prev.lists.map((list) =>
+        list.id === tempId ? response.list : list
+      ),
+    }));
+
+  } catch (error) {
+    console.error("Error creating list:", error);
+    toast.error("Failed to create list");
+
+    // 4️⃣ ROLLBACK (REMOVE TEMP LIST)
+    updateBoardData((prev) => ({
+      ...prev,
+      lists: prev.lists.filter((list) => list.id !== tempId),
+    }));
+  }
+};
+
+  // const handleSaveList = async (listName: string) => {
+  //   if (!currentBoard || !currentOrganization?.id) return;
+
+  //   try {
+  //     // Create a temporary list for optimistic update
+  //     const tempList = {
+  //       id: `temp-${Date.now()}`, // Temporary ID
+  //       board_id: currentBoard.id,
+  //       name: listName,
+  //       position: lists.length,
+  //       is_archived: false,
+  //       created_at: new Date().toISOString(),
+  //       updated_at: new Date().toISOString(),
+  //       cards: [],
+  //     };
+
+  //     // OPTIMISTIC UPDATE: Add the temporary list immediately
+  //     updateBoardData((prev) => ({
+  //       ...prev,
+  //       lists: [...prev.lists, tempList],
+  //     }));
+
+  //     // Make API call in the background
+  //     setTimeout(async () => {
+  //       try {
+  //         const response = await kanbanAPI.createList({
+  //           board_id: currentBoard!.id,
+  //           name: listName,
+  //           organizationId: currentOrganization.id,
+  //         });
+
+  //         toast.success("List created successfully!");
+  //         // Invalidate query to refresh data
+  //         // invalidateBoard();
+  //       } catch (error) {
+  //         console.error("Error creating list:", error);
+  //         toast.error("Failed to create list");
+  //       }
+  //     }, 0);
+  //   } catch (error) {
+  //     console.error("Error in add list logic:", error);
+  //     toast.error("Failed to create list");
+  //   }
+  // };
 
   useEffect(() => {
     const handleGlobalDragEnd = (e: DragEvent) => {

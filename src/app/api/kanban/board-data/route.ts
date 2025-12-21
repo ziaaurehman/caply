@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { serializeBigInt } from "@/utils/serializeBigInt";
 
 export async function GET(request: NextRequest) {
   try {
@@ -336,7 +337,7 @@ export async function GET(request: NextRequest) {
           filename: attachment.filename,
           original_filename: attachment.originalFilename,
           file_path: attachment.filePath,
-          file_size: attachment.fileSize,
+          file_size: Number(attachment.fileSize),
           mime_type: attachment.mimeType,
           uploaded_by: attachment.uploadedBy,
           uploaded_at: attachment.uploadedAt,
@@ -432,7 +433,7 @@ export async function GET(request: NextRequest) {
       updated_at: currentBoard.updatedAt,
     };
 
-    return NextResponse.json({
+    const responseData = {
       success: true,
       data: {
         project: transformedProject,
@@ -442,7 +443,9 @@ export async function GET(request: NextRequest) {
         cards: enrichedCards,
         labels: boardLabels,
       },
-    });
+    };
+
+    return NextResponse.json(serializeBigInt(responseData))
   } catch (error) {
     console.error("Error fetching board data:", error);
     return NextResponse.json(
