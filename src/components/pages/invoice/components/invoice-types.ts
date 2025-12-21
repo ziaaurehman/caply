@@ -53,3 +53,9 @@ export const TAX_RATES: {
   BC: { name: "British Columbia", federal: 5, provincial: 5 },
   AB: { name: "Alberta", federal: 5, provincial: 0 },
 };
+export const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  CAD: "CA$",
+  EUR: "€",
+  GBP: "£",
+};

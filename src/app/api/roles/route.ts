@@ -126,6 +126,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/roles - Create a new organization-specific role
 export async function POST(request: NextRequest) {
+  console.log("Comes Here on new Account Create")
   try {
     const body = await request.json();
     const { name, display_name, description, permission_ids, organizationId } =

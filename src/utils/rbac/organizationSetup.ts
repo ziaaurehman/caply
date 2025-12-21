@@ -151,6 +151,7 @@ export const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
     is_system_role: false,
     permissions: [
       "projects.read",
+      "users.read",
       "tasks.read",
       "tasks.update",
       "time_entries.create",

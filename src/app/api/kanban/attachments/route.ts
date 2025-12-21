@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server"; // Keep for file storage
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
+import { supabaseAdmin } from "@/utils/supabase/admin";
 
 export async function GET(req: NextRequest) {
   try {
@@ -184,7 +185,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Upload file to Supabase storage (keeping Supabase for file storage)
-    const supabase = await createClient();
+    const supabase = supabaseAdmin;
     const fileExt = file.name.split(".").pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
     const filePath = `card-attachments/${cardId}/${fileName}`;
@@ -205,53 +206,55 @@ export async function POST(req: NextRequest) {
     }
 
     // Create attachment record and activity log in a transaction
-    const result = await prisma.$transaction(async (tx) => {
-      // Create attachment record
-      const attachment = await tx.attachment.create({
-        data: {
-          cardId,
-          filename: fileName,
-          originalFilename: file.name,
-          filePath: uploadData.path,
-          fileSize: BigInt(file.size),
-          mimeType: file.type,
-          uploadedBy: session.user.id,
-        },
-        include: {
-          uploader: {
-            select: {
-              id: true,
-              fullName: true,
-              email: true,
-              avatarUrl: true,
+    const result = await prisma
+      .$transaction(async (tx) => {
+        // Create attachment record
+        const attachment = await tx.attachment.create({
+          data: {
+            cardId,
+            filename: fileName,
+            originalFilename: file.name,
+            filePath: uploadData.path,
+            fileSize: BigInt(file.size),
+            mimeType: file.type,
+            uploadedBy: session.user.id,
+          },
+          include: {
+            uploader: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                avatarUrl: true,
+              },
             },
           },
-        },
-      });
+        });
 
-      // Create activity log
-      await tx.activity.create({
-        data: {
-          userId: session.user.id,
-          boardId: card.list.boardId,
-          cardId: cardId,
-          actionType: "create",
-          entityType: "attachment",
-          entityId: attachment.id,
-          details: {
-            filename: file.name,
-            file_size: file.size,
-            card_title: card.title,
+        // Create activity log
+        await tx.activity.create({
+          data: {
+            userId: session.user.id,
+            boardId: card.list.boardId,
+            cardId: cardId,
+            actionType: "create",
+            entityType: "attachment",
+            entityId: attachment.id,
+            details: {
+              filename: file.name,
+              file_size: file.size,
+              card_title: card.title,
+            },
           },
-        },
-      });
+        });
 
-      return attachment;
-    }).catch(async (error) => {
-      // Clean up uploaded file if database insert fails
-      await supabase.storage.from("caply").remove([filePath]);
-      throw error;
-    });
+        return attachment;
+      })
+      .catch(async (error) => {
+        // Clean up uploaded file if database insert fails
+        await supabase.storage.from("caply").remove([filePath]);
+        throw error;
+      });
 
     // Transform to match expected format
     const transformedAttachment = {
@@ -260,7 +263,8 @@ export async function POST(req: NextRequest) {
       filename: result.filename,
       original_filename: result.originalFilename,
       file_path: result.filePath,
-      file_size: result.fileSize,
+
+      file_size: Number(result.fileSize), // ✅ FIX HERE
       mime_type: result.mimeType,
       uploaded_by: result.uploadedBy,
       uploaded_at: result.uploadedAt,
