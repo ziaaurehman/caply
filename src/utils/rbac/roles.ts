@@ -192,7 +192,7 @@ export const DEFAULT_ROLES: Omit<
     permissions: PERMISSIONS.filter(
       (p) =>
         // Can view projects and tasks
-        (p.resource === "projects" && p.action === "read") ||
+        (p.resource === "projects" && ["read", "update"].includes(p.action)) ||
         (p.resource === "tasks" && ["read", "update"].includes(p.action)) ||
         // Can view their own profile
         (p.resource === "users" && p.action === "read") ||
