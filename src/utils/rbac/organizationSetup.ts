@@ -153,6 +153,7 @@ export const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
       "projects.read",
       "users.read",
       "tasks.read",
+      "projects.update",
       "tasks.update",
       "time_entries.create",
       "time_entries.read",
