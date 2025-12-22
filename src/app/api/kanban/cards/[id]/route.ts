@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateOrganizationAccessWithId, hasPermission } from "@/utils/organizationUtils";
+import {
+  validateOrganizationAccessWithId,
+  hasPermission,
+} from "@/utils/organizationUtils";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
 
@@ -208,8 +211,7 @@ export async function GET(
           },
         },
       })),
-      labels:
-        card.cardLabels?.map((cl) => cl.label).filter(Boolean) || [],
+      labels: card.cardLabels?.map((cl) => cl.label).filter(Boolean) || [],
       card_labels: undefined, // Remove the original card_labels to avoid confusion
       checklists: card.checklists.map((checklist) => ({
         id: checklist.id,
@@ -233,9 +235,11 @@ export async function GET(
                   user_id: item.projectMember.organizationMember.userId,
                   users: {
                     id: item.projectMember.organizationMember.user.id,
-                    full_name: item.projectMember.organizationMember.user.fullName,
+                    full_name:
+                      item.projectMember.organizationMember.user.fullName,
                     email: item.projectMember.organizationMember.user.email,
-                    avatar_url: item.projectMember.organizationMember.user.avatarUrl,
+                    avatar_url:
+                      item.projectMember.organizationMember.user.avatarUrl,
                   },
                 },
               }
@@ -286,6 +290,12 @@ export async function GET(
     );
   }
 }
+const parseDueDate = (value: any) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? null : date;
+};
 
 export async function PATCH(
   req: NextRequest,
@@ -372,7 +382,11 @@ export async function PATCH(
     }
 
     // Check if user has projects:update permission OR is a project member
-    const hasUpdatePermission = hasPermission(userContext, "projects", "update");
+    const hasUpdatePermission = hasPermission(
+      userContext,
+      "projects",
+      "update"
+    );
 
     if (!hasUpdatePermission) {
       // If user doesn't have update permission, check if they're a project member
@@ -425,7 +439,8 @@ export async function PATCH(
           description: description !== undefined ? description : undefined,
           listId: list_id !== undefined ? list_id : undefined,
           position: position !== undefined ? position : undefined,
-          dueDate: due_date !== undefined ? (due_date ? new Date(due_date) : null) : undefined,
+          dueDate: due_date !== undefined ? parseDueDate(due_date) : undefined,
+
           isCompleted: is_completed !== undefined ? is_completed : undefined,
           isArchived: is_archived !== undefined ? is_archived : undefined,
           coverColor: cover_color !== undefined ? cover_color : undefined,
