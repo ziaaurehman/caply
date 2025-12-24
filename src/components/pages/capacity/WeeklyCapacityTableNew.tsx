@@ -17,6 +17,7 @@ import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useSession } from "next-auth/react";
 
 interface DayData {
   dayName: string;
@@ -134,12 +135,13 @@ const fetchProjectAssignments = async (
 };
 
 const fetchResources = async (
-  organizationId: string
+  organizationId: string,
+  userId: string
 ): Promise<ResourceAllocation[]> => {
   if (!organizationId) throw new Error("Organization ID is required");
 
   const response = await fetch(
-    `/api/capacity/resources?organizationId=${organizationId}&only_active=true`
+    `/api/capacity/resources?organizationId=${organizationId}&userId=${userId}&only_active=true`
   );
 
   if (!response.ok) {
@@ -154,6 +156,8 @@ export default function WeeklyCapacityTableNew({
   selectedWeek = "",
   onAddResource,
 }: WeeklyCapacityTableProps) {
+    const { data: session } = useSession();
+  
   const queryClient = useQueryClient();
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(
     new Set()
@@ -629,7 +633,7 @@ export default function WeeklyCapacityTableNew({
     refetch,
   } = useQuery({
     queryKey: ["resources", currentOrganization?.id],
-    queryFn: () => fetchResources(currentOrganization?.id || ""),
+    queryFn: () => fetchResources(currentOrganization?.id || "",session?.user.id),
     enabled: !!currentOrganization?.id, // Only fetch when organization ID is available
     staleTime: 5 * 60 * 1000, // 5 minutes
   });

@@ -32,6 +32,7 @@ import {
   getDay,
 } from "date-fns";
 import { toast } from "sonner";
+import { useSession } from "next-auth/react";
 
 interface ResourceAllocation {
   id: string;
@@ -183,7 +184,7 @@ const fetchProjects = async (organizationId: string): Promise<Project[]> => {
   return data.projects || [];
 };
 
-export default function MonthlyCapacityTable({ 
+export default function MonthlyCapacityTable({
   selectedMonth = new Date().getMonth(),
   selectedYear = new Date().getFullYear(),
   onAddResource,
@@ -192,6 +193,8 @@ export default function MonthlyCapacityTable({
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(
     new Set()
   );
+  const { data: session } = useSession();
+
   const { currentOrganization } = useOrganizationStore();
   const [deletingTarget, setDeletingTarget] = useState<{
     memberId: string;
@@ -257,9 +260,14 @@ export default function MonthlyCapacityTable({
     data: monthlyCapacityData,
     isLoading: monthlyLoading,
     error: monthlyError,
-  } = useMonthlyCapacity(currentOrganization?.id || "", monthStr, {
-    only_active: true,
-  });
+  } = useMonthlyCapacity(
+    currentOrganization?.id || "",
+    session?.user.id || "",
+    monthStr,
+    {
+      only_active: true,
+    }
+  );
 
   // Generate weeks for the selected month - use data from API if available
   const weeksData: WeekData[] = useMemo(() => {

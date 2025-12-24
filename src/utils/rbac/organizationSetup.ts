@@ -152,6 +152,8 @@ export const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
     permissions: [
       "projects.read",
       "users.read",
+      // Capacity planning
+      "capacity.read",
       "tasks.read",
       "projects.update",
       "tasks.update",

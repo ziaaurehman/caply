@@ -362,6 +362,7 @@ export const capacityAPI = {
   // ===== MONTHLY VIEW =====
   getMonthly: async (
     organizationId: string,
+    userId: string,
     month: string,
     params?: { only_active?: boolean }
   ): Promise<{
@@ -394,6 +395,7 @@ export const capacityAPI = {
   }> => {
     const sp = new URLSearchParams();
     sp.set("organizationId", organizationId);
+    sp.set("userId", userId);
     sp.set("month", month);
     if (params?.only_active !== undefined)
       sp.set("only_active", String(params.only_active));
