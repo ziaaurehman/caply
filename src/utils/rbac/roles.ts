@@ -123,6 +123,7 @@ export const DEFAULT_ORGANIZATION_ROLES: DefaultOrganizationRole[] = [
     is_system_role: false,
     permissions: [
       "projects.read",
+      "capacity.read",
       "tasks.read",
       "projects.update",
       "tasks.update",

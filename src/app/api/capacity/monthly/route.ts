@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+// import { getServerSession } from "next-auth";
+// import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { useSession } from "next-auth/react";
 
 // GET /api/capacity/monthly?organizationId=...&month=YYYY-MM
 // Returns monthly view per resource: resource info + per-week totals and project breakdown
 export async function GET(req: NextRequest) {
   try {
+    // const { data: session } = useSession();
+
     const { searchParams } = new URL(req.url);
     const organizationId =
       searchParams.get("organizationId") ||
       req.headers.get("x-organization-id");
+    const userId = searchParams.get("userId");
     const month = searchParams.get("month"); // format: YYYY-MM
     const onlyActive = (searchParams.get("only_active") ?? "true") === "true";
 
@@ -19,6 +25,30 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       );
     }
+    // const userId = session?.user?.id || "";
+
+    const userRoles = await prisma.organizationMember.findMany({
+      where: {
+        organizationId, // filter by organization if needed
+        userId: userId || "", // optional: filter by specific user
+      },
+      select: {
+        id: true, // organizationMemberId
+        organizationId: true,
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+          },
+        },
+      },
+    });
+    const currentMemberId = userRoles[0]?.id; // <-- this is the organizationMemberIdF
+    const isAdmin =
+      userRoles[0]?.role?.displayName === "Organization Administrator";
+
+    console.log("use Rle", userRoles);
 
     const validation = await validateOrganizationAccessWithId(organizationId, {
       resource: "capacity",
@@ -65,6 +95,9 @@ export async function GET(req: NextRequest) {
       where: {
         organizationId,
         ...(onlyActive ? { isActive: true } : {}),
+        ...(!isAdmin && currentMemberId
+          ? { organizationMemberId: currentMemberId }
+          : {}), // filter by member if not admin
       },
       include: {
         organizationMember: {
@@ -76,6 +109,13 @@ export async function GET(req: NextRequest) {
                 email: true,
                 avatarUrl: true,
                 position: true,
+              },
+            },
+            role: {
+              select: {
+                id: true,
+                name: true,
+                displayName: true,
               },
             },
           },

@@ -114,12 +114,13 @@ export function useCapacityOverview(
 // ===== MONTHLY VIEW =====
 export function useMonthlyCapacity(
   organizationId: string,
+  userId: string,
   month: string,
   params?: { only_active?: boolean }
 ) {
   return useQuery({
     queryKey: capacityKeys.monthlyByOrg(organizationId, "monthly", params),
-    queryFn: () => capacityAPI.getMonthly(organizationId, month, params),
+    queryFn: () => capacityAPI.getMonthly(organizationId,userId, month, params),
     enabled: !!organizationId && !!month,
     staleTime: 2 * 60 * 1000,
     gcTime: 5 * 60 * 1000,

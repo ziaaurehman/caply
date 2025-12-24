@@ -12,6 +12,8 @@ export async function GET(req: NextRequest) {
     const organizationId =
       searchParams.get("organizationId") ||
       req.headers.get("x-organization-id");
+    const userId = searchParams.get("userId");
+
     const onlyActive = (searchParams.get("only_active") ?? "true") === "true";
     const filterUserIds = searchParams.getAll("user_id");
 
@@ -21,6 +23,29 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const userRoles = await prisma.organizationMember.findMany({
+      where: {
+        organizationId, // filter by organization if needed
+        userId: userId || "", // optional: filter by specific user
+      },
+      select: {
+        id: true, // organizationMemberId
+        organizationId: true,
+        role: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+          },
+        },
+      },
+    });
+    const currentMemberId = userRoles[0]?.id; // <-- this is the organizationMemberIdF
+    const isAdmin =
+      userRoles[0]?.role?.displayName === "Organization Administrator";
+
+    console.log("use Rle", userRoles);
 
     const validation = await validateOrganizationAccessWithId(organizationId, {
       resource: "capacity",
@@ -39,6 +64,9 @@ export async function GET(req: NextRequest) {
       where: {
         organizationId,
         ...(onlyActive ? { isActive: true } : {}),
+        ...(!isAdmin && currentMemberId
+          ? { organizationMemberId: currentMemberId }
+          : {}), // filter by member if not admin
       },
       select: {
         id: true,
