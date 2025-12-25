@@ -9,6 +9,11 @@ import {
   subWeeks,
   parseISO,
   isWithinInterval,
+  startOfDay,
+  endOfDay,
+  eachDayOfInterval,
+  startOfMonth,
+  endOfMonth,
 } from "date-fns";
 import {
   Plus,
@@ -36,6 +41,7 @@ import type {
   ApproveLeaveRequestData,
 } from "@/utils/api/leave";
 import { toast } from "sonner";
+import { useAuthStore } from "@/lib/stores/authStore";
 
 interface TeamMember {
   id: string;
@@ -53,8 +59,9 @@ interface TeamMember {
 }
 
 export default function LeaveManagementPage() {
-  const { currentOrganization } = useOrganizationStore();
+  const { currentOrganization, cachedUserId } = useOrganizationStore();
 
+  console.log("User Role Inside is :>", currentOrganization?.role);
   // Tab state
   const [activeTab, setActiveTab] = useState<"my-leaves" | "approve">(
     "my-leaves"
@@ -109,6 +116,8 @@ export default function LeaveManagementPage() {
     refetch: refetchLeaveData,
   } = useLeaveData(currentOrganization?.id || "");
 
+  console.log("user Leave Reques in leave data", leaveRequests);
+
   const {
     data: teamData,
     isLoading: teamLoading,
@@ -120,7 +129,11 @@ export default function LeaveManagementPage() {
   const approveLeaveRequestMutation = useApproveLeaveRequest();
 
   // Extract team members
-  const teamMembers = teamData?.members || [];
+  const teamMembers =
+    currentOrganization?.role !== "Team Member"
+      ? teamData?.members || []
+      : teamData?.members.filter((user) => user.user_id === cachedUserId);
+  console.log("Leaves Team Member Data", teamMembers);
 
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -336,16 +349,20 @@ export default function LeaveManagementPage() {
             >
               My Leaves
             </button>
-            <button
-              onClick={() => setActiveTab("approve")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "approve"
-                  ? "border-orange-500 text-orange-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              Approve
-            </button>
+            {currentOrganization?.role !== "Team Member" && (
+              <>
+                <button
+                  onClick={() => setActiveTab("approve")}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === "approve"
+                      ? "border-orange-500 text-orange-600"
+                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  }`}
+                >
+                  Approve
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -564,6 +581,21 @@ export default function LeaveManagementPage() {
                 <X className="h-6 w-6" />
               </button>
             </div>
+            <div className="px-6 pt-3">
+              {currentOrganization?.role === "Team Member" && (
+                <>
+                  <div className="flex w-full justify-between">
+                    <span className="font-medium">Status:</span>{" "}
+                    <p
+                      className={` px-3 rounded-md  ${getStatusColor(selectedRequest.status)}`}
+                    >
+                      {" "}
+                      {selectedRequest.status}
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
 
             <div className="p-6 space-y-4">
               <div className="bg-gray-50 p-4 rounded-lg">
@@ -593,118 +625,129 @@ export default function LeaveManagementPage() {
                 </div>
               </div>
 
-              <form onSubmit={handleApproveRequest} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Decision
-                  </label>
-                  <div className="mt-2 space-y-2">
-                    <label className="flex items-center">
-                      <input
-                        type="radio"
-                        value="approved"
-                        checked={approvalData.status === "approved"}
+              {currentOrganization?.role !== "Team Member" && (
+                <>
+                  {" "}
+                  <form onSubmit={handleApproveRequest} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Decision
+                      </label>
+                      <div className="mt-2 space-y-2">
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            value="approved"
+                            checked={approvalData.status === "approved"}
+                            onChange={(e) =>
+                              setApprovalData({
+                                ...approvalData,
+                                status: e.target.value as
+                                  | "approved"
+                                  | "rejected",
+                              })
+                            }
+                            className="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">
+                            Approve
+                          </span>
+                        </label>
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            value="rejected"
+                            checked={approvalData.status === "rejected"}
+                            onChange={(e) =>
+                              setApprovalData({
+                                ...approvalData,
+                                status: e.target.value as
+                                  | "approved"
+                                  | "rejected",
+                              })
+                            }
+                            className="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">
+                            Reject
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {approvalData.status === "rejected" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">
+                          Rejection Reason
+                        </label>
+                        <input
+                          type="text"
+                          value={approvalData.rejected_reason || ""}
+                          onChange={(e) =>
+                            setApprovalData({
+                              ...approvalData,
+                              rejected_reason: e.target.value,
+                            })
+                          }
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 sm:text-sm"
+                          placeholder="Reason for rejection"
+                          required={approvalData.status === "rejected"}
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Comments (Optional)
+                      </label>
+                      <textarea
+                        value={approvalData.comment || ""}
                         onChange={(e) =>
                           setApprovalData({
                             ...approvalData,
-                            status: e.target.value as "approved" | "rejected",
+                            comment: e.target.value,
                           })
                         }
-                        className="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300"
+                        rows={3}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 sm:text-sm"
+                        placeholder="Additional comments..."
                       />
-                      <span className="ml-2 text-sm text-gray-700">
-                        Approve
-                      </span>
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="radio"
-                        value="rejected"
-                        checked={approvalData.status === "rejected"}
-                        onChange={(e) =>
+                    </div>
+
+                    <div className="flex justify-end space-x-3 mt-6">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setShowApprovalModal(false);
+                          setSelectedRequest(null);
                           setApprovalData({
-                            ...approvalData,
-                            status: e.target.value as "approved" | "rejected",
-                          })
-                        }
-                        className="focus:ring-orange-500 h-4 w-4 text-orange-600 border-gray-300"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">Reject</span>
-                    </label>
-                  </div>
-                </div>
-
-                {approvalData.status === "rejected" && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Rejection Reason
-                    </label>
-                    <input
-                      type="text"
-                      value={approvalData.rejected_reason || ""}
-                      onChange={(e) =>
-                        setApprovalData({
-                          ...approvalData,
-                          rejected_reason: e.target.value,
-                        })
-                      }
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 sm:text-sm"
-                      placeholder="Reason for rejection"
-                      required={approvalData.status === "rejected"}
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Comments (Optional)
-                  </label>
-                  <textarea
-                    value={approvalData.comment || ""}
-                    onChange={(e) =>
-                      setApprovalData({
-                        ...approvalData,
-                        comment: e.target.value,
-                      })
-                    }
-                    rows={3}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-orange-500 focus:ring-orange-500 sm:text-sm"
-                    placeholder="Additional comments..."
-                  />
-                </div>
-
-                <div className="flex justify-end space-x-3 mt-6">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setShowApprovalModal(false);
-                      setSelectedRequest(null);
-                      setApprovalData({
-                        status: "approved",
-                        comment: "",
-                        rejected_reason: "",
-                      });
-                    }}
-                    disabled={approveLeaveRequestMutation.isPending}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    className={`${
-                      approvalData.status === "approved"
-                        ? "bg-green-600 hover:bg-green-700 focus:ring-green-500"
-                        : "bg-red-600 hover:bg-red-700 focus:ring-red-500"
-                    }`}
-                    disabled={approveLeaveRequestMutation.isPending}
-                  >
-                    {approveLeaveRequestMutation.isPending
-                      ? "Processing..."
-                      : `${approvalData.status === "approved" ? "Approve" : "Reject"} Request`}
-                  </Button>
-                </div>
-              </form>
+                            status: "approved",
+                            comment: "",
+                            rejected_reason: "",
+                          });
+                        }}
+                        disabled={approveLeaveRequestMutation.isPending}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        className={`${
+                          approvalData.status === "approved"
+                            ? "bg-green-600 hover:bg-green-700 focus:ring-green-500"
+                            : "bg-red-600 hover:bg-red-700 focus:ring-red-500"
+                        }`}
+                        disabled={approveLeaveRequestMutation.isPending}
+                      >
+                        {approveLeaveRequestMutation.isPending
+                          ? "Processing..."
+                          : `${approvalData.status === "approved" ? "Approve" : "Reject"} Request`}
+                      </Button>
+                    </div>
+                  </form>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -752,18 +795,30 @@ function MyLeavesView({
       view === "week" ? subWeeks(selectedDate, 1) : subWeeks(selectedDate, 4)
     );
   };
+  console.log("receive data of leaves", leaveRequests);
 
   const handleNextPeriod = () => {
     setSelectedDate(
       view === "week" ? addWeeks(selectedDate, 1) : addWeeks(selectedDate, 4)
     );
   };
-
-  // Calculate days to display
   const startDate = startOfWeek(selectedDate, { weekStartsOn: 1 });
-  const days = Array.from({ length: view === "week" ? 5 : 20 }, (_, i) =>
-    addDays(startDate, i)
-  );
+
+  let days: Date[] = [];
+
+  if (view === "week") {
+    // Monday → Friday (5 working days)
+    const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
+
+    days = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+  }
+
+  if (view === "month") {
+    days = eachDayOfInterval({
+      start: startOfMonth(selectedDate),
+      end: endOfMonth(selectedDate),
+    });
+  }
 
   // Filter requests based on selected filters
   const filteredRequests = leaveRequests.filter((request) => {
@@ -786,6 +841,7 @@ function MyLeavesView({
       requests: memberRequests,
     };
   });
+  console.log("member leaves", memberLeaves);
 
   const getLeaveTypeColor = (type: string) => {
     switch (type) {
@@ -1008,9 +1064,9 @@ function MyLeavesView({
                   </td>
                   {days.map((day, index) => {
                     const dayRequests = requests.filter((request) =>
-                      isWithinInterval(day, {
-                        start: parseISO(request.start_date),
-                        end: parseISO(request.end_date),
+                      isWithinInterval(startOfDay(day), {
+                        start: startOfDay(parseISO(request.start_date)),
+                        end: endOfDay(parseISO(request.end_date)),
                       })
                     );
 
@@ -1102,6 +1158,7 @@ function ApproveLeavesView({
 }) {
   // Filter requests based on selected filters
   const filteredRequests = leaveRequests.filter((request) => {
+    console.log("User reques data", request);
     const matchesEmployee =
       selectedEmployee === "all" || request.user_id === selectedEmployee;
     const matchesType =
@@ -1214,6 +1271,7 @@ function ApproveLeavesView({
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredRequests.map((request) => {
+                console.log("User requesr ", request);
                 const member = teamMembers.find(
                   (m) => m.user_id === request.user_id
                 );

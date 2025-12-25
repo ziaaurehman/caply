@@ -34,6 +34,7 @@ import { PermissionChecks } from "@/utils/rbac";
 import WeekPicker from "./WeekPicker";
 import { canViewTimesheetSubmissions } from "@/utils/clientOrganizationUtils";
 import { toast } from "sonner";
+import { endOfWeek, isWithinInterval, startOfWeek } from "date-fns";
 
 // Types
 interface TimeEntry {
@@ -1366,6 +1367,21 @@ function ApproveTimesheetsView({
     monday.setDate(diff);
     return monday.toISOString().split("T")[0];
   }
+  const filteredSubmissions = React.useMemo(() => {
+    if (!filters.selectedWeek) return submissions;
+
+    const weekStart = startOfWeek(new Date(filters.selectedWeek), {
+      weekStartsOn: 1,
+    });
+    const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+
+    return submissions.filter((submission) =>
+      isWithinInterval(new Date(submission.weekStart), {
+        start: weekStart,
+        end: weekEnd,
+      })
+    );
+  }, [submissions, filters.selectedWeek]);
 
   return (
     <div>
@@ -1472,7 +1488,7 @@ function ApproveTimesheetsView({
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {submissions.map((submission) => (
+              {filteredSubmissions.map((submission) => (
                 <tr key={submission.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">

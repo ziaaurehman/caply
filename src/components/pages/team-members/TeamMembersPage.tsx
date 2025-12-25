@@ -41,6 +41,8 @@ import {
 
 const TeamMembersPage: React.FC = () => {
   const { data: session } = useSession();
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
 
@@ -188,15 +190,32 @@ const TeamMembersPage: React.FC = () => {
     }
   };
 
+  // const handleResendInvitation = async (invitationId: string) => {
+  //   if (!currentOrganization?.id) return;
+
+  //   await resendInvitationMutation.mutateAsync({
+  //     invitationId,
+  //     organizationId: currentOrganization.id,
+  //   });
+
+  //   toast.success("Invitation resent successfully!");
+  // };
+
   const handleResendInvitation = async (invitationId: string) => {
     if (!currentOrganization?.id) return;
 
-    await resendInvitationMutation.mutateAsync({
-      invitationId,
-      organizationId: currentOrganization.id,
-    });
+    setResendingId(invitationId);
 
-    toast.success("Invitation resent successfully!");
+    try {
+      await resendInvitationMutation.mutateAsync({
+        invitationId,
+        organizationId: currentOrganization.id,
+      });
+
+      toast.success("Invitation resent successfully!");
+    } finally {
+      setResendingId(null);
+    }
   };
 
   const handleCancelInvitation = async (invitation: PendingInvitation) => {
@@ -397,7 +416,7 @@ const TeamMembersPage: React.FC = () => {
                       disabled={resendInvitationMutation.isPending}
                       className="px-3 py-1 text-xs font-medium text-blue-600 bg-blue-100 hover:bg-blue-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                     >
-                      {resendInvitationMutation.isPending ? (
+                      {resendingId === invitation.id ? (
                         <>
                           <div className="w-3 h-3 border border-blue-600 border-t-transparent rounded-full animate-spin" />
                           Resending...

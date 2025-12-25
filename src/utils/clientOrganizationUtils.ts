@@ -134,3 +134,9 @@ export function canViewTeamMembers(
 ): boolean {
   return hasPermission(context, "users", "read") || isManagerOrAbove(context);
 }
+
+export function canViewInvoice(
+  context: OrganizationContext | null
+): boolean {
+  return hasPermission(context, "invoices", "read") || isManagerOrAbove(context);
+}
