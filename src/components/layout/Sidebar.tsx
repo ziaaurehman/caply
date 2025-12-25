@@ -38,6 +38,7 @@ import {
   canViewTeamMembers,
   canViewTimesheetSubmissions,
   canViewTimesheets,
+  canViewInvoice,
 } from "@/utils/clientOrganizationUtils";
 
 interface SidebarProps {
@@ -240,6 +241,7 @@ export default function Sidebar({
   const userCanViewCapacity = canViewCapacity(organizationContext);
   const userCanViewTimesheets = canViewTimesheets(organizationContext);
   const userCanViewTeamMembers = canViewTeamMembers(organizationContext);
+  const userCanViewInvoice = canViewInvoice(organizationContext);
 
   const isContextLoading = loading && currentOrganization?.id;
 
@@ -427,7 +429,7 @@ export default function Sidebar({
                   isCollapsed={sidebarCollapsed}
                 />
               )}
-              {userCanViewTeamMembers && (
+              {userCanViewInvoice && (
                 <NavItem
                   href={invoiceManagementMenuItem.href}
                   icon={invoiceManagementMenuItem.icon}

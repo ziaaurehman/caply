@@ -52,7 +52,9 @@ const InvoicePage: React.FC = () => {
   );
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showSaveDraftModal, setShowSaveDraftModal] = useState(false);
-  const [originalInvoice, setOriginalInvoice] = useState<LocalInvoice | null>(null);
+  const [originalInvoice, setOriginalInvoice] = useState<LocalInvoice | null>(
+    null
+  );
   const [confirmDelete, setConfirmDelete] = useState<{
     open: boolean;
     id: string | null;
@@ -71,8 +73,8 @@ const InvoicePage: React.FC = () => {
     companyName: "",
     companyAddress: "",
     companyPhone: "",
-    issueDate: new Date().toISOString().split("T")[0],
-    dueDate: new Date().toISOString().split("T")[0],
+    issueDate: new Date().toISOString().slice(0, 10),
+    dueDate: new Date().toISOString().slice(0, 10),
     projectId: "",
     projectName: "",
     paymentMethod: "Bank Transfer",
@@ -248,12 +250,14 @@ const InvoicePage: React.FC = () => {
       // Compare current invoice with original using the same normalization
       const normalizedCurrent = normalizeInvoiceForComparison(currentInvoice);
       const normalizedOriginal = normalizeInvoiceForComparison(originalInvoice);
-      
-      const hasChanges = JSON.stringify(normalizedCurrent) !== JSON.stringify(normalizedOriginal);
+
+      const hasChanges =
+        JSON.stringify(normalizedCurrent) !==
+        JSON.stringify(normalizedOriginal);
       setHasUnsavedChanges(hasChanges);
     } else if (view === "create" && !editingInvoice) {
       // For new invoices, check if any meaningful data has been entered
-      const hasData = 
+      const hasData =
         currentInvoice.clientId !== "" ||
         currentInvoice.companyName !== "" ||
         currentInvoice.lineItems.length > 0 ||
@@ -264,61 +268,58 @@ const InvoicePage: React.FC = () => {
     }
   }, [currentInvoice, view, editingInvoice, originalInvoice]);
 
-const calculations = React.useMemo(() => {
-  const subtotal = currentInvoice.lineItems.reduce(
-    (sum, item) => sum + item.amount,
-    0
-  );
+  const calculations = React.useMemo(() => {
+    const subtotal = currentInvoice.lineItems.reduce(
+      (sum, item) => sum + item.amount,
+      0
+    );
 
-  let discountAmount = 0;
+    let discountAmount = 0;
 
-  if (currentInvoice.discountType === "percentage") {
-    discountAmount = subtotal * (currentInvoice.discount / 100);
-  } else if (currentInvoice.discountType === "fixed") {
-    discountAmount = currentInvoice.discount;
-  }
-
-  discountAmount = Math.min(discountAmount, subtotal);
-
-  let federalTax = 0;
-  let provincialTax = 0;
-
-  // ✅ store applied tax rate
-  let appliedTaxRate: { federal: number; provincial: number } | null = null;
-
-  if (!currentInvoice.isInternational && currentInvoice.province) {
-    const TAX_RATES: Record<
-      string,
-      { federal: number; provincial: number }
-    > = {
-      ON: { federal: 5, provincial: 8 },
-      QC: { federal: 5, provincial: 9.975 },
-      BC: { federal: 5, provincial: 5 },
-      AB: { federal: 5, provincial: 0 },
-    };
-
-    appliedTaxRate = TAX_RATES[currentInvoice.province] ?? null;
-
-    if (appliedTaxRate) {
-      const taxableAmount = subtotal - discountAmount;
-      federalTax = taxableAmount * (appliedTaxRate.federal / 100);
-      provincialTax = taxableAmount * (appliedTaxRate.provincial / 100);
+    if (currentInvoice.discountType === "percentage") {
+      discountAmount = subtotal * (currentInvoice.discount / 100);
+    } else if (currentInvoice.discountType === "fixed") {
+      discountAmount = currentInvoice.discount;
     }
-  }
 
-  const total = subtotal - discountAmount + federalTax + provincialTax;
+    discountAmount = Math.min(discountAmount, subtotal);
 
-  return {
-    subtotal,
-    discountAmount,
-    federalTax,
-    provincialTax,
-    total,
-    taxRate: appliedTaxRate, // ✅ returned
-    Currency : currentInvoice.currency
-  };
-}, [currentInvoice]);
+    let federalTax = 0;
+    let provincialTax = 0;
 
+    // ✅ store applied tax rate
+    let appliedTaxRate: { federal: number; provincial: number } | null = null;
+
+    if (!currentInvoice.isInternational && currentInvoice.province) {
+      const TAX_RATES: Record<string, { federal: number; provincial: number }> =
+        {
+          ON: { federal: 5, provincial: 8 },
+          QC: { federal: 5, provincial: 9.975 },
+          BC: { federal: 5, provincial: 5 },
+          AB: { federal: 5, provincial: 0 },
+        };
+
+      appliedTaxRate = TAX_RATES[currentInvoice.province] ?? null;
+
+      if (appliedTaxRate) {
+        const taxableAmount = subtotal - discountAmount;
+        federalTax = taxableAmount * (appliedTaxRate.federal / 100);
+        provincialTax = taxableAmount * (appliedTaxRate.provincial / 100);
+      }
+    }
+
+    const total = subtotal - discountAmount + federalTax + provincialTax;
+
+    return {
+      subtotal,
+      discountAmount,
+      federalTax,
+      provincialTax,
+      total,
+      taxRate: appliedTaxRate, // ✅ returned
+      Currency: currentInvoice.currency,
+    };
+  }, [currentInvoice]);
 
   const resetStates = () => {
     setShowPreview(false);
@@ -472,7 +473,7 @@ const calculations = React.useMemo(() => {
       setViewingInvoice(null);
       setOriginalInvoice(null);
       setShowSaveDraftModal(false);
-      
+
       // Show appropriate success message based on status
       if (status === "sent") {
         toast.success("Invoice sent successfully!");
@@ -487,6 +488,77 @@ const calculations = React.useMemo(() => {
     }
   };
 
+  const handleUpdate = async (status?: string) => {
+    if (!currentInvoice.clientId) {
+      alert("Please select a client.");
+      return;
+    }
+
+    if (currentInvoice.lineItems.length === 0) {
+      alert("Please add at least one line item.");
+      return;
+    }
+
+    try {
+      const invoiceData = {
+        clientId: currentInvoice.clientId,
+        companyName: currentInvoice.companyName,
+        companyAddress: currentInvoice.companyAddress,
+        companyPhone: currentInvoice.companyPhone,
+        projectId: currentInvoice.projectId || undefined,
+        invoiceNumber: currentInvoice.invoiceNumber,
+        title: `Invoice ${currentInvoice.invoiceNumber}`,
+        issueDate: currentInvoice.issueDate,
+        dueDate: currentInvoice.dueDate,
+        paymentMethod: currentInvoice.paymentMethod,
+        isInternational: currentInvoice.isInternational,
+        province: currentInvoice.province,
+        currency: currentInvoice.currency,
+        poNumber: currentInvoice.poNumber,
+        notes: currentInvoice.notes,
+        status: status ?? currentInvoice.status,
+        subtotal: calculations.subtotal,
+        discountAmount:
+          currentInvoice.discountType === "fixed" ? currentInvoice.discount : 0,
+        discountPercentage:
+          currentInvoice.discountType === "percentage"
+            ? currentInvoice.discount
+            : 0,
+        discounttype: currentInvoice.discountType,
+        taxAmount: calculations.federalTax + calculations.provincialTax,
+        totalAmount: calculations.total,
+        lineItems: currentInvoice.lineItems.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          amount: item.amount,
+        })),
+      };
+
+      await updateInvoiceMutation.mutateAsync({
+        ...invoiceData,
+        id: currentInvoice.id,
+        organizationId,
+      } as UpdateInvoiceData & { organizationId: string });
+
+      resetStates();
+      setView("list");
+      setEditingInvoice(null);
+      setViewingInvoice(null);
+      setOriginalInvoice(null);
+      setShowSaveDraftModal(false);
+
+      if (status === "sent") {
+        toast.success("Invoice sent successfully!");
+      } else {
+        toast.success("Invoice updated successfully!");
+      }
+    } catch (error) {
+      console.error("Error updating invoice:", error);
+      alert("Failed to update invoice");
+    }
+  };
+
   const validateInvoiceForSending = (): { valid: boolean; error?: string } => {
     if (!currentInvoice.clientId) {
       return { valid: false, error: "Please select a client" };
@@ -497,7 +569,10 @@ const calculations = React.useMemo(() => {
     if (!currentInvoice.companyName || !currentInvoice.companyName.trim()) {
       return { valid: false, error: "Please enter company name" };
     }
-    if (!currentInvoice.companyAddress || !currentInvoice.companyAddress.trim()) {
+    if (
+      !currentInvoice.companyAddress ||
+      !currentInvoice.companyAddress.trim()
+    ) {
       return { valid: false, error: "Please enter company address" };
     }
     if (!currentInvoice.companyPhone || !currentInvoice.companyPhone.trim()) {
@@ -515,7 +590,7 @@ const calculations = React.useMemo(() => {
     if (!currentInvoice.dueDate) {
       return { valid: false, error: "Due date is required" };
     }
-    
+
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(currentInvoice.clientEmail.trim())) {
@@ -539,7 +614,7 @@ const calculations = React.useMemo(() => {
   // Helper function to normalize invoice for comparison
   const normalizeInvoiceForComparison = (invoice: LocalInvoice) => {
     const sortedLineItems = [...invoice.lineItems]
-      .map(item => ({
+      .map((item) => ({
         id: item.id,
         description: String(item.description || ""),
         quantity: Number(item.quantity || 0),
@@ -548,7 +623,7 @@ const calculations = React.useMemo(() => {
         amount: Number(item.amount || 0),
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
-    
+
     return {
       id: invoice.id,
       invoiceNumber: String(invoice.invoiceNumber || ""),
@@ -583,30 +658,31 @@ const calculations = React.useMemo(() => {
       if (editingInvoice && originalInvoice) {
         // Direct comparison to ensure we catch changes
         const normalizedCurrent = normalizeInvoiceForComparison(currentInvoice);
-        const normalizedOriginal = normalizeInvoiceForComparison(originalInvoice);
-        
+        const normalizedOriginal =
+          normalizeInvoiceForComparison(originalInvoice);
+
         const currentStr = JSON.stringify(normalizedCurrent);
         const originalStr = JSON.stringify(normalizedOriginal);
-        
+
         if (currentStr !== originalStr) {
           setShowSaveDraftModal(true);
           return;
         }
       } else if (!editingInvoice) {
         // For new invoices, check if any meaningful data has been entered
-        const hasData = 
+        const hasData =
           currentInvoice.clientId !== "" ||
           currentInvoice.companyName !== "" ||
           currentInvoice.lineItems.length > 0 ||
           currentInvoice.clientEmail !== "";
-        
+
         if (hasData) {
           setShowSaveDraftModal(true);
           return;
         }
       }
     }
-    
+
     // No changes, just go back
     resetStates();
     setView("list");
@@ -658,6 +734,42 @@ const calculations = React.useMemo(() => {
       }
 
       await handleSave("sent");
+      toast.dismiss(loadingToast);
+      toast.success("Invoice sent successfully!");
+      resetStates();
+      setView("list");
+      setEditingInvoice(null);
+      setViewingInvoice(null);
+    } catch (error: any) {
+      console.error("Send invoice error:", error);
+      toast.dismiss(loadingToast);
+      toast.error(error.message || "Failed to send invoice. Please try again.");
+    }
+  };
+  const handleSendInvoiceDraft = async () => {
+    // Validate before sending
+    const validation = validateInvoiceForSending();
+    if (!validation.valid) {
+      toast.error(validation.error || "Please fill all required fields");
+      return;
+    }
+
+    const loadingToast = toast.loading("Sending invoice...");
+
+    try {
+      const res = await fetch("/api/send-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentInvoice, calculations }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to send invoice");
+      }
+
+      await handleUpdate("sent");
       toast.dismiss(loadingToast);
       toast.success("Invoice sent successfully!");
       resetStates();
@@ -759,7 +871,9 @@ const calculations = React.useMemo(() => {
           open={showSaveDraftModal}
           onClose={handleSaveDraftCancel}
           onConfirm={handleSaveDraftConfirm}
-          isLoading={createInvoiceMutation.isPending || updateInvoiceMutation.isPending}
+          isLoading={
+            createInvoiceMutation.isPending || updateInvoiceMutation.isPending
+          }
         />
       </>
     );
@@ -787,7 +901,9 @@ const calculations = React.useMemo(() => {
             onDownloadPDF={handleDownloadPDF}
             setPreviewRef={setPreviewRef}
             onSendInvoice={
-              viewingInvoice?.status !== "paid" ? handleSendInvoicejust : handleSendInvoicejust
+              viewingInvoice?.status === "draft"
+                ? handleSendInvoiceDraft
+                : handleSendInvoicejust
             }
             isLoading={
               createInvoiceMutation.isPending || updateInvoiceMutation.isPending
@@ -879,7 +995,9 @@ const calculations = React.useMemo(() => {
         open={showSaveDraftModal}
         onClose={handleSaveDraftCancel}
         onConfirm={handleSaveDraftConfirm}
-        isLoading={createInvoiceMutation.isPending || updateInvoiceMutation.isPending}
+        isLoading={
+          createInvoiceMutation.isPending || updateInvoiceMutation.isPending
+        }
       />
     </div>
   );

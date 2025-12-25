@@ -152,7 +152,6 @@ export const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
     permissions: [
       "projects.read",
       "users.read",
-      // Capacity planning
       "capacity.read",
       "tasks.read",
       "projects.update",
@@ -164,7 +163,7 @@ export const DEFAULT_ORGANIZATION_ROLES: RoleTemplate[] = [
       "timesheets.read",
       "timesheets.update",
       "clients.read",
-      "invoices.read",
+      // "invoices.read",
       "estimates.read",
       "expenses.create",
       "expenses.read",
