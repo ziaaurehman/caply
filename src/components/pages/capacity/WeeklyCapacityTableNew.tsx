@@ -156,8 +156,8 @@ export default function WeeklyCapacityTableNew({
   selectedWeek = "",
   onAddResource,
 }: WeeklyCapacityTableProps) {
-    const { data: session } = useSession();
-  
+  const { data: session } = useSession();
+
   const queryClient = useQueryClient();
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(
     new Set()
@@ -633,7 +633,7 @@ export default function WeeklyCapacityTableNew({
     refetch,
   } = useQuery({
     queryKey: ["resources", currentOrganization?.id],
-    queryFn: () => fetchResources(currentOrganization?.id || "",session?.user.id),
+    queryFn: () => fetchResources(currentOrganization?.id || "", session?.user.id || ""),
     enabled: !!currentOrganization?.id, // Only fetch when organization ID is available
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -943,11 +943,10 @@ export default function WeeklyCapacityTableNew({
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-500">Allocated:</span>
               <span
-                className={`text-sm font-medium ${
-                  totalWeeklyAllocated > totalWeeklyCapacity
-                    ? "text-red-600"
-                    : "text-gray-900"
-                }`}
+                className={`text-sm font-medium ${totalWeeklyAllocated > totalWeeklyCapacity
+                  ? "text-red-600"
+                  : "text-gray-900"
+                  }`}
               >
                 {totalWeeklyAllocated.toFixed(1)}h
               </span>
@@ -959,13 +958,12 @@ export default function WeeklyCapacityTableNew({
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-500">Available:</span>
               <span
-                className={`text-sm font-medium ${
-                  totalWeeklyAvailable < 0
-                    ? "text-red-600"
-                    : totalWeeklyAvailable < totalWeeklyCapacity * 0.1
-                      ? "text-yellow-600"
-                      : "text-green-600"
-                }`}
+                className={`text-sm font-medium ${totalWeeklyAvailable < 0
+                  ? "text-red-600"
+                  : totalWeeklyAvailable < totalWeeklyCapacity * 0.1
+                    ? "text-yellow-600"
+                    : "text-green-600"
+                  }`}
               >
                 {totalWeeklyAvailable.toFixed(1)}h
               </span>
@@ -977,13 +975,12 @@ export default function WeeklyCapacityTableNew({
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-500">Utilization:</span>
               <span
-                className={`text-sm font-medium ${
-                  utilizationPercentage > 100
-                    ? "text-red-600"
-                    : utilizationPercentage >= 90
-                      ? "text-yellow-600"
-                      : "text-green-600"
-                }`}
+                className={`text-sm font-medium ${utilizationPercentage > 100
+                  ? "text-red-600"
+                  : utilizationPercentage >= 90
+                    ? "text-yellow-600"
+                    : "text-green-600"
+                  }`}
               >
                 {utilizationPercentage.toFixed(1)}%
               </span>
@@ -995,13 +992,12 @@ export default function WeeklyCapacityTableNew({
         <div className="mt-3">
           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-300 ${
-                utilizationPercentage > 100
-                  ? "bg-red-500"
-                  : utilizationPercentage >= 90
-                    ? "bg-yellow-500"
-                    : "bg-green-500"
-              }`}
+              className={`h-full rounded-full transition-all duration-300 ${utilizationPercentage > 100
+                ? "bg-red-500"
+                : utilizationPercentage >= 90
+                  ? "bg-yellow-500"
+                  : "bg-green-500"
+                }`}
               style={{
                 width: `${Math.min(utilizationPercentage, 100)}%`,
               }}
@@ -1161,9 +1157,8 @@ export default function WeeklyCapacityTableNew({
                 return (
                   <th
                     key={day.dayName}
-                    className={`text-center px-4 py-4 text-xs font-medium tracking-wider text-gray-500 uppercase ${
-                      dayIsPast ? "opacity-60" : ""
-                    }`}
+                    className={`text-center px-4 py-4 text-xs font-medium tracking-wider text-gray-500 uppercase ${dayIsPast ? "opacity-60" : ""
+                      }`}
                   >
                     <div>{day.dayName}</div>
                     <div
@@ -1277,28 +1272,41 @@ export default function WeeklyCapacityTableNew({
                     {daysData.map((day) => {
                       const isWeekend =
                         day.dayOfWeek === 0 || day.dayOfWeek === 6;
-                      const dayAllocation = isWeekend
-                        ? 0
-                        : member.allocations.reduce(
-                            (s, a) =>
-                              s + (a.dailyHours?.[day.dayOfWeek] ?? a.hours),
-                            0
-                          );
+
+                      // For weekends, only sum hours from projects that allow weekends
+                      // For weekdays, sum all projects
+                      const dayAllocation = member.allocations.reduce(
+                        (s, a) => {
+                          if (isWeekend && !a.includeWeekends) {
+                            return s; // Don't include this project's hours on weekends
+                          }
+                          return s + (a.dailyHours?.[day.dayOfWeek] ?? a.hours);
+                        },
+                        0
+                      );
+
+                      // If weekend and no hours allocated, show "-"
+                      if (isWeekend && dayAllocation === 0) {
+                        return (
+                          <td
+                            key={day.dayName}
+                            className="px-4 py-4 text-center bg-gray-50 opacity-50"
+                          >
+                            <div className="text-gray-300 text-sm">-</div>
+                          </td>
+                        );
+                      }
 
                       return (
                         <td
                           key={day.dayName}
-                          className={`px-4 py-4 text-center ${isWeekend ? "opacity-50 cursor-not-allowed" : ""}`}
+                          className="px-4 py-4 text-center"
                         >
-                          {isWeekend ? (
-                            <div className="text-gray-300 text-sm">-</div>
-                          ) : (
-                            <div
-                              className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(dayAllocation, member.capacity)}`}
-                            >
-                              {dayAllocation}h
-                            </div>
-                          )}
+                          <div
+                            className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(dayAllocation, member.capacity)}`}
+                          >
+                            {dayAllocation}h
+                          </div>
                         </td>
                       );
                     })}
@@ -1355,17 +1363,16 @@ export default function WeeklyCapacityTableNew({
                                   return (
                                     <input
                                       type="number"
-                                      className={`w-16 border border-gray-300 rounded px-2 py-1 text-sm text-gray-700 ${
-                                        dayIsPast
-                                          ? "opacity-50 cursor-not-allowed bg-gray-100"
-                                          : ""
-                                      }`}
+                                      className={`w-16 border border-gray-300 rounded px-2 py-1 text-sm text-gray-700 ${dayIsPast
+                                        ? "opacity-50 cursor-not-allowed bg-gray-100"
+                                        : ""
+                                        }`}
                                       value={
                                         editedDailyHours[
-                                          `${memberId}:${allocation.projectId}`
+                                        `${memberId}:${allocation.projectId}`
                                         ]?.[day.dayOfWeek] ??
                                         allocation.dailyHours?.[
-                                          day.dayOfWeek
+                                        day.dayOfWeek
                                         ] ??
                                         0
                                       }
@@ -1464,13 +1471,12 @@ export default function WeeklyCapacityTableNew({
                               <Trash className="h-4 w-4" />
                             </button>
                             <button
-                              className={`${
-                                linkedStatus[
-                                  `${memberId}:${allocation.projectId}`
-                                ] !== false
-                                  ? "text-orange-600"
-                                  : "text-gray-400"
-                              } hover:text-orange-700`}
+                              className={`${linkedStatus[
+                                `${memberId}:${allocation.projectId}`
+                              ] !== false
+                                ? "text-orange-600"
+                                : "text-gray-400"
+                                } hover:text-orange-700`}
                               title={
                                 linkedStatus[
                                   `${memberId}:${allocation.projectId}`

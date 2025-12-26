@@ -88,7 +88,10 @@ export async function sendInvitationEmail(
         const transporter = createSendGridTransporter();
 
         const info = await transporter.sendMail({
-          from: fromEmail,
+          from: {
+            name: process.env.FROM_NAME || "Caply",
+            address: fromEmail,
+          },
           to: data.email,
           subject: `You're invited to join ${data.organizationName}`,
           html: emailHtml,
@@ -145,7 +148,7 @@ async function sendViaResend(data: InvitationEmailData): Promise<EmailResult> {
     const fromEmail = process.env.FROM_EMAIL || "noreply@yourcompany.com";
 
     const response = await resend.emails.send({
-      from: fromEmail,
+      from: `${process.env.FROM_NAME || "Caply"} <${fromEmail}>`,
       to: data.email,
       subject: `You're invited to join ${data.organizationName}`,
       html: emailHtml,
@@ -200,11 +203,10 @@ function generateInvitationEmailHTML(
       </head>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="background-color: #f8f9fa; padding: 30px; border-radius: 10px; text-align: center; margin-bottom: 30px;">
-          ${
-            data.organizationLogo
-              ? `<img src="${data.organizationLogo}" alt="${data.organizationName}" style="max-width: 150px; margin-bottom: 20px;">`
-              : ""
-          }
+          ${data.organizationLogo
+      ? `<img src="${data.organizationLogo}" alt="${data.organizationName}" style="max-width: 150px; margin-bottom: 20px;">`
+      : ""
+    }
           <h1 style="color: #2563eb; margin: 0;">You're Invited!</h1>
           <p style="font-size: 18px; margin: 10px 0 0 0; color: #666;">
             Join ${data.organizationName} as a ${data.roleName}
@@ -220,17 +222,16 @@ function generateInvitationEmailHTML(
             <strong>${data.inviterName}</strong> has invited you to join <strong>${data.organizationName}</strong> as a <strong>${data.roleName}</strong>.
           </p>
 
-          ${
-            data.message
-              ? `
+          ${data.message
+      ? `
             <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2563eb;">
               <p style="margin: 0; font-style: italic; color: #555;">
                 "${data.message}"
               </p>
             </div>
           `
-              : ""
-          }
+      : ""
+    }
 
           <div style="text-align: center; margin: 30px 0;">
             <a href="${inviteUrl}" 
@@ -285,7 +286,10 @@ export async function sendWelcomeEmail(
         const transporter = createSendGridTransporter();
 
         const info = await transporter.sendMail({
-          from: fromEmail,
+          from: {
+            name: process.env.FROM_NAME || "Caply",
+            address: fromEmail,
+          },
           to: data.email,
           subject: `Welcome to ${data.organizationName}!`,
           html: `
@@ -339,7 +343,7 @@ async function sendWelcomeViaResend(
     const fromEmail = process.env.FROM_EMAIL || "noreply@yourcompany.com";
 
     const response = await resend.emails.send({
-      from: fromEmail,
+      from: `${process.env.FROM_NAME || "Caply"} <${fromEmail}>`,
       to: data.email,
       subject: `Welcome to ${data.organizationName}!`,
       html: `
@@ -388,12 +392,17 @@ export async function sendVerificationCodeEmail(
       try {
         const transporter = createSendGridTransporter();
         console.log("Comes Here")
-        console.log({  from: fromEmail,
+        console.log({
+          from: fromEmail,
           to: data.email,
           subject: "Verify your email address",
-          html: emailHtml,})
+          html: emailHtml,
+        })
         const info = await transporter.sendMail({
-          from: fromEmail,
+          from: {
+            name: process.env.FROM_NAME || "Caply",
+            address: fromEmail,
+          },
           to: data.email,
           subject: "Verify your email address",
           html: emailHtml,
@@ -443,7 +452,7 @@ async function sendVerificationCodeViaResend(
     const fromEmail = process.env.FROM_EMAIL || "noreply@yourcompany.com";
 
     const response = await resend.emails.send({
-      from: fromEmail,
+      from: `${process.env.FROM_NAME || "Caply"} <${fromEmail}>`,
       to: data.email,
       subject: "Verify your email address",
       html: emailHtml,

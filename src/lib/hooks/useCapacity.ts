@@ -14,7 +14,7 @@ export const capacityKeys = {
   monthly: () => [...capacityKeys.all, "monthly"] as const,
   monthlyByOrg: (
     organizationId: string,
-    
+
     month: string,
     params?: { only_active?: boolean }
   ) => [...capacityKeys.monthly(), organizationId, month, params] as const,
@@ -120,7 +120,7 @@ export function useMonthlyCapacity(
 ) {
   return useQuery({
     queryKey: capacityKeys.monthlyByOrg(organizationId, "monthly", params),
-    queryFn: () => capacityAPI.getMonthly(organizationId,userId, month, params),
+    queryFn: () => capacityAPI.getMonthly(organizationId, userId, month, params),
     enabled: !!organizationId && !!month,
     staleTime: 2 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
@@ -208,17 +208,29 @@ export function useCreateAllocation() {
       notes?: string | null;
     }) => capacityAPI.createAllocation(data),
     onSuccess: (data, variables) => {
-      // Invalidate allocations queries
+      // Invalidate all allocations queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.allocationsByOrg(variables.organization_id),
+        queryKey: capacityKeys.allocations(),
+        exact: false,
       });
 
-      // Invalidate overview queries
+      // Invalidate all overview queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.overviewByOrg(variables.organization_id),
+        queryKey: capacityKeys.overview(),
+        exact: false,
       });
-      // Invalidate monthly as well (wildcard)
-      queryClient.invalidateQueries({ queryKey: capacityKeys.monthly() });
+
+      // Invalidate all monthly queries
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.monthly(),
+        exact: false,
+      });
+
+      // Invalidate project queries (allocations affect project capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
+      });
     },
     onError: (error) => {
       console.error("Failed to create allocation:", error);
@@ -240,16 +252,29 @@ export function useUpdateAllocation() {
       organizationId: string;
     }) => capacityAPI.updateAllocation(id, data, organizationId),
     onSuccess: (data, variables) => {
-      // Invalidate allocations queries
+      // Invalidate all allocations queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.allocationsByOrg(variables.organizationId),
+        queryKey: capacityKeys.allocations(),
+        exact: false,
       });
 
-      // Invalidate overview queries
+      // Invalidate all overview queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.overviewByOrg(variables.organizationId),
+        queryKey: capacityKeys.overview(),
+        exact: false,
       });
-      queryClient.invalidateQueries({ queryKey: capacityKeys.monthly() });
+
+      // Invalidate all monthly queries
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.monthly(),
+        exact: false,
+      });
+
+      // Invalidate project queries (allocations affect project capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
+      });
     },
     onError: (error) => {
       console.error("Failed to update allocation:", error);
@@ -269,16 +294,29 @@ export function useDeleteAllocation() {
       organizationId: string;
     }) => capacityAPI.deleteAllocation(organizationId, id),
     onSuccess: (data, variables) => {
-      // Invalidate allocations queries
+      // Invalidate all allocations queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.allocationsByOrg(variables.organizationId),
+        queryKey: capacityKeys.allocations(),
+        exact: false,
       });
 
-      // Invalidate overview queries
+      // Invalidate all overview queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.overviewByOrg(variables.organizationId),
+        queryKey: capacityKeys.overview(),
+        exact: false,
       });
-      queryClient.invalidateQueries({ queryKey: capacityKeys.monthly() });
+
+      // Invalidate all monthly queries
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.monthly(),
+        exact: false,
+      });
+
+      // Invalidate project queries (allocations affect project capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
+      });
     },
     onError: (error) => {
       console.error("Failed to delete allocation:", error);
@@ -294,9 +332,20 @@ export function useUpdateMemberCapacity() {
       data: Omit<MemberCapacity, "id" | "created_at" | "updated_at">
     ) => capacityAPI.updateMemberCapacity(data),
     onSuccess: () => {
-      // Invalidate member capacities queries
+      // Invalidate all member capacities queries
       queryClient.invalidateQueries({
         queryKey: capacityKeys.memberCapacities(),
+        exact: false,
+      });
+
+      // Invalidate overview and allocation queries
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.overview(),
+        exact: false,
+      });
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.allocations(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -312,9 +361,20 @@ export function useUpdateCapacitySettings() {
     mutationFn: (data: Partial<CapacitySettings> & { project_id: string }) =>
       capacityAPI.updateSettings(data),
     onSuccess: (data, variables) => {
-      // Invalidate settings queries
+      // Invalidate all settings queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.settingsByProject(variables.project_id),
+        queryKey: capacityKeys.settings(),
+        exact: false,
+      });
+
+      // Invalidate overview and allocation queries
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.overview(),
+        exact: false,
+      });
+      queryClient.invalidateQueries({
+        queryKey: capacityKeys.allocations(),
+        exact: false,
       });
     },
     onError: (error) => {

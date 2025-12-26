@@ -168,22 +168,32 @@ export function useCreateLeaveRequest() {
       data: CreateLeaveRequestData;
     }) => leaveAPI.createLeaveRequest(organizationId, data),
     onSuccess: (data, variables) => {
-      // Invalidate leave requests queries
+      // Invalidate all leave requests queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.requestsByOrg(variables.organizationId),
+        queryKey: leaveKeys.requests(),
+        exact: false,
       });
 
-      // Invalidate stats and summary
+      // Invalidate all stats and summary queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.statsByOrg(variables.organizationId),
+        queryKey: leaveKeys.stats(),
+        exact: false,
       });
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.summaryByOrg(variables.organizationId),
+        queryKey: leaveKeys.summary(),
+        exact: false,
       });
 
-      // Invalidate balances
+      // Invalidate all balances queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.balancesByOrg(variables.organizationId),
+        queryKey: leaveKeys.balances(),
+        exact: false,
+      });
+
+      // Invalidate calendar queries
+      queryClient.invalidateQueries({
+        queryKey: leaveKeys.calendar(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -212,17 +222,26 @@ export function useUpdateLeaveRequest() {
         data
       );
 
-      // Invalidate leave requests queries
+      // Invalidate all leave requests queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.requestsByOrg(variables.organizationId),
+        queryKey: leaveKeys.requests(),
+        exact: false,
       });
 
-      // Invalidate stats and summary
+      // Invalidate all stats and summary queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.statsByOrg(variables.organizationId),
+        queryKey: leaveKeys.stats(),
+        exact: false,
       });
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.summaryByOrg(variables.organizationId),
+        queryKey: leaveKeys.summary(),
+        exact: false,
+      });
+
+      // Invalidate calendar queries
+      queryClient.invalidateQueries({
+        queryKey: leaveKeys.calendar(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -251,17 +270,26 @@ export function useDeleteLeaveRequest() {
         ),
       });
 
-      // Invalidate leave requests queries
+      // Invalidate all leave requests queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.requestsByOrg(variables.organizationId),
+        queryKey: leaveKeys.requests(),
+        exact: false,
       });
 
-      // Invalidate stats and summary
+      // Invalidate all stats and summary queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.statsByOrg(variables.organizationId),
+        queryKey: leaveKeys.stats(),
+        exact: false,
       });
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.summaryByOrg(variables.organizationId),
+        queryKey: leaveKeys.summary(),
+        exact: false,
+      });
+
+      // Invalidate calendar queries
+      queryClient.invalidateQueries({
+        queryKey: leaveKeys.calendar(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -290,23 +318,33 @@ export function useApproveLeaveRequest() {
         data
       );
 
-      // Invalidate leave requests queries
+      // Invalidate all leave requests queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.requestsByOrg(variables.organizationId),
+        queryKey: leaveKeys.requests(),
+        exact: false,
       });
 
-      // Invalidate stats and summary
+      // Invalidate all stats and summary queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.statsByOrg(variables.organizationId),
+        queryKey: leaveKeys.stats(),
+        exact: false,
       });
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.summaryByOrg(variables.organizationId),
+        queryKey: leaveKeys.summary(),
+        exact: false,
       });
 
-      // Invalidate balances if approved
+      // Invalidate calendar queries
+      queryClient.invalidateQueries({
+        queryKey: leaveKeys.calendar(),
+        exact: false,
+      });
+
+      // Invalidate all balances if approved
       if (data.leave_request.status === "approved") {
         queryClient.invalidateQueries({
-          queryKey: leaveKeys.balancesByOrg(variables.organizationId),
+          queryKey: leaveKeys.balances(),
+          exact: false,
         });
       }
     },
@@ -330,14 +368,16 @@ export function useUpdateLeaveBalance() {
       data: { total_days?: number; used_days?: number };
     }) => leaveAPI.updateLeaveBalance(organizationId, balanceId, data),
     onSuccess: (data, variables) => {
-      // Invalidate balances queries
+      // Invalidate all balances queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.balancesByOrg(variables.organizationId),
+        queryKey: leaveKeys.balances(),
+        exact: false,
       });
 
-      // Invalidate summary
+      // Invalidate all summary queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.summaryByOrg(variables.organizationId),
+        queryKey: leaveKeys.summary(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -363,9 +403,10 @@ export function useCreateLeavePolicy() {
       >;
     }) => leaveAPI.createLeavePolicy(organizationId, data),
     onSuccess: (data, variables) => {
-      // Invalidate policies queries
+      // Invalidate all policies queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.policiesByOrg(variables.organizationId),
+        queryKey: leaveKeys.policies(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -393,9 +434,10 @@ export function useUpdateLeavePolicy() {
       >;
     }) => leaveAPI.updateLeavePolicy(organizationId, policyId, data),
     onSuccess: (data, variables) => {
-      // Invalidate policies queries
+      // Invalidate all policies queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.policiesByOrg(variables.organizationId),
+        queryKey: leaveKeys.policies(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -416,9 +458,10 @@ export function useDeleteLeavePolicy() {
       policyId: string;
     }) => leaveAPI.deleteLeavePolicy(organizationId, policyId),
     onSuccess: (data, variables) => {
-      // Invalidate policies queries
+      // Invalidate all policies queries
       queryClient.invalidateQueries({
-        queryKey: leaveKeys.policiesByOrg(variables.organizationId),
+        queryKey: leaveKeys.policies(),
+        exact: false,
       });
     },
     onError: (error) => {

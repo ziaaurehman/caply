@@ -358,9 +358,16 @@ export const useSaveTimesheet = () => {
       });
     },
     onSuccess: (data, variables) => {
-      // Invalidate and refetch the timesheet data
+      // Invalidate all timesheet queries
       queryClient.invalidateQueries({
-        queryKey: ["timesheet", variables.organizationId, variables.weekStart],
+        queryKey: ["timesheet"],
+        exact: false,
+      });
+
+      // Invalidate capacity queries (timesheets affect capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["capacity"],
+        exact: false,
       });
     },
   });
@@ -424,12 +431,22 @@ export const useSubmitTimesheet = () => {
       return timesheetsAPI.submitTimesheet(organizationId, submissionId);
     },
     onSuccess: (data, variables) => {
-      // Invalidate timesheet and submissions data
+      // Invalidate all timesheet queries
       queryClient.invalidateQueries({
-        queryKey: ["timesheet", variables.organizationId],
+        queryKey: ["timesheet"],
+        exact: false,
       });
+
+      // Invalidate all submissions queries
       queryClient.invalidateQueries({
-        queryKey: ["submissions", variables.organizationId],
+        queryKey: ["submissions"],
+        exact: false,
+      });
+
+      // Invalidate capacity queries (timesheets affect capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["capacity"],
+        exact: false,
       });
     },
   });
@@ -500,9 +517,22 @@ export const useResolveSubmission = () => {
       );
     },
     onSuccess: (data, variables) => {
-      // Invalidate submissions
+      // Invalidate all submissions queries
       queryClient.invalidateQueries({
-        queryKey: ["submissions", variables.organizationId],
+        queryKey: ["submissions"],
+        exact: false,
+      });
+
+      // Invalidate timesheet queries
+      queryClient.invalidateQueries({
+        queryKey: ["timesheet"],
+        exact: false,
+      });
+
+      // Invalidate capacity queries (approved timesheets affect capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["capacity"],
+        exact: false,
       });
     },
   });
@@ -552,10 +582,10 @@ export const useUpdateTimesheetEntry = () => {
       return timesheetsAPI.updateTimesheetEntry(organizationId, entryId, data);
     },
     onSuccess: (data, variables) => {
-      // Invalidate queries but don't immediately refetch
-      // The component will handle refetching when needed (e.g., on save or week change)
+      // Invalidate all timesheet queries
       queryClient.invalidateQueries({
-        queryKey: ["timesheet", variables.organizationId],
+        queryKey: ["timesheet"],
+        exact: false,
       });
     },
   });
@@ -575,9 +605,10 @@ export const useDeleteTimesheetEntry = () => {
       return timesheetsAPI.deleteTimesheetEntry(organizationId, entryId);
     },
     onSuccess: (data, variables) => {
-      // Invalidate and refetch the timesheet data
+      // Invalidate all timesheet queries
       queryClient.invalidateQueries({
-        queryKey: ["timesheet", variables.organizationId],
+        queryKey: ["timesheet"],
+        exact: false,
       });
     },
   });

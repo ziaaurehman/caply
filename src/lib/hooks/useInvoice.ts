@@ -11,7 +11,7 @@ import type {
 export const invoiceKeys = {
   all: ["invoices"] as const,
   list: (organizationId: string) => [...invoiceKeys.all, "list", organizationId] as const,
-  detail: (invoiceId: string, organizationId: string) => 
+  detail: (invoiceId: string, organizationId: string) =>
     [...invoiceKeys.all, "detail", invoiceId, organizationId] as const,
 };
 
@@ -43,9 +43,20 @@ export function useCreateInvoice(organizationId: string) {
     mutationFn: (data: CreateInvoiceData) =>
       invoiceAPI.createInvoice({ ...data, organizationId }),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: invoiceKeys.list(organizationId) });
+      // Invalidate all invoices list queries
+      queryClient.invalidateQueries({
+        queryKey: invoiceKeys.all,
+        exact: false,
+      });
+
+      // Invalidate project queries (invoices are related to projects)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
+      });
+
       queryClient.setQueryData(
-        invoiceKeys.detail(data.invoice.id, organizationId), 
+        invoiceKeys.detail(data.invoice.id, organizationId),
         data
       );
     },
@@ -58,11 +69,20 @@ export function useUpdateInvoice() {
     mutationFn: (data: UpdateInvoiceData & { organizationId: string }) =>
       invoiceAPI.updateInvoice(data),
     onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ 
-        queryKey: invoiceKeys.list(variables.organizationId) 
+      // Invalidate all invoices list queries
+      queryClient.invalidateQueries({
+        queryKey: invoiceKeys.all,
+        exact: false,
       });
+
+      // Invalidate project queries (invoices are related to projects)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
+      });
+
       queryClient.setQueryData(
-        invoiceKeys.detail(data.invoice.id, variables.organizationId), 
+        invoiceKeys.detail(data.invoice.id, variables.organizationId),
         data
       );
     },
@@ -75,9 +95,18 @@ export function useDeleteInvoice() {
     mutationFn: (data: { id: string; organizationId: string }) =>
       invoiceAPI.deleteInvoice(data.id, data.organizationId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ 
-        queryKey: invoiceKeys.list(variables.organizationId) 
+      // Invalidate all invoices list queries
+      queryClient.invalidateQueries({
+        queryKey: invoiceKeys.all,
+        exact: false,
       });
+
+      // Invalidate project queries (invoices are related to projects)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
+      });
+
       queryClient.removeQueries({
         queryKey: invoiceKeys.detail(variables.id, variables.organizationId)
       });

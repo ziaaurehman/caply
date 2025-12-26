@@ -35,14 +35,14 @@ export async function sendEmail({
     disposition?: string; // "attachment" | "inline"
   }[];
 }): Promise<void> {
-    console.log(to)
-    console.log(process.env.FROM_EMAIL)
-    console.log(process.env.FROM_NAME)
+  console.log(to)
+  console.log(process.env.FROM_EMAIL)
+  console.log(process.env.FROM_NAME)
   const msg = {
     to,
     from: {
       email: process.env.FROM_EMAIL as string,
-      name: process.env.FROM_NAME || "System Notification",
+      name: process.env.FROM_NAME || "Caply",
     },
     subject,
     html,

@@ -96,12 +96,22 @@ export function useCreateTeamMember() {
     mutationFn: (data: CreateTeamMemberData & { organizationId: string }) =>
       teamAPI.createTeamMember(data),
     onSuccess: (data, variables) => {
-      // Invalidate team members list for the organization
-      queryClient.invalidateQueries({
-        queryKey: teamMemberKeys.list(variables.organizationId),
-      });
+      // Invalidate all team members list queries
       queryClient.invalidateQueries({
         queryKey: teamMemberKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate capacity queries (new members affect capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["capacity"],
+        exact: false,
+      });
+
+      // Invalidate project queries (members can be assigned to projects)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
       });
     },
     onError: (error) => {
@@ -124,12 +134,22 @@ export function useUpdateTeamMember() {
     onSuccess: (data, variables) => {
       const { id, data: updateData } = variables;
 
-      // Invalidate team members list to reflect changes
-      queryClient.invalidateQueries({
-        queryKey: teamMemberKeys.list(updateData.organizationId),
-      });
+      // Invalidate all team members list queries
       queryClient.invalidateQueries({
         queryKey: teamMemberKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate capacity queries (member updates affect capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["capacity"],
+        exact: false,
+      });
+
+      // Invalidate project queries (role changes affect projects)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
       });
     },
     onError: (error) => {
@@ -151,12 +171,29 @@ export function useDeleteTeamMember() {
     }) => teamAPI.deleteTeamMember(id, organizationId),
     onSuccess: (_, variables) => {
       const { organizationId } = variables;
-  queryClient.invalidateQueries({
-        queryKey: teamMemberKeys.lists(),
-      });
-      // Invalidate team members list
+
+      // Invalidate all team members list queries
       queryClient.invalidateQueries({
-        queryKey: teamMemberKeys.list(organizationId),
+        queryKey: teamMemberKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate capacity queries (member deletion affects capacity)
+      queryClient.invalidateQueries({
+        queryKey: ["capacity"],
+        exact: false,
+      });
+
+      // Invalidate project queries (member deletion affects projects)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
+      });
+
+      // Invalidate timesheet queries (member deletion affects timesheets)
+      queryClient.invalidateQueries({
+        queryKey: ["timesheet"],
+        exact: false,
       });
     },
     onError: (error) => {
@@ -179,7 +216,7 @@ export function useResendInvitation() {
       organizationId: string;
     }) => teamAPI.resendInvitation(invitationId),
     onSuccess: (_, variables) => {
-        queryClient.invalidateQueries({
+      queryClient.invalidateQueries({
         queryKey: teamMemberKeys.lists(),
       });
       // Invalidate team members list to refresh invitation data
@@ -205,7 +242,7 @@ export function useCancelInvitation() {
       organizationId: string;
     }) => teamAPI.cancelInvitation(invitationId),
     onSuccess: (_, variables) => {
-        queryClient.invalidateQueries({
+      queryClient.invalidateQueries({
         queryKey: teamMemberKeys.lists(),
       });
       // Invalidate team members list to refresh invitation data

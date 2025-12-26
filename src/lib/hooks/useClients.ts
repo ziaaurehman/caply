@@ -17,7 +17,7 @@ export const clientKeys = {
   details: () => [...clientKeys.all, "detail"] as const,
   detail: (id: string, organizationId: string) =>
     [...clientKeys.details(), id, organizationId] as const,
-    projects: (clientId: string, organizationId: string) =>
+  projects: (clientId: string, organizationId: string) =>
     [...clientKeys.detail(clientId, organizationId), "projects"] as const,
 };
 
@@ -66,9 +66,10 @@ export function useCreateClient(organizationId: string) {
     mutationFn: (data: CreateClientData & { organizationId: string }) =>
       clientAPI.createClient(data),
     onSuccess: (data) => {
-      // Invalidate clients list for the organization
+      // Invalidate all clients list queries
       queryClient.invalidateQueries({
-        queryKey: clientKeys.list(organizationId),
+        queryKey: clientKeys.lists(),
+        exact: false,
       });
 
       // Add the new client to cache
@@ -103,9 +104,16 @@ export function useUpdateClient() {
         data
       );
 
-      // Invalidate clients list to reflect changes
+      // Invalidate all clients list queries
       queryClient.invalidateQueries({
-        queryKey: clientKeys.list(updateData.organizationId),
+        queryKey: clientKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate all client details queries
+      queryClient.invalidateQueries({
+        queryKey: clientKeys.details(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -133,9 +141,16 @@ export function useDeleteClient() {
         queryKey: clientKeys.detail(id, organizationId),
       });
 
-      // Invalidate clients list
+      // Invalidate all clients list queries
       queryClient.invalidateQueries({
-        queryKey: clientKeys.list(organizationId),
+        queryKey: clientKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate project queries (projects are related to clients)
+      queryClient.invalidateQueries({
+        queryKey: ["projects"],
+        exact: false,
       });
     },
     onError: (error) => {
