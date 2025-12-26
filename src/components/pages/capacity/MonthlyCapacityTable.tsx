@@ -436,7 +436,7 @@
 // //     },
 // //   });
 
-  
+
 // //     const {
 // //       data: projectAssignments = [],
 // //       isLoading: assignmentsLoading,
@@ -3369,75 +3369,33 @@ export default function MonthlyCapacityTable({
     only_active: true,
   })
 
-  // Generate weeks for the selected month - use data from API if available
+  // Generate days for the selected month (MON-SUN like weekly view)
   const weeksData: WeekData[] = useMemo(() => {
-    // If we have monthly data, use the weeks from the API
-    if (monthlyCapacityData?.weeks && monthlyCapacityData.weeks.length > 0) {
-      return monthlyCapacityData.weeks.map((week: { week_start_date: string }, index: number) => {
-        const weekStart = new Date(week.week_start_date)
-        const weekEnd = new Date(weekStart)
-        weekEnd.setDate(weekStart.getDate() + 6) // Sunday
+    const days: WeekData[] = []
 
-        const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
-        const startDateStr = `${String(weekStart.getDate()).padStart(2, "0")} ${monthNames[weekStart.getMonth()]}`
-        const isValidDate = (d: Date) => d instanceof Date && !isNaN(d.getTime())
-
-        if (!isValidDate(weekStart) || !isValidDate(weekEnd)) {
-          console.error("Invalid week dates:", { weekStart, weekEnd })
-          return null // or skip this week
-        }
-        return {
-          weekNumber: `W${String(index + 1).padStart(2, "0")}`,
-          startDate: weekStart.toISOString(),
-          endDate: weekEnd.toISOString(),
-          label: startDateStr,
-        }
-      })
-    }
-
-    // Fallback: generate weeks manually if API data not available
-    const weeks: WeekData[] = []
+    // Get the first Monday of the month (or previous Monday if month starts mid-week)
     const monthStart = new Date(selectedYear, selectedMonth, 1)
-    const monthEnd = new Date(selectedYear, selectedMonth + 1, 0)
+    const firstMonday = new Date(monthStart)
+    const dayOfWeek = monthStart.getDay()
+    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+    firstMonday.setDate(monthStart.getDate() - daysToSubtract)
 
-    const firstDayOfWeek = monthStart.getDay()
-    const daysToMonday = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1
+    // Generate 7 days starting from Monday
+    const dayNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
-    let currentWeekStart = new Date(monthStart)
-    currentWeekStart.setDate(monthStart.getDate() - daysToMonday)
-    let weekCount = 0
-    while (currentWeekStart <= monthEnd && weekCount < 6) {
-      const dayOfWeek = currentWeekStart.getDay()
-      const mondayBasedDay = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-      const daysUntilSunday = 6 - mondayBasedDay
+    for (let i = 0; i < 7; i++) {
+      const currentDay = new Date(firstMonday)
+      currentDay.setDate(firstMonday.getDate() + i)
 
-      const weekEnd = new Date(currentWeekStart)
-      weekEnd.setDate(currentWeekStart.getDate() + daysUntilSunday)
-      const actualWeekEnd = weekEnd > monthEnd ? monthEnd : weekEnd
-
-      const weekNumber = `W${String(weekCount + 1).padStart(2, "0")}`
-      const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
-      const startDateStr = `${String(currentWeekStart.getDate()).padStart(2, "0")} ${monthNames[currentWeekStart.getMonth()]}`
-
-      weeks.push({
-        weekNumber,
-        startDate: currentWeekStart.toISOString(),
-        endDate: actualWeekEnd.toISOString(),
-        label: startDateStr,
+      days.push({
+        weekNumber: dayNames[i],
+        startDate: currentDay.toISOString(),
+        endDate: currentDay.toISOString(),
+        label: `${String(currentDay.getDate()).padStart(2, "0")}`,
       })
-
-      const nextWeekStart = new Date(actualWeekEnd)
-      nextWeekStart.setDate(actualWeekEnd.getDate() + 1)
-
-      if (nextWeekStart > monthEnd) {
-        break
-      }
-
-      currentWeekStart = nextWeekStart
-      weekCount++
     }
 
-    return weeks
+    return days
   }, [selectedMonth, selectedYear, monthlyCapacityData])
 
   const addProjectMutation = useMutation({
@@ -4206,9 +4164,16 @@ export default function MonthlyCapacityTable({
                       </div>
                     </td>
                     {weeksData.map((week, weekIndex) => {
+                      const isWeekend = week.weekNumber === "SAT" || week.weekNumber === "SUN";
+
+                      // For weekends, only sum hours from projects that allow weekends
+                      // For weekdays, sum all projects
                       const totalDailyAllocated = member.allocations.reduce((sum, allocation) => {
-                        return sum + (allocation.defaultHoursPerDay || 0)
-                      }, 0)
+                        if (isWeekend && !allocation.allowWeekends) {
+                          return sum; // Don't include this project's hours on weekends
+                        }
+                        return sum + (allocation.defaultHoursPerDay || 0);
+                      }, 0);
 
                       const hasWeekendAllocation = member.allocations.some((a) => a.allowWeekends)
                       const weekCapacity = member.capacity * (hasWeekendAllocation ? 7 : 5)
@@ -4217,6 +4182,15 @@ export default function MonthlyCapacityTable({
                         return sum + (Number(allocation.weeklyHours?.[weekIndex]) || 0)
                       }, 0)
                       const weekUtilization = weekCapacity > 0 ? (weekAllocatedTotal / weekCapacity) * 100 : 0
+
+                      // For weekends in member header, show "-" if no projects allow weekends
+                      if (isWeekend && totalDailyAllocated === 0) {
+                        return (
+                          <td key={week.weekNumber} className="px-4 py-4 text-center bg-gray-50 opacity-50">
+                            <div className="text-gray-300 text-sm">-</div>
+                          </td>
+                        );
+                      }
 
                       return (
                         <td key={week.weekNumber} className="px-4 py-4 text-center">
@@ -4253,15 +4227,24 @@ export default function MonthlyCapacityTable({
                         </td>
                         <td className="px-4 py-3"></td>
                         {weeksData.map((week, weekIdx) => {
-                          const displayHours = allocation.defaultHoursPerDay || 0
+                          const isWeekend = week.weekNumber === "SAT" || week.weekNumber === "SUN";
+                          const shouldShowHours = !isWeekend || allocation.allowWeekends;
+                          const displayHours = shouldShowHours ? (allocation.defaultHoursPerDay || 0) : 0;
 
                           return (
-                            <td key={week.weekNumber} className="px-4 py-3 text-center">
-                              <div className="flex justify-center">
-                                <div className="min-w-[40px] h-10 px-2 flex items-center justify-center bg-orange-400 text-white font-bold rounded text-sm shadow-sm">
-                                  {displayHours.toFixed(1)}h
+                            <td
+                              key={week.weekNumber}
+                              className={`px-4 py-3 text-center ${isWeekend && !allocation.allowWeekends ? "bg-gray-50 opacity-50" : ""}`}
+                            >
+                              {!shouldShowHours ? (
+                                <div className="text-gray-300 text-sm">-</div>
+                              ) : (
+                                <div className="flex justify-center">
+                                  <div className="min-w-[40px] h-10 px-2 flex items-center justify-center bg-orange-400 text-white font-bold rounded text-sm shadow-sm">
+                                    {displayHours.toFixed(1)}h
+                                  </div>
                                 </div>
-                              </div>
+                              )}
                             </td>
                           )
                         })}

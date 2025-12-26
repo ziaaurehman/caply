@@ -120,7 +120,7 @@ export default function WeeklyCapacityTable({
   // New capacity v2 hooks
   const monthStr = `${String(selectedYear)}-${String(selectedMonth + 1).padStart(2, "0")}`;
   const { data: monthlyCapacityData, isLoading: monthlyLoading } =
-    useMonthlyCapacity(organizationId || "", monthStr, { only_active: true });
+    useMonthlyCapacity(organizationId || "", organizationId || "", monthStr, { only_active: true });
   const upsertWeeklyPlanMutation = useUpsertWeeklyPlan();
   const upsertDailyOverridesMutation = useUpsertDailyOverrides();
 
@@ -161,7 +161,7 @@ export default function WeeklyCapacityTable({
       if (viewMode !== "monthly" || !organizationId) return;
       const monthStr = `${String(selectedYear)}-${String(selectedMonth + 1).padStart(2, "0")}`;
       try {
-        const resp = await capacityAPI.getMonthly(organizationId, monthStr, {
+        const resp = await capacityAPI.getMonthly(organizationId, organizationId, monthStr, {
           only_active: true,
         });
         const weekKeys = (resp.weeks || []).map((w: any) => w.week_start_date);
@@ -204,9 +204,9 @@ export default function WeeklyCapacityTable({
     const weeks: WeekData[] = [];
 
     if (viewMode === "monthly") {
-      // For monthly view, show weeks of the selected month
+      // For monthly view, show 7 days (MON-SUN) just like weekly view
+      // Use the first week of the month as the reference
       const monthStart = new Date(selectedYear, selectedMonth, 1);
-      const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
 
       // Get the first Monday of the month (or previous Monday if month starts mid-week)
       const firstMonday = new Date(monthStart);
@@ -214,40 +214,19 @@ export default function WeeklyCapacityTable({
       const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       firstMonday.setDate(monthStart.getDate() - daysToSubtract);
 
-      // Generate weeks for the month
-      let currentWeek = new Date(firstMonday);
-      let weekCount = 0;
+      // Generate 7 days starting from Monday
+      const dayNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 
-      while (currentWeek <= monthEnd && weekCount < 6) {
-        const weekEnd = new Date(currentWeek);
-        weekEnd.setDate(currentWeek.getDate() + 6);
-
-        const weekNumber = `W${String(weekCount + 1).padStart(2, "0")}`;
-        const monthNames = [
-          "JAN",
-          "FEB",
-          "MAR",
-          "APR",
-          "MAY",
-          "JUN",
-          "JUL",
-          "AUG",
-          "SEP",
-          "OCT",
-          "NOV",
-          "DEC",
-        ];
-        const startDateStr = `${String(currentWeek.getDate()).padStart(2, "0")} ${monthNames[currentWeek.getMonth()]}`;
+      for (let i = 0; i < 7; i++) {
+        const currentDay = new Date(firstMonday);
+        currentDay.setDate(firstMonday.getDate() + i);
 
         weeks.push({
-          weekNumber,
-          startDate: currentWeek.toISOString(),
-          endDate: weekEnd.toISOString(),
-          label: startDateStr,
+          weekNumber: dayNames[i],
+          startDate: currentDay.toISOString(),
+          endDate: currentDay.toISOString(),
+          label: `${String(currentDay.getDate()).padStart(2, "0")}`,
         });
-
-        currentWeek.setDate(currentWeek.getDate() + 7);
-        weekCount++;
       }
     } else if (viewMode === "weekly") {
       // For weekly view, show days of the week (SUN-SAT)
@@ -491,7 +470,7 @@ export default function WeeklyCapacityTable({
             });
             setMemberTasks((prev) => ({ ...prev, [memberId]: map }));
           })
-          .catch(() => {});
+          .catch(() => { });
       }
     }
     setExpandedMembers(newExpanded);
@@ -671,6 +650,27 @@ export default function WeeklyCapacityTable({
     });
   };
 
+  // Helper function to get project's allow_weekends setting
+  const getProjectAllowWeekends = (
+    allocation: ResourceAllocation,
+    week: WeekData,
+    member?: any
+  ): boolean => {
+    if (viewMode === "monthly" && member?.monthlyResource) {
+      const weekStartDate = toDateOnly(new Date(week.startDate));
+      const weekInfo = member.monthlyResource.weeks.find(
+        (w: any) => w.week_start_date === weekStartDate
+      );
+      if (weekInfo) {
+        const projectInfo = weekInfo.projects?.find(
+          (p: any) => p.project?.id === allocation.project_id
+        );
+        return projectInfo?.allow_weekends ?? false;
+      }
+    }
+    return false;
+  };
+
   return (
     <div className="overflow-x-auto">
       {/* Loading state for monthly view */}
@@ -750,9 +750,8 @@ export default function WeeklyCapacityTable({
               return (
                 <th
                   key={week.weekNumber}
-                  className={`text-center px-4 py-4 text-xs font-medium tracking-wider ${
-                    isWeekend ? "text-gray-300" : "text-gray-500 uppercase"
-                  }`}
+                  className={`text-center px-4 py-4 text-xs font-medium tracking-wider ${isWeekend ? "text-gray-300" : "text-gray-500 uppercase"
+                    }`}
                 >
                   <div>{week.weekNumber}</div>
                   <div
@@ -841,11 +840,23 @@ export default function WeeklyCapacityTable({
                   {weeksData.map((week) => {
                     const isWeekend =
                       week.weekNumber === "SUN" || week.weekNumber === "SAT";
-                    let weekAllocation;
 
+                    // For member header row, always show '-' for weekends
+                    // Individual projects will show their own weekend hours based on allow_weekends
+                    if (isWeekend) {
+                      return (
+                        <td
+                          key={week.weekNumber}
+                          className="px-4 py-4 text-center bg-gray-50 opacity-50"
+                        >
+                          <div className="text-gray-300 text-sm">-</div>
+                        </td>
+                      );
+                    }
+
+                    let weekAllocation;
                     if (viewMode === "weekly") {
-                      // Use dummy data for weekly view
-                      weekAllocation = isWeekend ? 0 : 8; // 8 hours for weekdays, 0 for weekends
+                      weekAllocation = 8; // 8 hours for weekdays
                     } else {
                       weekAllocation = getAllocationForWeek(
                         member.allocations,
@@ -857,53 +868,43 @@ export default function WeeklyCapacityTable({
                     return (
                       <td
                         key={week.weekNumber}
-                        className={`px-4 py-4 text-center relative group ${
-                          isWeekend
-                            ? "cursor-not-allowed opacity-50"
-                            : "cursor-pointer"
-                        }`}
+                        className="px-4 py-4 text-center relative group cursor-pointer"
                         onClick={() => {
-                          if (!isWeekend) {
-                            onWeekCellClick?.({
-                              userId: member.user.id,
-                              week,
-                              member,
-                              allocations: member.allocations,
-                            });
-                          }
+                          onWeekCellClick?.({
+                            userId: member.user.id,
+                            week,
+                            member,
+                            allocations: member.allocations,
+                          });
                         }}
                       >
-                        {isWeekend ? (
-                          <div className="text-gray-300 text-sm">-</div>
-                        ) : (
-                          <>
-                            <div
-                              className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(weekAllocation, 8)}`}
-                            >
-                              {weekAllocation}h
+                        <>
+                          <div
+                            className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(weekAllocation, 8)}`}
+                          >
+                            {weekAllocation}h
+                          </div>
+                          {/* Tooltip */}
+                          <div className="invisible  group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                            <div className="font-medium">
+                              {viewMode === "weekly"
+                                ? week.weekNumber
+                                : `Week ${week.weekNumber}`}
                             </div>
-                            {/* Tooltip */}
-                            <div className="invisible  group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                              <div className="font-medium">
-                                {viewMode === "weekly"
-                                  ? week.weekNumber
-                                  : `Week ${week.weekNumber}`}
-                              </div>
-                              <div>Allocated: {weekAllocation}h</div>
+                            <div>Allocated: {weekAllocation}h</div>
+                            <div>
+                              Capacity:{" "}
+                              {viewMode === "weekly" ? 8 : member.capacity}h
+                            </div>
+                            {viewMode === "weekly" ? (
+                              <div>Available: {8 - weekAllocation}h</div>
+                            ) : (
                               <div>
-                                Capacity:{" "}
-                                {viewMode === "weekly" ? 8 : member.capacity}h
+                                Available: {member.capacity - weekAllocation}h
                               </div>
-                              {viewMode === "weekly" ? (
-                                <div>Available: {8 - weekAllocation}h</div>
-                              ) : (
-                                <div>
-                                  Available: {member.capacity - weekAllocation}h
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
+                            )}
+                          </div>
+                        </>
                       </td>
                     );
                   })}
@@ -960,7 +961,7 @@ export default function WeeklyCapacityTable({
                                         member.allocations.filter(
                                           (a) =>
                                             a.project_id ===
-                                              allocation.project_id &&
+                                            allocation.project_id &&
                                             getOrganizationMemberIdFromAllocation(
                                               a
                                             ) === orgMemberId
@@ -1026,7 +1027,7 @@ export default function WeeklyCapacityTable({
                                       member.allocations.filter(
                                         (a) =>
                                           a.project_id ===
-                                            allocation.project_id &&
+                                          allocation.project_id &&
                                           getOrganizationMemberIdFromAllocation(
                                             a
                                           ) === orgMemberId
@@ -1066,30 +1067,100 @@ export default function WeeklyCapacityTable({
                       </td>
                       {/* Tasks column */}
 
-                      {weeksData.map((week, i) => (
-                        <td
-                          key={week.weekNumber}
-                          className="px-4 py-3 text-center"
-                        >
-                          {editingId === allocation.id &&
-                          editingWeekIndex === i ? (
-                            <input
-                              type="number"
-                              className="w-20 px-2 py-1 border rounded text-center"
-                              value={editingHours}
-                              onChange={(e) => setEditingHours(e.target.value)}
-                              step={0.5}
-                              min={0}
-                              max={168}
-                              onKeyDown={async (e) => {
-                                if (e.key === "Enter") {
+                      {weeksData.map((week, i) => {
+                        const isWeekend =
+                          week.weekNumber === "SUN" || week.weekNumber === "SAT";
+                        const allowWeekends = getProjectAllowWeekends(
+                          allocation,
+                          week,
+                          member
+                        );
+                        const shouldShowHours = !isWeekend || allowWeekends;
+                        const days = allowWeekends ? 7 : 5;
+                        const hoursPerDay = allocation.hours_per_week / days;
+
+                        return (
+                          <td
+                            key={week.weekNumber}
+                            className={`px-4 py-3 text-center ${isWeekend && !allowWeekends
+                              ? "bg-gray-50 opacity-50"
+                              : ""
+                              }`}
+                          >
+                            {!shouldShowHours ? (
+                              <span className="text-gray-300 text-sm">-</span>
+                            ) : editingId === allocation.id &&
+                              editingWeekIndex === i ? (
+                              <input
+                                type="number"
+                                className="w-20 px-2 py-1 border rounded text-center"
+                                value={editingHours}
+                                onChange={(e) => setEditingHours(e.target.value)}
+                                step={0.5}
+                                min={0}
+                                max={168}
+                                onKeyDown={async (e) => {
+                                  if (e.key === "Enter") {
+                                    const newVal = Number(editingHours || 0);
+                                    try {
+                                      const isLinked =
+                                        allocationLinkState[allocation.id] !==
+                                        false; // default linked
+                                      if (isLinked) {
+                                        // Update all allocations for this member & project
+                                        const orgMemberId =
+                                          getOrganizationMemberIdFromAllocation(
+                                            allocation
+                                          );
+                                        const sameProjectAllocations =
+                                          member.allocations.filter(
+                                            (a) =>
+                                              a.project_id ===
+                                              allocation.project_id &&
+                                              getOrganizationMemberIdFromAllocation(
+                                                a
+                                              ) === orgMemberId
+                                          );
+                                        await Promise.allSettled(
+                                          sameProjectAllocations.map((a) =>
+                                            updateAllocationMutation.mutateAsync({
+                                              id: a.id,
+                                              data: {
+                                                hours_per_week: newVal,
+                                              } as any,
+                                              organizationId: organizationId!,
+                                            })
+                                          )
+                                        );
+                                      } else {
+                                        await updateSingleWeekCapacity(
+                                          allocation,
+                                          week,
+                                          newVal,
+                                          memberId
+                                        );
+                                      }
+                                    } catch (err) {
+                                      toast.error(
+                                        "Failed to update capacity. Please try again."
+                                      );
+                                    } finally {
+                                      setEditingId(null);
+                                      setEditingWeekIndex(null);
+                                      onRefresh?.();
+                                    }
+                                  } else if (e.key === "Escape") {
+                                    setEditingId(null);
+                                    setEditingWeekIndex(null);
+                                  }
+                                }}
+                                onBlur={async () => {
                                   const newVal = Number(editingHours || 0);
                                   try {
                                     const isLinked =
                                       allocationLinkState[allocation.id] !==
-                                      false; // default linked
+                                      false;
                                     if (isLinked) {
-                                      // Update all allocations for this member & project
                                       const orgMemberId =
                                         getOrganizationMemberIdFromAllocation(
                                           allocation
@@ -1098,28 +1169,32 @@ export default function WeeklyCapacityTable({
                                         member.allocations.filter(
                                           (a) =>
                                             a.project_id ===
-                                              allocation.project_id &&
+                                            allocation.project_id &&
                                             getOrganizationMemberIdFromAllocation(
                                               a
                                             ) === orgMemberId
                                         );
                                       await Promise.allSettled(
                                         sameProjectAllocations.map((a) =>
-                                          updateAllocationMutation.mutateAsync({
-                                            id: a.id,
-                                            data: {
-                                              hours_per_week: newVal,
-                                            } as any,
-                                            organizationId: organizationId!,
-                                          })
+                                          capacityAPI.updateAllocation(
+                                            a.id,
+                                            { hours_per_week: newVal } as any,
+                                            organizationId
+                                          )
                                         )
                                       );
-                                    } else {
+                                    } else if (viewMode !== "monthly") {
                                       await updateSingleWeekCapacity(
                                         allocation,
                                         week,
                                         newVal,
                                         memberId
+                                      );
+                                    } else {
+                                      await updateWeekCapacityNewModel(
+                                        allocation,
+                                        week,
+                                        newVal
                                       );
                                     }
                                   } catch (err) {
@@ -1131,82 +1206,24 @@ export default function WeeklyCapacityTable({
                                     setEditingWeekIndex(null);
                                     onRefresh?.();
                                   }
-                                } else if (e.key === "Escape") {
-                                  setEditingId(null);
-                                  setEditingWeekIndex(null);
-                                }
-                              }}
-                              onBlur={async () => {
-                                const newVal = Number(editingHours || 0);
-                                try {
-                                  const isLinked =
-                                    allocationLinkState[allocation.id] !==
-                                    false;
-                                  if (isLinked) {
-                                    const orgMemberId =
-                                      getOrganizationMemberIdFromAllocation(
-                                        allocation
-                                      );
-                                    const sameProjectAllocations =
-                                      member.allocations.filter(
-                                        (a) =>
-                                          a.project_id ===
-                                            allocation.project_id &&
-                                          getOrganizationMemberIdFromAllocation(
-                                            a
-                                          ) === orgMemberId
-                                      );
-                                    await Promise.allSettled(
-                                      sameProjectAllocations.map((a) =>
-                                        capacityAPI.updateAllocation(
-                                          a.id,
-                                          { hours_per_week: newVal } as any,
-                                          organizationId
-                                        )
-                                      )
-                                    );
-                                  } else if (viewMode !== "monthly") {
-                                    await updateSingleWeekCapacity(
-                                      allocation,
-                                      week,
-                                      newVal,
-                                      memberId
-                                    );
-                                  } else {
-                                    await updateWeekCapacityNewModel(
-                                      allocation,
-                                      week,
-                                      newVal
-                                    );
-                                  }
-                                } catch (err) {
-                                  toast.error(
-                                    "Failed to update capacity. Please try again."
-                                  );
-                                } finally {
-                                  setEditingId(null);
-                                  setEditingWeekIndex(null);
-                                  onRefresh?.();
-                                }
-                              }}
-                            />
-                          ) : (
-                            <button
-                              className="text-sm text-gray-600"
-                              title="Click to edit hours"
-                              onClick={() => {
-                                setEditingId(allocation.id);
-                                setEditingWeekIndex(i);
-                                setEditingHours(
-                                  String(allocation.hours_per_week)
-                                );
-                              }}
-                            >
-                              {allocation.hours_per_week}h
-                            </button>
-                          )}
-                        </td>
-                      ))}
+                                }}
+                              />
+                            ) : (
+                              <button
+                                className="text-sm text-gray-600 hover:text-gray-900"
+                                title="Click to edit hours"
+                                onClick={() => {
+                                  setEditingId(allocation.id);
+                                  setEditingWeekIndex(i);
+                                  setEditingHours(String(hoursPerDay.toFixed(1)));
+                                }}
+                              >
+                                {hoursPerDay.toFixed(1)}h
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
                       {/* Actions column */}
                       <td className="px-2 py-3 text-center">
                         <div className="inline-flex items-center gap-2">

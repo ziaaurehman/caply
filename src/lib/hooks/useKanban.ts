@@ -138,12 +138,10 @@ export function useCreateBoard() {
     mutationFn: (data: CreateBoardData & { organizationId: string }) =>
       kanbanAPI.createBoard(data),
     onSuccess: (data, variables) => {
-      // Invalidate boards list for the project
+      // Invalidate all boards queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.boardsByProject(
-          variables.project_id,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.boards(),
+        exact: false,
       });
 
       // Add the new board to cache
@@ -247,12 +245,10 @@ export function useCreateList() {
     mutationFn: (data: CreateListData & { organizationId: string }) =>
       kanbanAPI.createList(data),
     onSuccess: (data, variables) => {
-      // Invalidate lists for the board
+      // Invalidate all lists queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.listsByBoard(
-          variables.board_id,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.lists(),
+        exact: false,
       });
 
       // Add the new list to cache
@@ -337,9 +333,10 @@ export function useArchiveList() {
       // Update the list in cache
       queryClient.setQueryData(kanbanKeys.list(variables.listId), data.list);
 
-      // Invalidate lists queries to refresh the list
+      // Invalidate all lists queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.lists(),
+        exact: false,
       });
     },
   });
@@ -359,12 +356,10 @@ export function useReorderLists() {
       organizationId: string;
     }) => kanbanAPI.reorderLists(boardId, listPositions, organizationId),
     onSuccess: (_, variables) => {
-      // Invalidate lists for the board
+      // Invalidate all lists queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.listsByBoard(
-          variables.boardId,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.lists(),
+        exact: false,
       });
     },
   });
@@ -436,17 +431,15 @@ export function useCreateCard() {
     mutationFn: (data: CreateCardData & { organizationId: string }) =>
       kanbanAPI.createCard(data),
     onSuccess: (data, variables) => {
-      // Invalidate cards for the list
+      // Invalidate all cards queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.cardsByList(
-          variables.list_id,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.cards(),
+        exact: false,
       });
 
-      // Invalidate cards for the board (if we know the board ID)
+      // Invalidate lists queries (card counts affect lists)
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.cardsByBoard("", variables.organizationId),
+        queryKey: kanbanKeys.lists(),
         exact: false,
       });
 
@@ -477,9 +470,15 @@ export function useUpdateCard() {
         { card: data.card }
       );
 
-      // Invalidate cards queries
+      // Invalidate all cards queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.cards(),
+        exact: false,
+      });
+
+      // Invalidate lists queries (card updates may affect list counts)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.lists(),
         exact: false,
       });
     },
@@ -503,9 +502,15 @@ export function useDeleteCard() {
         queryKey: kanbanKeys.card(variables.id, variables.organizationId),
       });
 
-      // Invalidate cards queries
+      // Invalidate all cards queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.cards(),
+        exact: false,
+      });
+
+      // Invalidate lists queries (card deletion affects list counts)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.lists(),
         exact: false,
       });
     },
@@ -533,9 +538,10 @@ export function useArchiveCard() {
         data.card
       );
 
-      // Invalidate cards queries to refresh the card
+      // Invalidate all cards queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.cards(),
+        exact: false,
       });
     },
   });
@@ -555,12 +561,10 @@ export function useReorderCards() {
       organizationId: string;
     }) => kanbanAPI.reorderCards(listId, cardPositions, organizationId),
     onSuccess: (_, variables) => {
-      // Invalidate cards for the list
+      // Invalidate all cards queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.cardsByList(
-          variables.listId,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.cards(),
+        exact: false,
       });
     },
   });
@@ -600,12 +604,10 @@ export function useCreateLabel() {
     mutationFn: (data: CreateLabelData & { organizationId: string }) =>
       kanbanAPI.createLabel(data),
     onSuccess: (data, variables) => {
-      // Invalidate labels for the board
+      // Invalidate all labels queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.labelsByBoard(
-          variables.board_id,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.labels(),
+        exact: false,
       });
 
       // Add the new label to cache
@@ -628,9 +630,15 @@ export function useUpdateLabel() {
         label: data.label,
       });
 
-      // Invalidate labels queries
+      // Invalidate all labels queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.labels(),
+        exact: false,
+      });
+
+      // Invalidate cards queries (cards display labels)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.cards(),
         exact: false,
       });
     },
@@ -679,12 +687,16 @@ export function useCreateChecklist() {
   return useMutation({
     mutationFn: (data: CreateChecklistData) => kanbanAPI.createChecklist(data),
     onSuccess: (data, variables) => {
-      // Invalidate checklists for the card
+      // Invalidate all checklists queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.checklistsByCard(
-          variables.card_id,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.checklists(),
+        exact: false,
+      });
+
+      // Invalidate card queries (checklists affect card details)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.cards(),
+        exact: false,
       });
 
       // Add the new checklist to cache
@@ -707,9 +719,15 @@ export function useUpdateChecklist() {
         checklist: data.checklist,
       });
 
-      // Invalidate checklists queries
+      // Invalidate all checklists queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.checklists(),
+        exact: false,
+      });
+
+      // Invalidate card queries (checklist progress affects cards)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.cards(),
         exact: false,
       });
     },
@@ -727,9 +745,15 @@ export function useDeleteChecklist() {
         queryKey: kanbanKeys.checklist(variables),
       });
 
-      // Invalidate checklists queries
+      // Invalidate all checklists queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.checklists(),
+        exact: false,
+      });
+
+      // Invalidate card queries (checklist deletion affects cards)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.cards(),
         exact: false,
       });
     },
@@ -745,12 +769,16 @@ export function useCreateChecklistItem() {
     mutationFn: (data: CreateChecklistItemData) =>
       kanbanAPI.createChecklistItem(data),
     onSuccess: (data, variables) => {
-      // Invalidate checklists for the card
+      // Invalidate all checklists queries
       queryClient.invalidateQueries({
-        queryKey: kanbanKeys.checklistsByCard(
-          variables.checklist_id,
-          variables.organizationId
-        ),
+        queryKey: kanbanKeys.checklists(),
+        exact: false,
+      });
+
+      // Invalidate card queries (checklist items affect cards)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.cards(),
+        exact: false,
       });
 
       // Add the new checklist item to cache
@@ -774,9 +802,15 @@ export function useUpdateChecklistItem() {
         checklist_item: data.checklist_item,
       });
 
-      // Invalidate checklists queries
+      // Invalidate all checklists queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.checklists(),
+        exact: false,
+      });
+
+      // Invalidate card queries (checklist item updates affect cards)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.cards(),
         exact: false,
       });
     },
@@ -794,9 +828,15 @@ export function useDeleteChecklistItem() {
         queryKey: kanbanKeys.checklistItem(variables),
       });
 
-      // Invalidate checklists queries
+      // Invalidate all checklists queries
       queryClient.invalidateQueries({
         queryKey: kanbanKeys.checklists(),
+        exact: false,
+      });
+
+      // Invalidate card queries (checklist item deletion affects cards)
+      queryClient.invalidateQueries({
+        queryKey: kanbanKeys.cards(),
         exact: false,
       });
     },

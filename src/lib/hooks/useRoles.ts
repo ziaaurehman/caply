@@ -71,9 +71,16 @@ export const useCreateRole = () => {
     mutationFn: (data: CreateRoleRequest & { organizationId: string }) =>
       rolesApi.create(data),
     onSuccess: (data, variables) => {
-      // Invalidate and refetch roles list
+      // Invalidate all roles list queries
       queryClient.invalidateQueries({
         queryKey: roleKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate team member queries (roles affect team members)
+      queryClient.invalidateQueries({
+        queryKey: ["teamMembers"],
+        exact: false,
       });
 
       // Optionally add the new role to the cache
@@ -108,9 +115,16 @@ export const useUpdateRole = () => {
         updatedRole
       );
 
-      // Invalidate roles list to ensure consistency
+      // Invalidate all roles list queries
       queryClient.invalidateQueries({
         queryKey: roleKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate team member queries (role changes affect team members)
+      queryClient.invalidateQueries({
+        queryKey: ["teamMembers"],
+        exact: false,
       });
 
       toast.success("Role updated successfully");
@@ -138,9 +152,16 @@ export const useDeleteRole = () => {
         queryKey: roleKeys.detail(variables.id, variables.organizationId),
       });
 
-      // Invalidate roles list
+      // Invalidate all roles list queries
       queryClient.invalidateQueries({
         queryKey: roleKeys.lists(),
+        exact: false,
+      });
+
+      // Invalidate team member queries (role deletion affects team members)
+      queryClient.invalidateQueries({
+        queryKey: ["teamMembers"],
+        exact: false,
       });
 
       toast.success("Role deleted successfully");

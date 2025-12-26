@@ -36,7 +36,7 @@ export const projectKeys = {
   capacity: () => [...projectKeys.all, "capacity"] as const,
   capacityAll: (organizationId: string) =>
     [...projectKeys.capacity(), "all", organizationId] as const,
-    timesheets: () => [...projectKeys.all, "timesheets"] as const,
+  timesheets: () => [...projectKeys.all, "timesheets"] as const,
   timesheetsByProject: (projectId: string, organizationId: string) =>
     [...projectKeys.timesheets(), projectId, organizationId] as const,
 };
@@ -157,41 +157,22 @@ export function useCreateProject(organizationId: string) {
   return useMutation({
     mutationFn: (data: CreateProjectData) => projectAPI.createProject(data),
     onSuccess: (data) => {
-      // Invalidate projects list for the organization
-      const queryKey = projectKeys.list(organizationId, {
-        page: 1,
-        limit: 10,
-        search: undefined,
-        status: undefined,
-      });
-      console.log("queryKey in the create project", queryKey);
+      // Invalidate all projects list queries
       queryClient.invalidateQueries({
-        queryKey: queryKey,
+        queryKey: projectKeys.lists(),
+        exact: false,
       });
 
+      // Invalidate all capacity queries
       queryClient.invalidateQueries({
-        queryKey: ["projects"],
+        queryKey: projectKeys.capacity(),
+        exact: false,
       });
 
-      // Invalidate specific organization project list
-      if (organizationId) {
-        queryClient.invalidateQueries({
-          queryKey: projectKeys.list(organizationId, {}),
-        });
-      }
-
-      // Invalidate kanban projects query
+      // Invalidate kanban projects queries
       queryClient.invalidateQueries({
-        queryKey: ["projects", organizationId],
-      });
-
-      queryClient.invalidateQueries({
-        queryKey: ["kanban-projects", organizationId],
-      });
-
-      // Invalidate capacity projects query
-      queryClient.invalidateQueries({
-        queryKey: projectKeys.capacityAll(organizationId),
+        queryKey: ["kanban-projects"],
+        exact: false,
       });
 
       // Add the new project to cache
@@ -238,18 +219,28 @@ export function useUpdateProject() {
         data
       );
 
-      // Invalidate projects list to reflect changes
+      // Invalidate all projects list queries
       queryClient.invalidateQueries({
         queryKey: projectKeys.lists(),
-        predicate: (query) => {
-          const [, , organizationId] = query.queryKey;
-          return organizationId === updateData.organizationId;
-        },
+        exact: false,
       });
 
-      // Invalidate capacity projects if applicable
+      // Invalidate all capacity queries
       queryClient.invalidateQueries({
-        queryKey: projectKeys.capacityAll(updateData.organizationId),
+        queryKey: projectKeys.capacity(),
+        exact: false,
+      });
+
+      // Invalidate kanban projects queries
+      queryClient.invalidateQueries({
+        queryKey: ["kanban-projects"],
+        exact: false,
+      });
+
+      // Invalidate timesheet queries (projects affect timesheets)
+      queryClient.invalidateQueries({
+        queryKey: ["timesheet"],
+        exact: false,
       });
     },
     onError: (error) => {
@@ -277,28 +268,34 @@ export function useDeleteProject() {
         queryKey: projectKeys.detail(id, organizationId),
       });
 
-      // Invalidate projects list
+      // Invalidate all projects list queries
       queryClient.invalidateQueries({
         queryKey: projectKeys.lists(),
-        predicate: (query) => {
-          const [, , orgId] = query.queryKey;
-          return orgId === organizationId;
-        },
+        exact: false,
       });
 
-      // Invalidate kanban projects query
+      // Invalidate kanban projects queries
       queryClient.invalidateQueries({
-        queryKey: ["kanban-projects", organizationId],
+        queryKey: ["kanban-projects"],
+        exact: false,
       });
 
-      // Invalidate capacity projects
+      // Invalidate all capacity queries
       queryClient.invalidateQueries({
-        queryKey: projectKeys.capacityAll(organizationId),
+        queryKey: projectKeys.capacity(),
+        exact: false,
       });
 
-      // Invalidate progress queries that might include this project
+      // Invalidate all progress queries
       queryClient.invalidateQueries({
         queryKey: projectKeys.progress(),
+        exact: false,
+      });
+
+      // Invalidate timesheet queries (projects affect timesheets)
+      queryClient.invalidateQueries({
+        queryKey: ["timesheet"],
+        exact: false,
       });
     },
     onError: (error) => {
@@ -316,12 +313,10 @@ export function useUploadProjectDocument() {
     mutationFn: (data: CreateProjectDocumentData) =>
       projectAPI.uploadProjectDocument(data),
     onSuccess: (data, variables) => {
-      // Invalidate project documents
+      // Invalidate all project documents queries
       queryClient.invalidateQueries({
-        queryKey: projectKeys.documentsByProject(
-          variables.projectId,
-          variables.organizationId
-        ),
+        queryKey: projectKeys.documents(),
+        exact: false,
       });
     },
     onError: (error) => {
@@ -345,12 +340,10 @@ export function useDeleteProjectDocument() {
     }) =>
       projectAPI.deleteProjectDocument(projectId, documentId, organizationId),
     onSuccess: (_, variables) => {
-      // Invalidate project documents
+      // Invalidate all project documents queries
       queryClient.invalidateQueries({
-        queryKey: projectKeys.documentsByProject(
-          variables.projectId,
-          variables.organizationId
-        ),
+        queryKey: projectKeys.documents(),
+        exact: false,
       });
     },
     onError: (error) => {
