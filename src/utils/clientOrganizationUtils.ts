@@ -132,7 +132,7 @@ export function canViewTimesheetSubmissions(
 export function canViewTeamMembers(
   context: OrganizationContext | null
 ): boolean {
-  return hasPermission(context, "users", "read") || isManagerOrAbove(context);
+  return hasPermission(context, "teams", "read") || isManagerOrAbove(context);
 }
 
 export function canViewInvoice(

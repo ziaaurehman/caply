@@ -274,6 +274,42 @@ const ALL_PERMISSIONS = [
     displayName: "Send Invoices",
     description: "Can send invoices to clients",
   },
+  // Invoice management
+  {
+    name: "teams.create",
+    module: "teams",
+    action: "create",
+    displayName: "Create teams",
+    description: "Can create teams",
+  },
+  {
+    name: "teams.read",
+    module: "teams",
+    action: "read",
+    displayName: "View teams",
+    description: "Can view teams",
+  },
+  {
+    name: "teams.update",
+    module: "teams",
+    action: "update",
+    displayName: "Update teams",
+    description: "Can edit teams",
+  },
+  {
+    name: "teams.delete",
+    module: "teams",
+    action: "delete",
+    displayName: "Delete teams",
+    description: "Can delete teams",
+  },
+  {
+    name: "teams.send",
+    module: "teams",
+    action: "send",
+    displayName: "Send teams",
+    description: "Can send teams to clients",
+  },
 
   // Estimate management
   {

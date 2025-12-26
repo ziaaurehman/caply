@@ -283,6 +283,41 @@ export const PERMISSIONS: Permission[] = [
     resource: 'invoices',
     action: 'send'
   },
+  {
+    id: 'teams.create',
+    name: 'Create teams',
+    description: 'Can create teams',
+    resource: 'teams',
+    action: 'create'
+  },
+  {
+    id: 'teams.read',
+    name: 'View teams',
+    description: 'Can view teams',
+    resource: 'teams',
+    action: 'read'
+  },
+  {
+    id: 'teams.update',
+    name: 'Update teams',
+    description: 'Can edit teams',
+    resource: 'teams',
+    action: 'update'
+  },
+  {
+    id: 'teams.delete',
+    name: 'Delete teams',
+    description: 'Can delete teams',
+    resource: 'teams',
+    action: 'delete'
+  },
+  {
+    id: 'teams.send',
+    name: 'Send teams',
+    description: 'Can send teams to clients',
+    resource: 'teams',
+    action: 'send'
+  },
 
   // Expense Management
   {
