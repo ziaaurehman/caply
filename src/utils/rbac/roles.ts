@@ -56,6 +56,12 @@ export const DEFAULT_ORGANIZATION_ROLES: DefaultOrganizationRole[] = [
       "invoices.update",
       "invoices.delete",
       "invoices.send",
+      // Teams management
+      "teams.create",
+      "teams.read",
+      "teams.update",
+      "teams.delete",
+      "teams.send",
 
       // Estimate management
       "estimates.create",
@@ -103,6 +109,10 @@ export const DEFAULT_ORGANIZATION_ROLES: DefaultOrganizationRole[] = [
       "invoices.read",
       "invoices.update",
       "invoices.send",
+      "teams.create",
+      "teams.read",
+      "teams.update",
+      "teams.send",
       "estimates.create",
       "estimates.read",
       "estimates.update",
@@ -132,6 +142,7 @@ export const DEFAULT_ORGANIZATION_ROLES: DefaultOrganizationRole[] = [
       "time_entries.update",
       "clients.read",
       "invoices.read",
+      "teams.read",
       "estimates.read",
       "expenses.create",
       "expenses.read",
