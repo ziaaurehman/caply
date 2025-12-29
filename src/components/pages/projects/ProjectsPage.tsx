@@ -277,10 +277,10 @@ export default function ProjectsPage() {
   };
 
   const getBudgetUtilization = (project: Project) => {
-    // Since we don't have actual spending data, we'll simulate it based on time progress
+    // Calculate budget utilization based on time progress
+    // This assumes projects spend proportionally to time elapsed
     const timeProgress = calculateTimeProgress(project);
-    // Simulate that projects typically spend proportionally to time elapsed
-    return Math.min(100, timeProgress + (Math.random() * 20 - 10)); // Add some variance
+    return Math.min(100, timeProgress);
   };
 
   const getProjectBudget = (project: Project) => {
@@ -461,11 +461,10 @@ export default function ProjectsPage() {
                     <button
                       key={option.value}
                       onClick={() => handleStatusFilter(option.value)}
-                      className={`${
-                        statusFilter === option.value
+                      className={`${statusFilter === option.value
                           ? "bg-orange-50 text-orange-900"
                           : "text-gray-900"
-                      } group relative cursor-pointer select-none py-2 pl-3 pr-9 hover:bg-orange-50 hover:text-orange-900 w-full text-left`}
+                        } group relative cursor-pointer select-none py-2 pl-3 pr-9 hover:bg-orange-50 hover:text-orange-900 w-full text-left`}
                     >
                       <span className="block truncate font-normal">
                         {option.label}

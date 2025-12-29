@@ -66,14 +66,31 @@ export default function KanbanCard({
 
   // Format due date in Trello style
   const formatDueDate = (dueDate: string) => {
+    // Validate the date string before parsing
+    if (!dueDate || typeof dueDate !== 'string' || dueDate.trim() === "") {
+      return null;
+    }
+
     const date = new Date(dueDate);
+
+    // Check if the date is valid
+    if (isNaN(date.getTime())) {
+      console.error("Invalid date value:", dueDate);
+      return null;
+    }
+
     const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time for accurate comparison
+
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const isOverdue = date < today;
-    const isDueToday = date.toDateString() === today.toDateString();
-    const isDueTomorrow = date.toDateString() === tomorrow.toDateString();
+    const dateOnly = new Date(date);
+    dateOnly.setHours(0, 0, 0, 0);
+
+    const isOverdue = dateOnly < today;
+    const isDueToday = dateOnly.getTime() === today.getTime();
+    const isDueTomorrow = dateOnly.getTime() === tomorrow.getTime();
 
     if (isOverdue)
       return {
@@ -106,13 +123,12 @@ export default function KanbanCard({
 
   return (
     <div
-      className={`bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 cursor-pointer group mb-3 ${
-        isBeingDragged
-          ? "opacity-50 scale-95 bg-blue-50/80 backdrop-blur-sm border-2 border-blue-300 border-dashed"
-          : isDraggedOver
-            ? "bg-blue-50/90 backdrop-blur-sm border-2 border-blue-400 shadow-lg transform scale-105"
-            : ""
-      }`}
+      className={`bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-all duration-200 cursor-pointer group mb-3 ${isBeingDragged
+        ? "opacity-50 scale-95 bg-blue-50/80 backdrop-blur-sm border-2 border-blue-300 border-dashed"
+        : isDraggedOver
+          ? "bg-blue-50/90 backdrop-blur-sm border-2 border-blue-400 shadow-lg transform scale-105"
+          : ""
+        }`}
       draggable
       onDragStart={(e) => onDragStart(e, card)}
       onClick={() => onClick(card)}
@@ -162,85 +178,87 @@ export default function KanbanCard({
           hasChecklists ||
           hasDueDate ||
           assignedMembers.length > 0) && (
-          <div className="flex items-center justify-between">
-            {/* Left side - Icons */}
-            <div className="flex items-center gap-1">
-              {/* Due Date */}
-              {hasDueDate && card.due_date && (
-                <div
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${formatDueDate(card.due_date).color}`}
-                >
-                  <Clock className="h-3 w-3" />
-                  <span>{formatDueDate(card.due_date).text}</span>
-                </div>
-              )}
+            <div className="flex items-center justify-between">
+              {/* Left side - Icons */}
+              <div className="flex items-center gap-1">
+                {/* Due Date */}
+                {hasDueDate && card.due_date && (() => {
+                  const formattedDate = formatDueDate(card.due_date);
+                  return formattedDate ? (
+                    <div
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${formattedDate.color}`}
+                    >
+                      <Clock className="h-3 w-3" />
+                      <span>{formattedDate.text}</span>
+                    </div>
+                  ) : null;
+                })()}
 
-              {/* Description Icon */}
-              {hasDescription && (
-                <div className="text-gray-400 hover:text-gray-600">
-                  <FileText className="h-3 w-3" />
-                </div>
-              )}
+                {/* Description Icon */}
+                {hasDescription && (
+                  <div className="text-gray-400 hover:text-gray-600">
+                    <FileText className="h-3 w-3" />
+                  </div>
+                )}
 
-              {/* Comments */}
-              {hasComments && (
-                <div className="flex items-center gap-1 text-gray-400 hover:text-gray-600">
-                  <MessageCircle className="h-3 w-3" />
-                  <span className="text-xs">{card.comments?.length}</span>
-                </div>
-              )}
+                {/* Comments */}
+                {hasComments && (
+                  <div className="flex items-center gap-1 text-gray-400 hover:text-gray-600">
+                    <MessageCircle className="h-3 w-3" />
+                    <span className="text-xs">{card.comments?.length}</span>
+                  </div>
+                )}
 
-              {/* Attachments */}
-              {hasAttachments && (
-                <div className="flex items-center gap-1 text-gray-400 hover:text-gray-600">
-                  <Paperclip className="h-3 w-3" />
-                  <span className="text-xs">{card.attachments?.length}</span>
-                </div>
-              )}
+                {/* Attachments */}
+                {hasAttachments && (
+                  <div className="flex items-center gap-1 text-gray-400 hover:text-gray-600">
+                    <Paperclip className="h-3 w-3" />
+                    <span className="text-xs">{card.attachments?.length}</span>
+                  </div>
+                )}
 
-              {/* Checklists */}
-              {hasChecklists && (
-                <div
-                  className={`flex items-center gap-1 text-xs ${
-                    completedChecklistItems === totalChecklistItems
+                {/* Checklists */}
+                {hasChecklists && (
+                  <div
+                    className={`flex items-center gap-1 text-xs ${completedChecklistItems === totalChecklistItems
                       ? "text-green-600"
                       : "text-gray-400"
-                  }`}
-                >
-                  <CheckSquare className="h-3 w-3" />
-                  <span>
-                    {completedChecklistItems}/{totalChecklistItems}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Right side - Members */}
-            {assignedMembers.length > 0 && (
-              <div className="flex -space-x-1">
-                {assignedMembers.slice(0, 3).map((member, index) => (
-                  <div
-                    key={member?.id || index}
-                    className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-medium border-2 border-white"
-                    title={member?.organization_members.users.full_name}
+                      }`}
                   >
-                    {member?.organization_members.users.full_name
-                      ?.split(" ")
-                      .map((n: string) => n[0])
-                      .join("")
-                      .slice(0, 2)
-                      .toUpperCase() || "??"}
-                  </div>
-                ))}
-                {assignedMembers.length > 3 && (
-                  <div className="w-6 h-6 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs font-medium border-2 border-white">
-                    +{assignedMembers.length - 3}
+                    <CheckSquare className="h-3 w-3" />
+                    <span>
+                      {completedChecklistItems}/{totalChecklistItems}
+                    </span>
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        )}
+
+              {/* Right side - Members */}
+              {assignedMembers.length > 0 && (
+                <div className="flex -space-x-1">
+                  {assignedMembers.slice(0, 3).map((member, index) => (
+                    <div
+                      key={member?.id || index}
+                      className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-medium border-2 border-white"
+                      title={member?.organization_members.users.full_name}
+                    >
+                      {member?.organization_members.users.full_name
+                        ?.split(" ")
+                        .map((n: string) => n[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase() || "??"}
+                    </div>
+                  ))}
+                  {assignedMembers.length > 3 && (
+                    <div className="w-6 h-6 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs font-medium border-2 border-white">
+                      +{assignedMembers.length - 3}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
       </div>
     </div>
   );

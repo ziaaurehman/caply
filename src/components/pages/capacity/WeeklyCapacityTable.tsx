@@ -204,29 +204,45 @@ export default function WeeklyCapacityTable({
     const weeks: WeekData[] = [];
 
     if (viewMode === "monthly") {
-      // For monthly view, show 7 days (MON-SUN) just like weekly view
-      // Use the first week of the month as the reference
+      // For monthly view, generate weeks instead of days
       const monthStart = new Date(selectedYear, selectedMonth, 1);
+      const monthEnd = new Date(selectedYear, selectedMonth + 1, 0);
 
-      // Get the first Monday of the month (or previous Monday if month starts mid-week)
+      // Find the first Monday on or before month start
       const firstMonday = new Date(monthStart);
       const dayOfWeek = monthStart.getDay();
       const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       firstMonday.setDate(monthStart.getDate() - daysToSubtract);
 
-      // Generate 7 days starting from Monday
-      const dayNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+      let weekNumber = 1;
+      let currentWeekStart = new Date(firstMonday);
 
-      for (let i = 0; i < 7; i++) {
-        const currentDay = new Date(firstMonday);
-        currentDay.setDate(firstMonday.getDate() + i);
+      // Generate weeks until we've covered the entire month
+      while (currentWeekStart <= monthEnd) {
+        const weekEnd = new Date(currentWeekStart);
+        weekEnd.setDate(currentWeekStart.getDate() + 6); // Sunday
+
+        // Format date range for label
+        const startDay = currentWeekStart.getDate();
+        const endDay = weekEnd.getDate();
+        const dateRangeLabel = `${startDay}-${endDay}`;
 
         weeks.push({
-          weekNumber: dayNames[i],
-          startDate: currentDay.toISOString(),
-          endDate: currentDay.toISOString(),
-          label: `${String(currentDay.getDate()).padStart(2, "0")}`,
+          weekNumber: `Week ${weekNumber}`,
+          startDate: currentWeekStart.toISOString(),
+          endDate: weekEnd.toISOString(),
+          label: dateRangeLabel,
         });
+
+        // Move to next week (next Monday)
+        currentWeekStart = new Date(weekEnd);
+        currentWeekStart.setDate(weekEnd.getDate() + 1);
+        weekNumber++;
+
+        // Stop if we've gone past the month end
+        if (currentWeekStart > monthEnd && weekNumber > 1) {
+          break;
+        }
       }
     } else if (viewMode === "weekly") {
       // For weekly view, show days of the week (SUN-SAT)
@@ -745,8 +761,10 @@ export default function WeeklyCapacityTable({
               WEEKLY CAPACITY
             </th>
             {weeksData.map((week) => {
+              // Only apply weekend styling in weekly view
               const isWeekend =
-                week.weekNumber === "SUN" || week.weekNumber === "SAT";
+                viewMode === "weekly" &&
+                (week.weekNumber === "SUN" || week.weekNumber === "SAT");
               return (
                 <th
                   key={week.weekNumber}

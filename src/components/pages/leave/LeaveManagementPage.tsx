@@ -341,11 +341,10 @@ export default function LeaveManagementPage() {
           <div className="flex space-x-8">
             <button
               onClick={() => setActiveTab("my-leaves")}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "my-leaves"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "my-leaves"
                   ? "border-orange-500 text-orange-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+                }`}
             >
               My Leaves
             </button>
@@ -353,11 +352,10 @@ export default function LeaveManagementPage() {
               <>
                 <button
                   onClick={() => setActiveTab("approve")}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === "approve"
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "approve"
                       ? "border-orange-500 text-orange-600"
                       : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
+                    }`}
                 >
                   Approve
                 </button>
@@ -383,6 +381,7 @@ export default function LeaveManagementPage() {
             setSelectedDate={setSelectedDate}
             view={view}
             setView={setView}
+            userRole={currentOrganization?.role}
             onNewRequest={() => setShowNewRequestModal(true)}
             onExport={exportCalendar}
             onRequestClick={(request) => {
@@ -400,6 +399,7 @@ export default function LeaveManagementPage() {
             setSelectedLeaveType={setSelectedLeaveType}
             selectedStatus={selectedStatus}
             setSelectedStatus={setSelectedStatus}
+            userRole={currentOrganization?.role}
             onRequestClick={(request) => {
               setSelectedRequest(request);
               setShowApprovalModal(true);
@@ -733,11 +733,10 @@ export default function LeaveManagementPage() {
                       </Button>
                       <Button
                         type="submit"
-                        className={`${
-                          approvalData.status === "approved"
+                        className={`${approvalData.status === "approved"
                             ? "bg-green-600 hover:bg-green-700 focus:ring-green-500"
                             : "bg-red-600 hover:bg-red-700 focus:ring-red-500"
-                        }`}
+                          }`}
                         disabled={approveLeaveRequestMutation.isPending}
                       >
                         {approveLeaveRequestMutation.isPending
@@ -770,6 +769,7 @@ function MyLeavesView({
   setSelectedDate,
   view,
   setView,
+  userRole,
   onNewRequest,
   onExport,
   onRequestClick,
@@ -786,6 +786,7 @@ function MyLeavesView({
   setSelectedDate: (date: Date) => void;
   view: "week" | "month";
   setView: (view: "week" | "month") => void;
+  userRole?: string;
   onNewRequest: () => void;
   onExport: () => void;
   onRequestClick: (request: LeaveRequest) => void;
@@ -884,21 +885,23 @@ function MyLeavesView({
       {/* Filters */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center space-x-2">
-            <Filter className="h-4 w-4 text-gray-500" />
-            <select
-              value={selectedEmployee}
-              onChange={(e) => setSelectedEmployee(e.target.value)}
-              className="text-sm border-gray-300 rounded-md shadow-sm focus:border-orange-500 focus:ring-orange-500"
-            >
-              <option value="all">All Employees</option>
-              {teamMembers.map((member) => (
-                <option key={member.id} value={member.user_id}>
-                  {member.users.full_name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {userRole !== "Team Member" && (
+            <div className="flex items-center space-x-2">
+              <Filter className="h-4 w-4 text-gray-500" />
+              <select
+                value={selectedEmployee}
+                onChange={(e) => setSelectedEmployee(e.target.value)}
+                className="text-sm border-gray-300 rounded-md shadow-sm focus:border-orange-500 focus:ring-orange-500"
+              >
+                <option value="all">All Employees</option>
+                {teamMembers.map((member) => (
+                  <option key={member.id} value={member.user_id}>
+                    {member.users.full_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex items-center space-x-2">
             <select
@@ -935,22 +938,20 @@ function MyLeavesView({
             <button
               type="button"
               onClick={() => setView("week")}
-              className={`px-4 py-2 text-sm font-medium border ${
-                view === "week"
+              className={`px-4 py-2 text-sm font-medium border ${view === "week"
                   ? "bg-orange-50 text-orange-700 border-orange-200"
                   : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-              } rounded-l-md`}
+                } rounded-l-md`}
             >
               Week
             </button>
             <button
               type="button"
               onClick={() => setView("month")}
-              className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${
-                view === "month"
+              className={`px-4 py-2 text-sm font-medium border-t border-b border-r ${view === "month"
                   ? "bg-orange-50 text-orange-700 border-orange-200"
                   : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-              } rounded-r-md`}
+                } rounded-r-md`}
             >
               Month
             </button>
@@ -1017,12 +1018,11 @@ function MyLeavesView({
                 {days.map((day, index) => (
                   <th
                     key={index}
-                    className={`px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-32 ${
-                      format(day, "yyyy-MM-dd") ===
-                      format(new Date(), "yyyy-MM-dd")
+                    className={`px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-32 ${format(day, "yyyy-MM-dd") ===
+                        format(new Date(), "yyyy-MM-dd")
                         ? "bg-orange-50"
                         : ""
-                    }`}
+                      }`}
                   >
                     <div>{format(day, "EEE")}</div>
                     <div className="text-gray-400 font-normal">
@@ -1144,6 +1144,7 @@ function ApproveLeavesView({
   setSelectedLeaveType,
   selectedStatus,
   setSelectedStatus,
+  userRole,
   onRequestClick,
 }: {
   leaveRequests: LeaveRequest[];
@@ -1154,6 +1155,7 @@ function ApproveLeavesView({
   setSelectedLeaveType: (value: string) => void;
   selectedStatus: string;
   setSelectedStatus: (value: string) => void;
+  userRole?: string;
   onRequestClick: (request: LeaveRequest) => void;
 }) {
   // Filter requests based on selected filters
@@ -1188,21 +1190,23 @@ function ApproveLeavesView({
       {/* Filters */}
       <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center space-x-2">
-            <Filter className="h-4 w-4 text-gray-500" />
-            <select
-              value={selectedEmployee}
-              onChange={(e) => setSelectedEmployee(e.target.value)}
-              className="text-sm border-gray-300 rounded-md shadow-sm focus:border-orange-500 focus:ring-orange-500"
-            >
-              <option value="all">All Employees</option>
-              {teamMembers.map((member) => (
-                <option key={member.id} value={member.user_id}>
-                  {member.users.full_name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {userRole !== "Team Member" && (
+            <div className="flex items-center space-x-2">
+              <Filter className="h-4 w-4 text-gray-500" />
+              <select
+                value={selectedEmployee}
+                onChange={(e) => setSelectedEmployee(e.target.value)}
+                className="text-sm border-gray-300 rounded-md shadow-sm focus:border-orange-500 focus:ring-orange-500"
+              >
+                <option value="all">All Employees</option>
+                {teamMembers.map((member) => (
+                  <option key={member.id} value={member.user_id}>
+                    {member.users.full_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex items-center space-x-2">
             <select

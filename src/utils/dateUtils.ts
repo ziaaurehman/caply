@@ -12,16 +12,16 @@ import {
 
 export const dateUtils = {
   // Convert UTC string to local Date object
-  utcToLocal: (utcString: string | Date): Date => {
-    if (!utcString) return new Date();
+  utcToLocal: (utcString: string | Date): Date | null => {
+    if (!utcString) return null;
 
     try {
       const date =
         typeof utcString === "string" ? parseISO(utcString) : utcString;
-      return isValid(date) ? date : new Date();
+      return isValid(date) ? date : null;
     } catch (error) {
       console.error("Error parsing UTC date:", error);
-      return new Date();
+      return null;
     }
   },
 
@@ -44,6 +44,7 @@ export const dateUtils = {
   ): string => {
     try {
       const localDate = dateUtils.utcToLocal(date);
+      if (!localDate) return "";
       return format(localDate, pattern);
     } catch (error) {
       console.error("Error formatting date:", error);
@@ -55,6 +56,7 @@ export const dateUtils = {
   formatForDateInput: (date: string | Date): string => {
     try {
       const localDate = dateUtils.utcToLocal(date);
+      if (!localDate) return "";
       return format(localDate, "yyyy-MM-dd");
     } catch (error) {
       console.error("Error formatting date for input:", error);
@@ -66,6 +68,7 @@ export const dateUtils = {
   formatForTimeInput: (date: string | Date): string => {
     try {
       const localDate = dateUtils.utcToLocal(date);
+      if (!localDate) return "12:00";
       return format(localDate, "HH:mm");
     } catch (error) {
       console.error("Error formatting time for input:", error);

@@ -404,11 +404,12 @@ export default function WeeklyCapacityTableNew({
     }
 
     try {
+      const daysPerWeek = addForm.includeWeekends ? 7 : 5
       const projectData = {
         organizationId: currentOrganization?.id,
         resourceAllocationId: addModalTarget,
         projectId: addForm.projectId,
-        hoursPerWeek: addForm.hours * 5, // Convert daily to weekly
+        hoursPerWeek: addForm.hours * daysPerWeek, // Convert daily to weekly (7 days if weekends, 5 if not)
         defaultHoursPerDay: addForm.hours,
         allowWeekends: addForm.includeWeekends,
         startDate: new Date().toISOString(),
@@ -765,10 +766,23 @@ export default function WeeklyCapacityTableNew({
         };
       });
 
+      // Get role name and format it properly
+      const roleName = memberInfo?.roles?.name;
+      let formattedRole = 'Team Member';
+
+      if (roleName) {
+        // Special case: if role is just "member", make it "Team Member"
+        if (roleName.toLowerCase() === 'member') {
+          formattedRole = 'Team Member';
+        } else {
+          formattedRole = roleName.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        }
+      }
+
       return {
         id: resource.id,
         fullName: userInfo?.full_name || "Unknown User",
-        jobTitle: userInfo?.position || "No Position",
+        jobTitle: userInfo?.position || formattedRole,
         avatarUrl: userInfo?.avatar_url,
         capacity: resource.weeklyCapacityHours / 5,
         allocations,
