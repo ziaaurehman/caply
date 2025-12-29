@@ -3369,33 +3369,52 @@ export default function MonthlyCapacityTable({
     only_active: true,
   })
 
-  // Generate days for the selected month (MON-SUN like weekly view)
+  // Generate weeks for the selected month instead of days
   const weeksData: WeekData[] = useMemo(() => {
-    const days: WeekData[] = []
+    const weeks: WeekData[] = []
 
-    // Get the first Monday of the month (or previous Monday if month starts mid-week)
+    // Get month boundaries
     const monthStart = new Date(selectedYear, selectedMonth, 1)
+    const monthEnd = new Date(selectedYear, selectedMonth + 1, 0)
+
+    // Find the first Monday on or before month start
     const firstMonday = new Date(monthStart)
     const dayOfWeek = monthStart.getDay()
     const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1
     firstMonday.setDate(monthStart.getDate() - daysToSubtract)
 
-    // Generate 7 days starting from Monday
-    const dayNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+    let weekNumber = 1
+    let currentWeekStart = new Date(firstMonday)
 
-    for (let i = 0; i < 7; i++) {
-      const currentDay = new Date(firstMonday)
-      currentDay.setDate(firstMonday.getDate() + i)
+    // Generate weeks until we've covered the entire month
+    while (currentWeekStart <= monthEnd) {
+      const weekEnd = new Date(currentWeekStart)
+      weekEnd.setDate(currentWeekStart.getDate() + 6) // Sunday
 
-      days.push({
-        weekNumber: dayNames[i],
-        startDate: currentDay.toISOString(),
-        endDate: currentDay.toISOString(),
-        label: `${String(currentDay.getDate()).padStart(2, "0")}`,
+      // Format date range for label
+      const startDay = currentWeekStart.getDate()
+      const endDay = weekEnd.getDate()
+      const dateRangeLabel = `${startDay}-${endDay}`
+
+      weeks.push({
+        weekNumber: `Week ${weekNumber}`,
+        startDate: currentWeekStart.toISOString(),
+        endDate: weekEnd.toISOString(),
+        label: dateRangeLabel,
       })
+
+      // Move to next week (next Monday)
+      currentWeekStart = new Date(weekEnd)
+      currentWeekStart.setDate(weekEnd.getDate() + 1)
+      weekNumber++
+
+      // Stop if we've gone past the month end
+      if (currentWeekStart > monthEnd && weekNumber > 1) {
+        break
+      }
     }
 
-    return days
+    return weeks
   }, [selectedMonth, selectedYear, monthlyCapacityData])
 
   const addProjectMutation = useMutation({
@@ -3550,11 +3569,12 @@ export default function MonthlyCapacityTable({
 
     try {
       // Step 1: Create the project assignment first
+      const daysPerWeek = addForm.includeWeekends ? 7 : 5
       const projectData = {
         organizationId: currentOrganization?.id,
         resourceAllocationId: addModalTarget,
         projectId: addForm.projectId,
-        hoursPerWeek: addForm.hours * 5, // Convert daily to weekly
+        hoursPerWeek: addForm.hours * daysPerWeek, // Convert daily to weekly (7 days if weekends, 5 if not)
         defaultHoursPerDay: addForm.hours,
         allowWeekends: addForm.includeWeekends,
         startDate: new Date().toISOString(),
@@ -3932,10 +3952,24 @@ export default function MonthlyCapacityTable({
         }
       })
 
+
+      // Get role name and format it properly
+      const roleName = resource.role_name || resource.role;
+      let formattedRole = 'Team Member';
+
+      if (roleName) {
+        // Special case: if role is just "member", make it "Team Member"
+        if (roleName.toLowerCase() === 'member') {
+          formattedRole = 'Team Member';
+        } else {
+          formattedRole = roleName.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        }
+      }
+
       return {
         id: resourceId,
         fullName: userInfo?.full_name || "Unknown User",
-        jobTitle: userInfo?.position || "No Position",
+        jobTitle: userInfo?.position || formattedRole,
         avatarUrl: userInfo?.avatar_url,
         capacity: resource.weekly_capacity_hours / 5,
         allocations,
@@ -4164,44 +4198,28 @@ export default function MonthlyCapacityTable({
                       </div>
                     </td>
                     {weeksData.map((week, weekIndex) => {
-                      const isWeekend = week.weekNumber === "SAT" || week.weekNumber === "SUN";
-
-                      // For weekends, only sum hours from projects that allow weekends
-                      // For weekdays, sum all projects
-                      const totalDailyAllocated = member.allocations.reduce((sum, allocation) => {
-                        if (isWeekend && !allocation.allowWeekends) {
-                          return sum; // Don't include this project's hours on weekends
-                        }
-                        return sum + (allocation.defaultHoursPerDay || 0);
+                      // In monthly view with weekly columns, calculate total weekly hours for all projects
+                      const totalWeeklyAllocated = member.allocations.reduce((sum, allocation) => {
+                        // Calculate weekly hours based on whether weekends are allowed
+                        const daysPerWeek = allocation.allowWeekends ? 7 : 5
+                        const weeklyHours = (allocation.defaultHoursPerDay || 0) * daysPerWeek
+                        return sum + weeklyHours
                       }, 0);
 
                       const hasWeekendAllocation = member.allocations.some((a) => a.allowWeekends)
                       const weekCapacity = member.capacity * (hasWeekendAllocation ? 7 : 5)
-                      // Keep utilization calculation based on actual weekly hours if possible, or total daily vs daily capacity
-                      const weekAllocatedTotal = member.allocations.reduce((sum, allocation) => {
-                        return sum + (Number(allocation.weeklyHours?.[weekIndex]) || 0)
-                      }, 0)
-                      const weekUtilization = weekCapacity > 0 ? (weekAllocatedTotal / weekCapacity) * 100 : 0
-
-                      // For weekends in member header, show "-" if no projects allow weekends
-                      if (isWeekend && totalDailyAllocated === 0) {
-                        return (
-                          <td key={week.weekNumber} className="px-4 py-4 text-center bg-gray-50 opacity-50">
-                            <div className="text-gray-300 text-sm">-</div>
-                          </td>
-                        );
-                      }
+                      const weekUtilization = weekCapacity > 0 ? (totalWeeklyAllocated / weekCapacity) * 100 : 0
 
                       return (
                         <td key={week.weekNumber} className="px-4 py-4 text-center">
                           <div className="flex flex-col items-center gap-1">
                             <div
                               className={`inline-block px-3 py-1 rounded text-white text-sm font-medium ${getUtilizationColor(
-                                totalDailyAllocated,
-                                member.capacity,
+                                totalWeeklyAllocated,
+                                weekCapacity,
                               )}`}
                             >
-                              {totalDailyAllocated.toFixed(1)}h
+                              {totalWeeklyAllocated.toFixed(1)}h
                             </div>
                             <div className="text-xs text-gray-500">{weekUtilization.toFixed(0)}%</div>
                           </div>
@@ -4219,31 +4237,29 @@ export default function MonthlyCapacityTable({
                           <div className="flex flex-col">
                             <div className="font-medium text-gray-700">{allocation.projectName}</div>
                             <div className="text-xs text-gray-500">
-                              {allocation.defaultHoursPerDay}h/day{" "}
-                              {allocation.allowWeekends ? "(7 days: " : "(5 days: "}
-                              {(allocation.defaultHoursPerDay * (allocation.allowWeekends ? 7 : 5)).toFixed(1)}h total)
+                              {(allocation.defaultHoursPerDay * (allocation.allowWeekends ? 7 : 5)).toFixed(1)}h/week
+                              {allocation.allowWeekends ? " (includes weekends)" : " (weekdays only)"}
                             </div>
                           </div>
                         </td>
                         <td className="px-4 py-3"></td>
                         {weeksData.map((week, weekIdx) => {
-                          const isWeekend = week.weekNumber === "SAT" || week.weekNumber === "SUN";
-                          const shouldShowHours = !isWeekend || allocation.allowWeekends;
-                          const displayHours = shouldShowHours ? (allocation.defaultHoursPerDay || 0) : 0;
+                          // In monthly view with weekly columns, always show hours (no weekend detection needed)
+                          const displayHours = (allocation.defaultHoursPerDay * (allocation.allowWeekends ? 7 : 5)) || 0;
 
                           return (
                             <td
                               key={week.weekNumber}
-                              className={`px-4 py-3 text-center ${isWeekend && !allocation.allowWeekends ? "bg-gray-50 opacity-50" : ""}`}
+                              className="px-4 py-3 text-center"
                             >
-                              {!shouldShowHours ? (
-                                <div className="text-gray-300 text-sm">-</div>
-                              ) : (
+                              {displayHours > 0 ? (
                                 <div className="flex justify-center">
                                   <div className="min-w-[40px] h-10 px-2 flex items-center justify-center bg-orange-400 text-white font-bold rounded text-sm shadow-sm">
                                     {displayHours.toFixed(1)}h
                                   </div>
                                 </div>
+                              ) : (
+                                <div className="text-gray-300 text-sm">-</div>
                               )}
                             </td>
                           )

@@ -3,6 +3,11 @@ export function serializeBigInt(data: any): any {
     return data.map(serializeBigInt);
   }
 
+  // Handle Date objects by converting to ISO string
+  if (data instanceof Date) {
+    return data.toISOString();
+  }
+
   if (data && typeof data === "object") {
     return Object.fromEntries(
       Object.entries(data).map(([key, value]) => [

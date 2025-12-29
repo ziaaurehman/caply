@@ -226,23 +226,23 @@ export async function GET(
           assigned_to_project_member_id: item.assignedToProjectMemberId,
           project_members: item.projectMember
             ? {
-                id: item.projectMember.id,
-                organization_member_id: item.projectMember.organizationMemberId,
-                role: item.projectMember.role,
-                joined_at: item.projectMember.joinedAt,
-                organization_members: {
-                  id: item.projectMember.organizationMember.id,
-                  user_id: item.projectMember.organizationMember.userId,
-                  users: {
-                    id: item.projectMember.organizationMember.user.id,
-                    full_name:
-                      item.projectMember.organizationMember.user.fullName,
-                    email: item.projectMember.organizationMember.user.email,
-                    avatar_url:
-                      item.projectMember.organizationMember.user.avatarUrl,
-                  },
+              id: item.projectMember.id,
+              organization_member_id: item.projectMember.organizationMemberId,
+              role: item.projectMember.role,
+              joined_at: item.projectMember.joinedAt,
+              organization_members: {
+                id: item.projectMember.organizationMember.id,
+                user_id: item.projectMember.organizationMember.userId,
+                users: {
+                  id: item.projectMember.organizationMember.user.id,
+                  full_name:
+                    item.projectMember.organizationMember.user.fullName,
+                  email: item.projectMember.organizationMember.user.email,
+                  avatar_url:
+                    item.projectMember.organizationMember.user.avatarUrl,
                 },
-              }
+              },
+            }
             : null,
         })),
       })),
@@ -293,8 +293,18 @@ export async function GET(
 const parseDueDate = (value: any) => {
   if (!value) return null;
 
-  const date = new Date(value);
-  return isNaN(date.getTime()) ? null : date;
+  // If it's already a Date object, return it
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? null : value;
+  }
+
+  // If it's a string, parse it
+  if (typeof value === 'string') {
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  return null;
 };
 
 export async function PATCH(

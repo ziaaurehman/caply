@@ -90,7 +90,7 @@ export default function TimesheetsPage() {
   const [submissionFilters, setSubmissionFilters] = useState({
     status: "submitted" as "submitted" | "approved" | "rejected",
     userId: "",
-    selectedWeek: "",
+    selectedWeek: getCurrentWeekStart(),
     search: "",
     page: 1,
     limit: 10,
@@ -763,11 +763,10 @@ export default function TimesheetsPage() {
                   setActiveTab("my-timesheet")
                 )
               }
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === "my-timesheet"
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "my-timesheet"
                   ? "border-primary-500 text-primary-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+                }`}
             >
               My Timesheet
             </button>
@@ -778,11 +777,10 @@ export default function TimesheetsPage() {
                     setActiveTab("approve-timesheets")
                   )
                 }
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === "approve-timesheets"
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "approve-timesheets"
                     ? "border-primary-500 text-primary-600"
                     : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+                  }`}
               >
                 Approve Timesheets
               </button>
@@ -977,15 +975,14 @@ function MyTimesheetView({
               <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-600">Status:</span>
                 <span
-                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    submissionStatus === "approved"
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${submissionStatus === "approved"
                       ? "bg-green-100 text-green-800"
                       : submissionStatus === "submitted"
                         ? "bg-yellow-100 text-yellow-800"
                         : submissionStatus === "rejected"
                           ? "bg-red-100 text-red-800"
                           : "bg-gray-100 text-gray-800"
-                  }`}
+                    }`}
                 >
                   {submissionStatus === "submitted"
                     ? "Pending Approval"
@@ -1534,15 +1531,14 @@ function ApproveTimesheetsView({
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span
-                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        submission.status === "approved"
+                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${submission.status === "approved"
                           ? "bg-green-100 text-green-800"
                           : submission.status === "rejected"
                             ? "bg-red-100 text-red-800"
                             : submission.status === "submitted"
                               ? "bg-yellow-100 text-yellow-800"
                               : "bg-gray-100 text-gray-800"
-                      }`}
+                        }`}
                     >
                       {submission.status}
                     </span>
@@ -1841,15 +1837,14 @@ function DetailsModal({
               <div>
                 <span className="font-medium">Status:</span>{" "}
                 <span
-                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    submission.status === "approved"
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${submission.status === "approved"
                       ? "bg-green-100 text-green-800"
                       : submission.status === "submitted"
                         ? "bg-blue-100 text-blue-800"
                         : submission.status === "rejected"
                           ? "bg-red-100 text-red-800"
                           : "bg-gray-100 text-gray-800"
-                  }`}
+                    }`}
                 >
                   {submission.status}
                 </span>
