@@ -3432,10 +3432,12 @@ export default function MonthlyCapacityTable({
 
       return response.json()
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["capacity"] })
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] })
-      queryClient.invalidateQueries({ queryKey: ["resources"] })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false })
       toast.success("Project assignment added successfully!")
       setAddForm({
         projectId: "",
@@ -3476,8 +3478,12 @@ export default function MonthlyCapacityTable({
 
       return response.json()
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["capacity"] })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false })
     },
     onError: (error: Error) => {
       console.error("Update weekly plan error:", error)
@@ -3494,6 +3500,7 @@ export default function MonthlyCapacityTable({
     queryFn: () => fetchProjectAssignments(currentOrganization?.id || ""),
     enabled: !!currentOrganization?.id,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnMount: 'always', // Always refetch when component mounts
   })
 
   const deleteProjectAssignmentMutation = useMutation({
@@ -3509,10 +3516,12 @@ export default function MonthlyCapacityTable({
 
       return response.json()
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["capacity"] })
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] })
-      queryClient.invalidateQueries({ queryKey: ["resources"] })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false })
       toast.success("Project assignment deleted successfully!")
       setDeletingTarget(null)
     },
@@ -3552,8 +3561,12 @@ export default function MonthlyCapacityTable({
 
       return response.json()
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["capacity"] })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false })
     },
     onError: (error: Error) => {
       console.error("Create weekly plan error:", error)

@@ -80,8 +80,6 @@ export async function GET(req: NextRequest) {
       submission = await prisma.timesheetSubmission.create({
         data: {
           organizationId,
-          projectId: "",
-
           userId,
           organizationMemberId: membership.id, // Use the actual OrganizationMember ID
           weekStartDate: new Date(weekStart),
@@ -137,10 +135,10 @@ export async function GET(req: NextRequest) {
         updated_at: entry.updatedAt,
         projects: entry.project
           ? {
-              id: entry.project.id,
-              name: entry.project.name,
-              code: entry.project.code,
-            }
+            id: entry.project.id,
+            name: entry.project.name,
+            code: entry.project.code,
+          }
           : null,
       })),
     };

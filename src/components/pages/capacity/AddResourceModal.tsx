@@ -145,23 +145,22 @@ export default function AddResourceModal({
       }
 
       queryClient.invalidateQueries({
-        queryKey: ["resources", currentOrganization.id],
+        queryKey: ["resources"],
+        exact: false,
       });
       queryClient.invalidateQueries({
-        queryKey: ["project-assignments"], 
+        queryKey: ["project-assignments"],
+        exact: false,
       });
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.monthlyByOrg(
-          currentOrganization.id,
-          "monthly",
-          { only_active: true }
-        ),
-      }),
+        queryKey: ["capacity"],
+        exact: false,
+      });
 
       toast.success("Resource added successfully!");
 
       onResourceAdded();
-      
+
       onClose();
       resetForm();
     } catch (err) {

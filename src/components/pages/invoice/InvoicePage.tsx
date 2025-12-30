@@ -292,12 +292,12 @@ const InvoicePage: React.FC = () => {
 
     if (!currentInvoice.isInternational && currentInvoice.province) {
       const TAX_RATES: Record<string, { federal: number; provincial: number }> =
-        {
-          ON: { federal: 5, provincial: 8 },
-          QC: { federal: 5, provincial: 9.975 },
-          BC: { federal: 5, provincial: 5 },
-          AB: { federal: 5, provincial: 0 },
-        };
+      {
+        ON: { federal: 5, provincial: 8 },
+        QC: { federal: 5, provincial: 9.975 },
+        BC: { federal: 5, provincial: 5 },
+        AB: { federal: 5, provincial: 0 },
+      };
 
       appliedTaxRate = TAX_RATES[currentInvoice.province] ?? null;
 
@@ -735,7 +735,6 @@ const InvoicePage: React.FC = () => {
 
       await handleSave("sent");
       toast.dismiss(loadingToast);
-      toast.success("Invoice sent successfully!");
       resetStates();
       setView("list");
       setEditingInvoice(null);
@@ -771,7 +770,6 @@ const InvoicePage: React.FC = () => {
 
       await handleUpdate("sent");
       toast.dismiss(loadingToast);
-      toast.success("Invoice sent successfully!");
       resetStates();
       setView("list");
       setEditingInvoice(null);
@@ -805,8 +803,10 @@ const InvoicePage: React.FC = () => {
         throw new Error(data.error || "Failed to send invoice");
       }
 
-      toast.success("Invoice sent successfully!");
+      // Note: No toast.success here as this just sends without saving
+      // The success message is shown after the API call succeeds
       toast.dismiss(loadingToast);
+      toast.success("Invoice sent successfully!");
       resetStates();
       setView("list");
       setEditingInvoice(null);

@@ -223,10 +223,13 @@ export default function WeeklyCapacityTableNew({
 
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       // Refresh the resources list to show the new assignment
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false });
     },
     onError: (error) => {
       console.error("Project assignment error:", error);
@@ -248,8 +251,12 @@ export default function WeeklyCapacityTableNew({
 
       return response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false });
       toast.success("Weekly plan updated successfully!");
     },
     onError: (error) => {
@@ -273,8 +280,13 @@ export default function WeeklyCapacityTableNew({
 
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       refetchAssignments();
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false });
       toast.success("Weekly plan created successfully!");
     },
     onError: (error) => {
@@ -301,10 +313,13 @@ export default function WeeklyCapacityTableNew({
 
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       // Refresh both queries to reflect the deletion
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false });
       toast.success("Project assignment deleted successfully!");
     },
     onError: (error) => {
@@ -328,8 +343,12 @@ export default function WeeklyCapacityTableNew({
 
       return response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false });
       toast.success("Resource updated successfully!");
       setEditingResource(null);
     },
@@ -355,9 +374,12 @@ export default function WeeklyCapacityTableNew({
 
       return response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["resources"] });
-      queryClient.invalidateQueries({ queryKey: ["project-assignments"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false });
       toast.success("Resource deleted successfully!");
       setDeletingResource(null);
     },
@@ -637,6 +659,7 @@ export default function WeeklyCapacityTableNew({
     queryFn: () => fetchResources(currentOrganization?.id || "", session?.user.id || ""),
     enabled: !!currentOrganization?.id, // Only fetch when organization ID is available
     staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnMount: 'always', // Always refetch when component mounts
   });
 
   // Generate days for the selected week
@@ -683,6 +706,7 @@ export default function WeeklyCapacityTableNew({
       fetchProjectAssignments(currentOrganization?.id || "", weekKey),
     enabled: !!currentOrganization?.id && !!weekKey,
     staleTime: 5 * 60 * 1000,
+    refetchOnMount: 'always', // Always refetch when component mounts
   });
 
   const getUtilizationTextColor = (allocated: number, capacity: number) => {

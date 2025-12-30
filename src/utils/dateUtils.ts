@@ -3,14 +3,17 @@ import {
   format,
   parseISO,
   formatISO,
-  startOfDay,
-  addHours,
-  addMinutes,
   isValid,
   isDate,
+  startOfWeek,
 } from "date-fns";
 
 export const dateUtils = {
+  // Get start of current week (Monday)
+  getCurrentWeekStart: (): string => {
+    return format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd");
+  },
+
   // Convert UTC string to local Date object
   utcToLocal: (utcString: string | Date): Date | null => {
     if (!utcString) return null;

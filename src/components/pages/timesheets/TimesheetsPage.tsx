@@ -35,6 +35,7 @@ import WeekPicker from "./WeekPicker";
 import { canViewTimesheetSubmissions } from "@/utils/clientOrganizationUtils";
 import { toast } from "sonner";
 import { endOfWeek, isWithinInterval, startOfWeek } from "date-fns";
+import { dateUtils } from "@/utils/dateUtils";
 
 // Types
 interface TimeEntry {
@@ -90,7 +91,7 @@ export default function TimesheetsPage() {
   const [submissionFilters, setSubmissionFilters] = useState({
     status: "submitted" as "submitted" | "approved" | "rejected",
     userId: "",
-    selectedWeek: getCurrentWeekStart(),
+    selectedWeek: dateUtils.getCurrentWeekStart(),
     search: "",
     page: 1,
     limit: 10,
@@ -168,9 +169,6 @@ export default function TimesheetsPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // State
-  const [selectedWeek, setSelectedWeek] = useState<string>(
-    getCurrentWeekStart()
-  );
   const [error, setError] = useState<string | null>(null);
   const [showNoteModal, setShowNoteModal] = useState<{
     entryId: string;
@@ -222,14 +220,7 @@ export default function TimesheetsPage() {
   }, [newEntries, entryChanges, deletedEntryIds]);
 
   // Helper functions
-  function getCurrentWeekStart(): string {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Monday
-    const monday = new Date(now);
-    monday.setDate(diff);
-    return monday.toISOString().split("T")[0];
-  }
+
 
   const canApproveTimesheets = canViewTimesheetSubmissions(organizationContext);
 
@@ -486,9 +477,18 @@ export default function TimesheetsPage() {
   const submitTimesheet = async () => {
     if (!currentOrganization?.id || !timesheetData?.submission?.id) return;
 
-    // First save any pending changes
-    if (hasUnsavedChanges) {
-      await saveTimesheet();
+    // Check for unsaved changes and prevent submission
+    const hasNewEntries = newEntries.length > 0;
+    const hasChangedEntries = Object.keys(entryChanges).length > 0;
+    const hasDeletedEntries = deletedEntryIds.size > 0;
+    const hasAnyUnsavedChanges = hasNewEntries || hasChangedEntries || hasDeletedEntries;
+
+    if (hasAnyUnsavedChanges) {
+      toast.error("Please save before submitting", {
+        description: "You have unsaved changes. Please save your timesheet before submitting.",
+        duration: 5000,
+      });
+      return;
     }
 
     // Validate entries
@@ -507,14 +507,18 @@ export default function TimesheetsPage() {
     );
 
     if (!hasEntries) {
-      alert("Please add at least one time entry");
+      toast.error("No time entries", {
+        description: "Please add at least one time entry before submitting.",
+        duration: 5000,
+      });
       return;
     }
 
     if (!hasValidEntries) {
-      alert(
-        "Please fill in all required fields (Project, Task, and at least some hours)"
-      );
+      toast.error("Incomplete entries", {
+        description: "Please fill in all required fields (Project, Task, and at least some hours).",
+        duration: 5000,
+      });
       return;
     }
 
@@ -731,7 +735,7 @@ export default function TimesheetsPage() {
       approvedBy: sub.approvedBy,
     })) || [];
 
-  const weekDays = getWeekDays(selectedWeek);
+  const weekDays = getWeekDays(currentWeekStart);
   const totalHours = allTimeEntries.reduce(
     (sum, entry) => sum + calculateTotal(entry),
     0
@@ -764,8 +768,8 @@ export default function TimesheetsPage() {
                 )
               }
               className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "my-timesheet"
-                  ? "border-primary-500 text-primary-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
             >
               My Timesheet
@@ -778,8 +782,8 @@ export default function TimesheetsPage() {
                   )
                 }
                 className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === "approve-timesheets"
-                    ? "border-primary-500 text-primary-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  ? "border-primary-500 text-primary-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                   }`}
               >
                 Approve Timesheets
@@ -976,12 +980,12 @@ function MyTimesheetView({
                 <span className="text-sm text-gray-600">Status:</span>
                 <span
                   className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${submissionStatus === "approved"
-                      ? "bg-green-100 text-green-800"
-                      : submissionStatus === "submitted"
-                        ? "bg-yellow-100 text-yellow-800"
-                        : submissionStatus === "rejected"
-                          ? "bg-red-100 text-red-800"
-                          : "bg-gray-100 text-gray-800"
+                    ? "bg-green-100 text-green-800"
+                    : submissionStatus === "submitted"
+                      ? "bg-yellow-100 text-yellow-800"
+                      : submissionStatus === "rejected"
+                        ? "bg-red-100 text-red-800"
+                        : "bg-gray-100 text-gray-800"
                     }`}
                 >
                   {submissionStatus === "submitted"
@@ -1356,14 +1360,7 @@ function ApproveTimesheetsView({
   onFiltersChange: (filters: any) => void;
   onPageChange: (page: number) => void;
 }) {
-  function getCurrentWeekStart(): string {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Monday
-    const monday = new Date(now);
-    monday.setDate(diff);
-    return monday.toISOString().split("T")[0];
-  }
+
   const filteredSubmissions = React.useMemo(() => {
     if (!filters.selectedWeek) return submissions;
 
@@ -1411,7 +1408,7 @@ function ApproveTimesheetsView({
               Week
             </label>
             <WeekPicker
-              value={filters.selectedWeek || getCurrentWeekStart()}
+              value={filters.selectedWeek || dateUtils.getCurrentWeekStart()}
               onChange={(weekStart) =>
                 onFiltersChange({ ...filters, selectedWeek: weekStart })
               }
@@ -1445,7 +1442,7 @@ function ApproveTimesheetsView({
               onFiltersChange({
                 status: "submitted", // Default to submitted
                 userId: "",
-                selectedWeek: getCurrentWeekStart(),
+                selectedWeek: dateUtils.getCurrentWeekStart(),
                 search: "",
               })
             }
@@ -1532,12 +1529,12 @@ function ApproveTimesheetsView({
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span
                       className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${submission.status === "approved"
-                          ? "bg-green-100 text-green-800"
-                          : submission.status === "rejected"
-                            ? "bg-red-100 text-red-800"
-                            : submission.status === "submitted"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-gray-100 text-gray-800"
+                        ? "bg-green-100 text-green-800"
+                        : submission.status === "rejected"
+                          ? "bg-red-100 text-red-800"
+                          : submission.status === "submitted"
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-gray-100 text-gray-800"
                         }`}
                     >
                       {submission.status}
@@ -1838,12 +1835,12 @@ function DetailsModal({
                 <span className="font-medium">Status:</span>{" "}
                 <span
                   className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${submission.status === "approved"
-                      ? "bg-green-100 text-green-800"
-                      : submission.status === "submitted"
-                        ? "bg-blue-100 text-blue-800"
-                        : submission.status === "rejected"
-                          ? "bg-red-100 text-red-800"
-                          : "bg-gray-100 text-gray-800"
+                    ? "bg-green-100 text-green-800"
+                    : submission.status === "submitted"
+                      ? "bg-blue-100 text-blue-800"
+                      : submission.status === "rejected"
+                        ? "bg-red-100 text-red-800"
+                        : "bg-gray-100 text-gray-800"
                     }`}
                 >
                   {submission.status}

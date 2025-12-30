@@ -19,6 +19,10 @@ export default function WeekPicker({
   const [selectedDate, setSelectedDate] = useState(new Date(value));
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setSelectedDate(new Date(value));
+  }, [value]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
