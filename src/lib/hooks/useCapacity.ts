@@ -121,12 +121,13 @@ export function useMonthlyCapacity(
   params?: { only_active?: boolean }
 ) {
   return useQuery({
-    queryKey: capacityKeys.monthlyByOrg(organizationId, "monthly", params),
+    queryKey: capacityKeys.monthlyByOrg(organizationId, month, params),
     queryFn: () => capacityAPI.getMonthly(organizationId, userId, month, params),
     enabled: !!organizationId && !!month,
     staleTime: 2 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
+    refetchOnMount: 'always', // Always refetch when component mounts to get latest data
   });
 }
 
@@ -210,21 +211,9 @@ export function useCreateAllocation() {
       notes?: string | null;
     }) => capacityAPI.createAllocation(data),
     onSuccess: (data, variables) => {
-      // Invalidate all allocations queries
+      // Invalidate all capacity queries (allocations, monthly, overview, etc.)
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.allocations(),
-        exact: false,
-      });
-
-      // Invalidate all overview queries
-      queryClient.invalidateQueries({
-        queryKey: capacityKeys.overview(),
-        exact: false,
-      });
-
-      // Invalidate all monthly queries
-      queryClient.invalidateQueries({
-        queryKey: capacityKeys.monthly(),
+        queryKey: capacityKeys.all,
         exact: false,
       });
 
@@ -254,21 +243,9 @@ export function useUpdateAllocation() {
       organizationId: string;
     }) => capacityAPI.updateAllocation(id, data, organizationId),
     onSuccess: (data, variables) => {
-      // Invalidate all allocations queries
+      // Invalidate all capacity queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.allocations(),
-        exact: false,
-      });
-
-      // Invalidate all overview queries
-      queryClient.invalidateQueries({
-        queryKey: capacityKeys.overview(),
-        exact: false,
-      });
-
-      // Invalidate all monthly queries
-      queryClient.invalidateQueries({
-        queryKey: capacityKeys.monthly(),
+        queryKey: capacityKeys.all,
         exact: false,
       });
 
@@ -296,21 +273,9 @@ export function useDeleteAllocation() {
       organizationId: string;
     }) => capacityAPI.deleteAllocation(organizationId, id),
     onSuccess: (data, variables) => {
-      // Invalidate all allocations queries
+      // Invalidate all capacity queries
       queryClient.invalidateQueries({
-        queryKey: capacityKeys.allocations(),
-        exact: false,
-      });
-
-      // Invalidate all overview queries
-      queryClient.invalidateQueries({
-        queryKey: capacityKeys.overview(),
-        exact: false,
-      });
-
-      // Invalidate all monthly queries
-      queryClient.invalidateQueries({
-        queryKey: capacityKeys.monthly(),
+        queryKey: capacityKeys.all,
         exact: false,
       });
 

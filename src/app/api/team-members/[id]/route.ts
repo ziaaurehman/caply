@@ -9,15 +9,15 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  try { 
-    const paramas = await params;
+  try {
+    const { id } = await params;
 
     const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const memberId = params.id;
+    const memberId = id;
     const body = await request.json();
     const { roleId, department, hourlyRate, weeklyCapacity } = body;
 
@@ -54,14 +54,14 @@ export async function PUT(
     //   },
     //   data: updateData,
     // });
-    
+
     // if (result.count === 0) {
     //   return NextResponse.json(
     //     { error: "Member not found or access denied" },
     //     { status: 404 }
     //   );
     // }
-    
+
 
     // Get the member to update
     // const member = await prisma.organizationMember.findFirst({
@@ -79,37 +79,42 @@ export async function PUT(
     const updateData: any = {};
     if (roleId) updateData.roleId = roleId;
     if (department !== undefined) updateData.department = department;
-    if (hourlyRate !== undefined) updateData.hourlyRate = hourlyRate;
+    if (hourlyRate !== undefined) updateData.hourlyRate = Number(hourlyRate);
     if (weeklyCapacity !== undefined)
-      updateData.weeklyCapacity = weeklyCapacity;
+      updateData.weeklyCapacity = parseInt(String(weeklyCapacity), 10);
     // ✅ NOW it's safe to check
-if (Object.keys(updateData).length === 0) {
-  return NextResponse.json(
-    { error: "No valid fields provided for update" },
-    { status: 400 }
-  );
-}
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json(
+        { error: "No valid fields provided for update" },
+        { status: 400 }
+      );
+    }
 
- /* ---------------- ATOMIC UPDATE ---------------- */
+    /* ---------------- ATOMIC UPDATE ---------------- */
 
- const result = await prisma.organizationMember.updateMany({
-  where: {
-    id: memberId,
-    organizationId: headerOrgId,
-  },
-  data: updateData,
-});
+    /* ---------------- ATOMIC UPDATE ---------------- */
+    // Use explicit update with ID. The ID is unique, so this targets exactly one record.
+    // We already validated organization access above.
 
-if (result.count === 0) {
-  return NextResponse.json(
-    { error: "Member not found or access denied" },
-    { status: 404 }
-  );
-}
+    // First verify the member belongs to the organization (security check)
+    const existingMember = await prisma.organizationMember.findFirst({
+      where: {
+        id: memberId,
+        organizationId: headerOrgId
+      }
+    });
+
+    if (!existingMember) {
+      return NextResponse.json(
+        { error: "Member not found in this organization" },
+        { status: 404 }
+      );
+    }
 
     const updatedMember = await prisma.organizationMember.update({
       where: { id: memberId },
       data: updateData,
+
       include: {
         user: {
           select: {

@@ -11,6 +11,7 @@ import {
   User,
   Shield,
   ChevronDown,
+  AlertCircle,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { type Role, type Permission, type TeamMember } from "@/utils/api";
@@ -20,6 +21,7 @@ import { Select } from "@/components/ui/Select";
 import { useAuthStore } from "@/lib/stores/authStore";
 import { useSession } from "next-auth/react";
 import { useRoles, useEmailProvider } from "@/lib/hooks/useTeamMembers";
+import { toast } from "sonner";
 
 interface TeamMemberModalProps {
   isOpen: boolean;
@@ -61,6 +63,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showAllPermissions, setShowAllPermissions] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const { currentOrganization } = useOrganizationStore();
 
@@ -101,6 +104,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setShowAllPermissions(false);
+      setApiError(null); // Clear any previous errors
     }
   }, [isOpen]);
 
@@ -134,6 +138,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
 
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
+    setApiError(null); // Clear previous errors
     try {
       await onSave({
         ...data,
@@ -143,6 +148,14 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
       reset();
     } catch (error) {
       console.error("Failed to save team member:", error);
+      // Display the error message from the API
+      if (error instanceof Error) {
+        setApiError(error.message);
+        toast.error(error.message);
+      } else {
+        setApiError("Failed to save team member. Please try again.");
+        toast.error("Failed to save team member. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -175,6 +188,21 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6">
+          {/* API Error Message */}
+          {apiError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <div className="flex-shrink-0">
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800">Error</h3>
+                  <p className="mt-1 text-sm text-red-700">{apiError}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Email Section */}
           <div className="space-y-4">
             <div className="flex items-center space-x-2">

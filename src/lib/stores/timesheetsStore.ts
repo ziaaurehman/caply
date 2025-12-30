@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { timesheetsAPI } from "@/utils/api/timesheets";
 import { capacityAPI } from "@/utils/api/capacity";
+import { dateUtils } from "@/utils/dateUtils";
 
 // Types
 export interface TimesheetEntry {
@@ -56,12 +57,9 @@ interface TimesheetsStore {
 }
 
 // Helper function to get current week start (Monday)
+// Helper function to get current week start (Monday)
 export const getCurrentWeekStart = (): string => {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Monday
-  const monday = new Date(now.setDate(diff));
-  return monday.toISOString().split("T")[0];
+  return dateUtils.getCurrentWeekStart();
 };
 
 // Store
@@ -252,7 +250,6 @@ export const useTimesheetsStore = create<TimesheetsStore>()(
     {
       name: "timesheets-store",
       partialize: (state) => ({
-        currentWeekStart: state.currentWeekStart,
         activeTab: state.activeTab,
       }),
     }

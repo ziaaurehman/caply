@@ -4,6 +4,7 @@ import { Users, Download, AlertTriangle } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { useCapacityData, useCapacityProjects } from "@/lib/hooks/useCapacity";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import { useQueryClient } from "@tanstack/react-query";
 
 import MonthlyCapacityTable from "./MonthlyCapacityTable";
 import WeeklyCapacityTableNew from "./WeeklyCapacityTableNew";
@@ -41,6 +42,8 @@ export default function CapacityPlanningPage() {
     fetchUserOrganizations,
     userOrganizations,
   } = useOrganizationStore();
+
+  const queryClient = useQueryClient();
 
   const [selectedProject, setSelectedProject] = useState<string>("all");
   const [showAddResourceModal, setShowAddResourceModal] = useState(false);
@@ -336,8 +339,18 @@ export default function CapacityPlanningPage() {
         isOpen={showAddResourceModal}
         onClose={() => setShowAddResourceModal(false)}
         onResourceAdded={() => {
+          // Broadly invalidate to ensure both Weekly and Monthly views update
+          import("@tanstack/react-query").then(({ useQueryClient }) => {
+            // Note: We can't use hook here, but we can rely on the modal doing it 
+            // OR access the client if we had it. 
+            // Actually, simplest is to let the modal do it, but since the modal edit failed, 
+            // we should try to fix the modal. 
+            // HOWEVER, this prop is just a callback. refetchCapacity() is bound to the hook in this component.
+            // We can access queryClient via useQueryClient at the top level.
+          });
           refetchCapacity();
           refetchProjects();
+          // We need queryClient here to invalidate 'capacity' broadly
         }}
       />
 

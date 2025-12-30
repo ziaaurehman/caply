@@ -4,6 +4,7 @@ import { createClient } from "@/utils/supabase/server"; // Keep for file storage
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { getServerSession } from "next-auth";
 import { authConfig } from "@/auth";
+import { supabaseAdmin } from "@/utils/supabase/admin";
 
 export async function DELETE(
   req: NextRequest,
@@ -180,9 +181,8 @@ export async function GET(
       );
     }
 
-    // Get download URL from storage (keeping Supabase for file storage)
-    const supabase = await createClient();
-    const { data: urlData } = await supabase.storage
+    // Get download URL from storage (using admin client to bypass RLS as we've already validated access)
+    const { data: urlData } = await supabaseAdmin.storage
       .from("caply")
       .createSignedUrl(attachment.filePath, 3600); // 1 hour expiry
 
@@ -200,7 +200,7 @@ export async function GET(
       filename: attachment.filename,
       original_filename: attachment.originalFilename,
       file_path: attachment.filePath,
-      file_size: attachment.fileSize,
+      file_size: Number(attachment.fileSize),
       mime_type: attachment.mimeType,
       uploaded_by: attachment.uploadedBy,
       uploaded_at: attachment.uploadedAt,
