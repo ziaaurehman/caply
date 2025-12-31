@@ -49,9 +49,9 @@ export default function LoginForm() {
         email,
         password,
       });
-      
+
       console.log("Sign in result:", result);
-      
+
       if (result?.error) {
         debugger
         // Check if email is not verified
@@ -74,7 +74,7 @@ export default function LoginForm() {
           router.push(`/verify-email?email=${encodeURIComponent(email)}`);
           return;
         }
-        
+
         setError(
           result.error === "CredentialsSignin"
             ? "Invalid email or password"
@@ -84,9 +84,12 @@ export default function LoginForm() {
         return;
       }
 
+      // Get callback URL from search params or default to dashboard
+      const callbackUrl = searchParams?.get('callbackUrl') || '/dashboard';
+
       // Use window.location.href instead of router.push to force a full page reload
       // This avoids React Hook inconsistencies by ensuring a clean mount of all components
-      window.location.href = "/dashboard";
+      window.location.href = callbackUrl;
     } catch (error) {
       console.error("Login error:", error);
       setError("Something went wrong. Please try again.");
@@ -97,7 +100,8 @@ export default function LoginForm() {
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     try {
-      await signIn("google", { callbackUrl: "/dashboard" });
+      const callbackUrl = searchParams?.get('callbackUrl') || '/dashboard';
+      await signIn("google", { callbackUrl });
     } catch (error) {
       console.error("Google sign in error:", error);
       setError("Failed to sign in with Google");

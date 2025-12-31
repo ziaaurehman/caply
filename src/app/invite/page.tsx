@@ -36,6 +36,14 @@ const InvitePageContent = () => {
   const [accepted, setAccepted] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
 
+  // Redirect unauthenticated users to login
+  useEffect(() => {
+    if (status === "unauthenticated" && token) {
+      // Redirect to login with callback URL to return to this invitation
+      router.push(`/login?callbackUrl=${encodeURIComponent(`/invite?token=${token}`)}`);
+    }
+  }, [status, token, router]);
+
   useEffect(() => {
     if (!token) {
       setError("Invalid invitation link");
@@ -43,8 +51,11 @@ const InvitePageContent = () => {
       return;
     }
 
-    validateInvitation();
-  }, [token]);
+    // Only validate if user is authenticated or loading
+    if (status === "authenticated" || status === "loading") {
+      validateInvitation();
+    }
+  }, [token, status]);
 
   const validateInvitation = async () => {
     try {
@@ -125,9 +136,9 @@ const InvitePageContent = () => {
         });
         window.dispatchEvent(event);
 
-        // Redirect to dashboard after 2 seconds
+        // Redirect to dashboard after 2 seconds with full page reload
         setTimeout(() => {
-          router.push("/dashboard");
+          window.location.href = "/dashboard";
         }, 2000);
       } else {
         setError(data.error || "Failed to accept invitation");
@@ -288,7 +299,7 @@ const InvitePageContent = () => {
               </div>
 
               {session.user.email?.toLowerCase() ===
-              invitation.email.toLowerCase() ? (
+                invitation.email.toLowerCase() ? (
                 <Button
                   onClick={acceptInvitation}
                   disabled={accepting}

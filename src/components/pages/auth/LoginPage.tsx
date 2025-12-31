@@ -4,15 +4,18 @@ import { useEffect } from "react"
 import { PieChart } from "lucide-react"
 import LoginForm from "./LoginForm"
 import { useSession } from "next-auth/react"
+import { useSearchParams } from "next/navigation"
 
 export default function LoginPage() {
   const { status } = useSession()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
     if (status === "authenticated") {
-      window.location.href = "/dashboard"
+      const callbackUrl = searchParams?.get('callbackUrl') || '/dashboard'
+      window.location.href = callbackUrl
     }
-  }, [status])
+  }, [status, searchParams])
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
