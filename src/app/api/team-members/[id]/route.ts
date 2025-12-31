@@ -185,12 +185,14 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { id } = await params;
+
     const session = await getServerSession(authConfig);
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const memberId = params.id;
+    const memberId = id;
 
     // Get organization ID from headers
     const headerOrgId = request.headers.get("x-organization-id");
