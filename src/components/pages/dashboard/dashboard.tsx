@@ -97,8 +97,8 @@ const DonutChart: React.FC<{
           <div className="text-xs text-gray-500 text-center leading-tight">
             {centerLabel.includes(" ")
               ? centerLabel
-                  .split(" ")
-                  .map((word, index) => <div key={index}>{word}</div>)
+                .split(" ")
+                .map((word, index) => <div key={index}>{word}</div>)
               : centerLabel}
           </div>
         </div>
@@ -296,16 +296,14 @@ const DashboardContent: React.FC = () => {
       <div className="max-w-7xl mx-auto space-y-8">
         {showPaymentConfirmation && (
           <div
-            className={`fixed top-4 right-4 z-50 animate-in slide-in-from-top-5 ${
-              showPaymentConfirmation ? "" : "animate-out slide-out-to-top-5"
-            }`}
+            className={`fixed top-4 right-4 z-50 animate-in slide-in-from-top-5 ${showPaymentConfirmation ? "" : "animate-out slide-out-to-top-5"
+              }`}
           >
             <div
-              className={`min-w-[400px] max-w-md rounded-lg shadow-lg p-6 ${
-                paymentStatus === "success"
-                  ? "bg-white border-l-4 border-green-500"
-                  : "bg-white border-l-4 border-red-500"
-              }`}
+              className={`min-w-[400px] max-w-md rounded-lg shadow-lg p-6 ${paymentStatus === "success"
+                ? "bg-white border-l-4 border-green-500"
+                : "bg-white border-l-4 border-red-500"
+                }`}
             >
               <div className="flex items-start">
                 <div className="flex-shrink-0">
@@ -317,22 +315,20 @@ const DashboardContent: React.FC = () => {
                 </div>
                 <div className="ml-3 flex-1">
                   <h3
-                    className={`text-lg font-semibold ${
-                      paymentStatus === "success"
-                        ? "text-green-900"
-                        : "text-red-900"
-                    }`}
+                    className={`text-lg font-semibold ${paymentStatus === "success"
+                      ? "text-green-900"
+                      : "text-red-900"
+                      }`}
                   >
                     {paymentStatus === "success"
                       ? "Payment Successful!"
                       : "Payment Canceled"}
                   </h3>
                   <div
-                    className={`mt-2 text-sm ${
-                      paymentStatus === "success"
-                        ? "text-green-700"
-                        : "text-red-700"
-                    }`}
+                    className={`mt-2 text-sm ${paymentStatus === "success"
+                      ? "text-green-700"
+                      : "text-red-700"
+                      }`}
                   >
                     {paymentStatus === "success" ? (
                       <>
@@ -424,85 +420,105 @@ const DashboardContent: React.FC = () => {
                   </button>
                 </div>
               </div>
-              <div className="p-6 flex-1 flex flex-col overflow-hidden">
-                <div className="flex-1 overflow-y-auto">
-                  {/* Table Header */}
-                  <div className="grid grid-cols-12 gap-4 mb-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <div className="col-span-4">PROJECT</div>
-                    <div className="col-span-2">PROGRESS</div>
-                    <div className="col-span-3">BUDGET</div>
-                    <div className="col-span-2">TIMELINE</div>
-                    <div className="col-span-1">STATUS</div>
-                  </div>
-
-                  {/* Projects */}
-                  <div className="space-y-4">
-                    {projects.map((project) => (
-                      <div
-                        key={project.id}
-                        className="grid grid-cols-12 gap-4 items-center py-3 border-b border-gray-100 last:border-b-0"
-                      >
-                        <div className="col-span-4">
-                          <div className="flex items-center">
-                            <div
-                              className={`h-3 w-3 rounded-full ${project.color} mr-3 flex-shrink-0`}
-                            ></div>
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-gray-900 truncate">
-                                {project.name}
-                              </div>
-                              <div className="text-sm text-gray-500 truncate">
-                                {project.description}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="col-span-2">
-                          <div className="flex items-center">
-                            <div className="w-16 bg-gray-200 rounded-full h-2 mr-2">
+              <div className="p-0 flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 overflow-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[40%]"
+                        >
+                          Project
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[20%]"
+                        >
+                          Progress
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[20%]"
+                        >
+                          Budget
+                        </th>
+                        <th
+                          scope="col"
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[20%]"
+                        >
+                          Timeline
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {projects.map((project) => (
+                        <tr key={project.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
                               <div
-                                className="bg-orange-500 h-2 rounded-full"
-                                style={{ width: `${project.progress}%` }}
+                                className={`h-2.5 w-2.5 rounded-full ${project.color} mr-3 flex-shrink-0 ring-2 ring-white`}
                               ></div>
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-gray-900 truncate">
+                                  {project.name}
+                                </div>
+                                <div className="text-xs text-gray-500 truncate mt-0.5">
+                                  {project.description}
+                                </div>
+                              </div>
                             </div>
-                            <span className="text-sm text-gray-900 whitespace-nowrap">
-                              {project.progress}% / 100%
-                            </span>
-                          </div>
-                        </div>
-                        <div className="col-span-3">
-                          <div className="text-sm text-gray-900">
-                            ${project.budget.spent.toLocaleString()} /
-                          </div>
-                          <div className="text-sm text-gray-900">
-                            ${project.budget.total.toLocaleString()}
-                          </div>
-                          <div className="text-sm text-green-600">
-                            +${project.budget.remaining.toLocaleString()}
-                          </div>
-                        </div>
-                        <div className="col-span-2">
-                          <div className="text-sm text-gray-900">
-                            -{project.timeline.daysLeft} days left
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {project.timeline.endDate}
-                          </div>
-                        </div>
-                        <div className="col-span-1">
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                            Behind
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap align-middle">
+                            <div className="w-full max-w-[140px]">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-medium text-gray-700">{project.progress}%</span>
+                              </div>
+                              <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-primary-600 h-1.5 rounded-full transition-all duration-500"
+                                  style={{ width: `${project.progress}%`, backgroundColor: project.progress < 30 ? '#ef4444' : project.progress < 70 ? '#f59e0b' : '#10b981' }}
+                                ></div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium text-gray-900">
+                                ${project.budget.spent.toLocaleString()}
+                                <span className="text-gray-400 font-normal ml-1">
+                                  / ${project.budget.total.toLocaleString()}
+                                </span>
+                              </span>
+                              <span className={`text-xs mt-0.5 font-medium ${project.budget.remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {project.budget.remaining >= 0 ? '+' : ''}${project.budget.remaining.toLocaleString()} left
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex flex-col">
+                              <div className="flex items-center text-sm text-gray-900">
+                                <span className={`w-1.5 h-1.5 rounded-full mr-2 ${project.timeline.daysLeft < 30 ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                                {project.timeline.daysLeft} days
+                              </div>
+                              <span className="text-xs text-gray-500 pl-3.5 mt-0.5">
+                                Due {project.timeline.endDate}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
 
-                <div className="pt-4 border-t border-gray-200 flex-shrink-0">
-                  <button className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-                    <Download className="h-4 w-4 mr-2" />
-                    Export
+                <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+                  <div className="text-xs text-gray-500">
+                    Showing {projects.length} active projects
+                  </div>
+                  <button className="flex items-center px-4 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm">
+                    <Download className="h-3.5 w-3.5 mr-2" />
+                    Export Report
                   </button>
                 </div>
               </div>
@@ -522,82 +538,77 @@ const DashboardContent: React.FC = () => {
                   </span>
                 </div>
               </div>
-              <div className="p-6 flex-1 flex flex-col overflow-hidden">
-                <div className="flex-1 overflow-y-auto">
+              <div className="p-0 flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 overflow-y-auto px-6 py-4">
                   <div className="space-y-6">
                     {teamMembers.map((member) => (
-                      <div key={member.id} className="space-y-3">
-                        <div className="flex items-center justify-between">
+                      <div key={member.id} className="group">
+                        <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center space-x-3">
-                            <img
-                              src={member.avatar || "/placeholder.svg"}
-                              alt={member.name}
-                              className="w-10 h-10 rounded-full object-cover"
-                            />
+                            <div className="relative">
+                              <img
+                                src={member.avatar || "/placeholder.svg"}
+                                alt={member.name}
+                                className="w-9 h-9 rounded-full object-cover border border-gray-200"
+                              />
+                              <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${member.status === 'available' ? 'bg-green-500' : member.status === 'optimal' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
+                            </div>
                             <div>
-                              <p className="text-sm font-medium text-gray-900">
+                              <p className="text-sm font-semibold text-gray-900 leading-none">
                                 {member.name}
                               </p>
-                              <p className="text-xs text-gray-500">
+                              <p className="text-xs text-gray-500 mt-1">
                                 {member.role}
                               </p>
                             </div>
                           </div>
-                          <span
-                            className={`text-sm font-medium ${getUtilizationTextColor(member.status)}`}
-                          >
-                            {member.utilization}%
-                          </span>
+                          <div className="text-right">
+                            <span
+                              className={`text-sm font-bold ${getUtilizationTextColor(member.status)}`}
+                            >
+                              {member.utilization}%
+                            </span>
+                          </div>
                         </div>
 
-                        <div className="relative">
-                          <div className="flex justify-between text-xs text-gray-400 mb-1">
-                            <span>0%</span>
-                            <span>25%</span>
-                            <span>50%</span>
-                            <span>75%</span>
-                            <span>100%</span>
-                          </div>
-                          <div className="w-full bg-gray-200 rounded-full h-2 relative">
+                        <div className="relative pt-1">
+                          <div className="w-full bg-gray-100 rounded-full h-2 relative overflow-hidden">
                             <div
-                              className={`h-2 rounded-full ${getUtilizationColor(member.utilization)}`}
+                              className={`h-2 rounded-full transition-all duration-500 ${getUtilizationColor(member.utilization)}`}
                               style={{ width: `${member.utilization}%` }}
                             ></div>
-                            {/* Tick marks */}
-                            <div className="absolute top-0 left-1/4 w-px h-2 bg-white"></div>
-                            <div className="absolute top-0 left-1/2 w-px h-2 bg-white"></div>
-                            <div className="absolute top-0 left-3/4 w-px h-2 bg-white"></div>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {member.hours}
-                          </p>
+                          <div className="flex justify-between items-center mt-1.5">
+                            <p className="text-xs text-gray-400 font-medium">
+                              {member.hours}
+                            </p>
+                            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">
+                              {member.status === 'available' ? 'Available' : member.status === 'optimal' ? 'Optimal' : 'Overloaded'}
+                            </p>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-gray-200 flex-shrink-0">
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="flex items-center space-x-1">
-                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                      <span className="text-gray-600">
-                        Overallocated ({">"}100%)
-                      </span>
+                <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+                  <div className="flex flex-wrap gap-4 text-xs justify-center">
+                    <div className="flex items-center space-x-1.5">
+                      <div className="w-2 h-2 bg-red-500 rounded-full ring-2 ring-red-100"></div>
+                      <span className="text-gray-600 font-medium">{">"}100%</span>
                     </div>
-                    <div className="flex items-center space-x-1">
-                      <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                      <span className="text-gray-600">High (90-100%)</span>
+                    <div className="flex items-center space-x-1.5">
+                      <div className="w-2 h-2 bg-red-500 rounded-full opacity-80 ring-2 ring-red-50"></div>
+                      <span className="text-gray-600 font-medium">90-100%</span>
                     </div>
-                    <div className="flex items-center space-x-1">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                      <span className="text-gray-600">Optimal (70-90%)</span>
+                    <div className="flex items-center space-x-1.5">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full ring-2 ring-blue-100"></div>
+                      <span className="text-gray-600 font-medium">70-90%</span>
                     </div>
-                    <div className="flex items-center space-x-1">
-                      <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-                      <span className="text-gray-600">
-                        Available ({"<"}70%)
-                      </span>
+                    <div className="flex items-center space-x-1.5">
+                      <div className="w-2 h-2 bg-green-500 rounded-full ring-2 ring-green-100"></div>
+                      <span className="text-gray-600 font-medium">{"<"}70%</span>
                     </div>
                   </div>
                 </div>

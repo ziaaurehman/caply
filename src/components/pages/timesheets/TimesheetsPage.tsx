@@ -51,6 +51,7 @@ interface TimeEntry {
   friday: { hours: number; notes: string };
   total: number;
   isNew: boolean;
+  isBillable: boolean;
 }
 
 interface TimesheetSubmission {
@@ -260,7 +261,9 @@ export default function TimesheetsPage() {
       tuesday_notes: "",
       wednesday_notes: "",
       thursday_notes: "",
+      thursday_notes: "",
       friday_notes: "",
+      is_billable: false,
     };
     setNewEntries([...newEntries, newEntry]);
     setHasUnsavedChanges(true);
@@ -673,6 +676,7 @@ export default function TimesheetsPage() {
             Number(updatedEntry.thursday_hours || 0) +
             Number(updatedEntry.friday_hours || 0),
           isNew: false,
+          isBillable: updatedEntry.is_billable ?? false,
         };
       }) || [];
 
@@ -714,6 +718,7 @@ export default function TimesheetsPage() {
         Number(entry.thursday_hours || 0) +
         Number(entry.friday_hours || 0),
       isNew: true,
+      isBillable: entry.is_billable ?? false,
     };
   });
 
@@ -1081,6 +1086,9 @@ function MyTimesheetView({
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Total
                 </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Billable
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>
@@ -1187,6 +1195,22 @@ function MyTimesheetView({
                       <span className="text-sm font-medium text-gray-900">
                         {Number(entry.total || 0).toFixed(2)}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      <div className="flex justify-center">
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={entry.isBillable}
+                            onChange={(e) =>
+                              onUpdateEntry(entry.id, "is_billable", e.target.checked)
+                            }
+                            disabled={loading || isReadOnly}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600"></div>
+                        </label>
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <button

@@ -221,6 +221,7 @@ export async function POST(req: NextRequest) {
               wednesdayNotes: entry.wednesday_notes || null,
               thursdayNotes: entry.thursday_notes || null,
               fridayNotes: entry.friday_notes || null,
+              isBillable: entry.is_billable ?? false,
             }));
 
           // Calculate total hours from entries we're about to insert (avoid extra query)
@@ -310,14 +311,15 @@ export async function POST(req: NextRequest) {
         wednesday_notes: entry.wednesdayNotes,
         thursday_notes: entry.thursdayNotes,
         friday_notes: entry.fridayNotes,
+        is_billable: entry.isBillable,
         created_at: entry.createdAt,
         updated_at: entry.updatedAt,
         projects: entry.project
           ? {
-              id: entry.project.id,
-              name: entry.project.name,
-              code: entry.project.code,
-            }
+            id: entry.project.id,
+            name: entry.project.name,
+            code: entry.project.code,
+          }
           : null,
       })),
     };

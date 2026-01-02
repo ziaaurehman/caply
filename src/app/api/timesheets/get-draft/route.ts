@@ -131,6 +131,7 @@ export async function GET(req: NextRequest) {
         wednesday_notes: entry.wednesdayNotes,
         thursday_notes: entry.thursdayNotes,
         friday_notes: entry.fridayNotes,
+        is_billable: entry.isBillable,
         created_at: entry.createdAt,
         updated_at: entry.updatedAt,
         projects: entry.project

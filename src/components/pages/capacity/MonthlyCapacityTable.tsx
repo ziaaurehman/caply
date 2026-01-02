@@ -3140,7 +3140,8 @@
 "use client"
 
 import React, { useState, useMemo } from "react"
-import { ChevronDown, ChevronUp, Plus, Trash, AlertTriangle } from "lucide-react"
+import { ChevronDown, ChevronUp, Plus, Trash, AlertTriangle, Pencil } from "lucide-react"
+import EditResourceModal from "@/components/pages/capacity/EditResourceModal"
 import ConfirmationModal from "@/components/ui/ConfirmationModal"
 import { useOrganizationStore } from "@/lib/stores/organizationStore"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
@@ -3226,6 +3227,7 @@ interface Member {
     defaultHoursPerDay: number // Added to store default hours per day
     allowWeekends: boolean // Added to store weekend allowance
   }>
+  hourlyRate?: number // Added hourlyRate
 }
 
 interface WeekData {
@@ -3341,6 +3343,8 @@ export default function MonthlyCapacityTable({
   const [editedWeeklyHours, setEditedWeeklyHours] = useState<{
     [key: string]: number[] // key: "memberId:projectId", value: array of weekly hours
   }>({})
+  const [editResourceModalOpen, setEditResourceModalOpen] = useState(false)
+  const [selectedResourceForEdit, setSelectedResourceForEdit] = useState<any | null>(null)
 
   const { data: projects = [], isLoading: projectsLoading } = useQuery({
     queryKey: ["projects", currentOrganization?.id],
@@ -3528,6 +3532,33 @@ export default function MonthlyCapacityTable({
     onError: (error: Error) => {
       console.error("Delete project assignment error:", error)
       toast.error(error.message || "Failed to delete project assignment")
+    },
+  })
+
+  // Add delete resource mutation
+  const deleteResourceMutation = useMutation({
+    mutationFn: async (resourceId: string) => {
+      const response = await fetch(`/api/capacity/resources?resourceId=${resourceId}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to delete resource")
+      }
+
+      return response.json()
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false })
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false })
+      toast.success("Resource deleted successfully!")
+      setDeletingTarget(null)
+    },
+    onError: (error: Error) => {
+      console.error("Delete resource error:", error)
+      toast.error(error.message || "Failed to delete resource")
     },
   })
 
@@ -3985,6 +4016,7 @@ export default function MonthlyCapacityTable({
         jobTitle: userInfo?.position || formattedRole,
         avatarUrl: userInfo?.avatar_url,
         capacity: resource.weekly_capacity_hours / 5,
+        hourlyRate: resource.hourly_rate,
         allocations,
       }
     })
@@ -4084,23 +4116,28 @@ export default function MonthlyCapacityTable({
           isOpen={Boolean(deletingTarget)}
           onClose={() => setDeletingTarget(null)}
           onConfirm={async () => {
-            if (!deletingTarget || !deletingTarget.assignmentId) return
+            if (!deletingTarget) return
 
             try {
-              // Delete the project assignment (this will cascade delete all weekly plans)
-              await deleteProjectAssignmentMutation.mutateAsync(deletingTarget.assignmentId)
+              if (deletingTarget.assignmentId) {
+                // Delete project assignment
+                await deleteProjectAssignmentMutation.mutateAsync(deletingTarget.assignmentId)
+              } else if (deletingTarget.memberId && !deletingTarget.projectId) {
+                // Delete resource (member)
+                // When deleting a resource, we use the resourceId (which is mapped to memberId in our loop)
+                await deleteResourceMutation.mutateAsync(deletingTarget.memberId)
+              }
             } catch (error) {
               // Error is handled by mutation
-              // Don't close the modal on error so user can retry
             }
           }}
-          title="Delete Project Assignment"
+          title={deletingTarget?.projectId ? "Delete Project Assignment" : "Delete Resource"}
           message={
-            deletingTarget?.projectName
+            deletingTarget?.projectId
               ? `Are you sure you want to delete the project assignment "${deletingTarget.projectName}"? This will permanently delete the assignment and all related weekly plans. This action cannot be undone.`
-              : "Are you sure you want to delete this project assignment? This will permanently delete the assignment and all related weekly plans. This action cannot be undone."
+              : `Are you sure you want to remove ${deletingTarget?.projectName || "this resource"}? This will delete all project assignments and capacity data for this user. This action cannot be undone.`
           }
-          isLoading={deleteProjectAssignmentMutation.isPending}
+          isLoading={deleteProjectAssignmentMutation.isPending || deleteResourceMutation.isPending}
         />
         <table className="min-w-full">
           <thead>
@@ -4177,7 +4214,14 @@ export default function MonthlyCapacityTable({
                         </button>
                         <div>
                           <div className="font-medium text-gray-900">{member.fullName}</div>
-                          <div className="text-sm text-gray-500">{member.jobTitle}</div>
+                          <div className="text-sm text-gray-500">
+                            {member.jobTitle}
+                            {member.hourlyRate && (
+                              <span className="ml-2 text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600 font-medium">
+                                ${Number(member.hourlyRate).toFixed(2)}/hr
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -4239,7 +4283,47 @@ export default function MonthlyCapacityTable({
                         </td>
                       )
                     })}
-                    <td className="px-4 py-4 text-center"></td>
+                    <td className="px-4 py-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          className="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"
+                          title="Edit Resource"
+                          onClick={() => {
+                            // Find the raw resource object from monthlyCapacityData to pass to modal
+                            const rawResource = monthlyCapacityData?.resources?.find(
+                              (r: any) => r.resource_allocation_id === member.id
+                            ) as any
+                            if (rawResource) {
+                              setSelectedResourceForEdit({
+                                id: member.id,
+                                fullName: member.fullName,
+                                email: rawResource.user?.email,
+                                role: member.jobTitle,
+                                weeklyCapacityHours: rawResource.weekly_capacity_hours,
+                                hourlyRate: rawResource.hourly_rate,
+                                isActive: rawResource.is_active,
+                              })
+                              setEditResourceModalOpen(true)
+                            }
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-gray-100"
+                          title="Remove Resource"
+                          onClick={() => {
+                            setDeletingTarget({
+                              memberId: member.id,
+                              projectId: "", // Empty string means regular resource deletion
+                              projectName: member.fullName,
+                            })
+                          }}
+                        >
+                          <Trash className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
 
                   {/* Expanded Project Rows */}
@@ -4476,6 +4560,18 @@ export default function MonthlyCapacityTable({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Edit Resource Modal */}
+      {selectedResourceForEdit && (
+        <EditResourceModal
+          isOpen={editResourceModalOpen}
+          onClose={() => {
+            setEditResourceModalOpen(false)
+            setSelectedResourceForEdit(null)
+          }}
+          resource={selectedResourceForEdit}
+        />
       )}
     </>
   )

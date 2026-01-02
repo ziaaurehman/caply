@@ -101,29 +101,29 @@ export async function GET(req: NextRequest) {
       // Calculate daily hours from daily overrides if they exist, otherwise use defaults
       const dailyHours = weeklyPlan
         ? (() => {
-            const defaultHours = Number(weeklyPlan.defaultHoursPerDay || 0);
-            const weekendHours = weeklyPlan.allowWeekends ? defaultHours : 0;
-            
-            // Start with default hours for all days
-            const hours = [
-              weekendHours, // Sunday (0)
-              defaultHours, // Monday (1)
-              defaultHours, // Tuesday (2)
-              defaultHours, // Wednesday (3)
-              defaultHours, // Thursday (4)
-              defaultHours, // Friday (5)
-              weekendHours, // Saturday (6)
-            ];
-            
-            // Override with actual values from dailyOverrides if they exist
-            if (weeklyPlan.dailyOverrides && weeklyPlan.dailyOverrides.length > 0) {
-              weeklyPlan.dailyOverrides.forEach((override: any) => {
-                hours[override.dayOfWeek] = Number(override.actualHours || 0);
-              });
-            }
-            
-            return hours;
-          })()
+          const defaultHours = Number(weeklyPlan.defaultHoursPerDay || 0);
+          const weekendHours = weeklyPlan.allowWeekends ? defaultHours : 0;
+
+          // Start with default hours for all days
+          const hours = [
+            weekendHours, // Sunday (0)
+            defaultHours, // Monday (1)
+            defaultHours, // Tuesday (2)
+            defaultHours, // Wednesday (3)
+            defaultHours, // Thursday (4)
+            defaultHours, // Friday (5)
+            weekendHours, // Saturday (6)
+          ];
+
+          // Override with actual values from dailyOverrides if they exist
+          if (weeklyPlan.dailyOverrides && weeklyPlan.dailyOverrides.length > 0) {
+            weeklyPlan.dailyOverrides.forEach((override: any) => {
+              hours[override.dayOfWeek] = Number(override.actualHours || 0);
+            });
+          }
+
+          return hours;
+        })()
         : null;
 
       return {
@@ -139,12 +139,12 @@ export async function GET(req: NextRequest) {
         notes: assignment.notes,
         weeklyPlan: weeklyPlan
           ? {
-              id: weeklyPlan.id,
-              weekStartDate: weeklyPlan.weekStartDate,
-              dailyHours,
-              isLinked: weeklyPlan.isLinked,
-              allowWeekends: weeklyPlan.allowWeekends,
-            }
+            id: weeklyPlan.id,
+            weekStartDate: weeklyPlan.weekStartDate,
+            dailyHours,
+            isLinked: weeklyPlan.isLinked,
+            allowWeekends: weeklyPlan.allowWeekends,
+          }
           : null,
       };
     });
@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
 
     const validation = await validateOrganizationAccessWithId(organizationId, {
       resource: "capacity",
-      action: "manage",
+      action: "create",
     });
 
     if (!validation.success) {
@@ -230,6 +230,22 @@ export async function POST(req: NextRequest) {
 
     if (!project || project.organizationId !== organizationId) {
       return NextResponse.json({ error: "Invalid project" }, { status: 400 });
+    }
+
+    // Check for duplicate active assignment
+    const existingAssignment = await prisma.projectAssignment.findFirst({
+      where: {
+        resourceAllocationId,
+        projectId,
+        isActive: true,
+      },
+    });
+
+    if (existingAssignment) {
+      return NextResponse.json(
+        { error: "Project is already assigned to this resource" },
+        { status: 400 }
+      );
     }
 
     // Create Project Assignment (using Prisma)
@@ -318,7 +334,7 @@ export async function DELETE(req: NextRequest) {
       assignment.resourceAllocation.organizationId,
       {
         resource: "capacity",
-        action: "manage",
+        action: "delete",
       }
     );
 

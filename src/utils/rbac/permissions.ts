@@ -365,6 +365,27 @@ export const PERMISSIONS: Permission[] = [
     action: 'read'
   },
   {
+    id: 'capacity.create',
+    name: 'Create Capacity',
+    description: 'Can create resource allocation',
+    resource: 'capacity',
+    action: 'create'
+  },
+  {
+    id: 'capacity.update',
+    name: 'Update Capacity',
+    description: 'Can update resource allocation',
+    resource: 'capacity',
+    action: 'update'
+  },
+  {
+    id: 'capacity.delete',
+    name: 'Delete Capacity',
+    description: 'Can delete resource allocation',
+    resource: 'capacity',
+    action: 'delete'
+  },
+  {
     id: 'capacity.manage',
     name: 'Manage Capacity',
     description: 'Can manage resource allocation and capacity',

@@ -20,6 +20,7 @@ export interface TimesheetEntry {
   wednesday_notes?: string;
   thursday_notes?: string;
   friday_notes?: string;
+  is_billable?: boolean;
 }
 
 export interface TimesheetProject {
@@ -212,6 +213,7 @@ export const useTimesheetsStore = create<TimesheetsStore>()(
             wednesday_notes: "",
             thursday_notes: "",
             friday_notes: "",
+            is_billable: false,
           };
 
           set({
@@ -237,6 +239,7 @@ export const useTimesheetsStore = create<TimesheetsStore>()(
           wednesday_notes: "",
           thursday_notes: "",
           friday_notes: "",
+          is_billable: false,
         };
 
         set({
@@ -287,6 +290,7 @@ export const useTimesheetData = (
           wednesday_notes: entry.wednesday_notes,
           thursday_notes: entry.thursday_notes,
           friday_notes: entry.friday_notes,
+          is_billable: entry.is_billable,
         })) || [];
 
       // Transform projects and mark planned ones
@@ -396,6 +400,7 @@ export const useAddTimesheetEntry = () => {
         wednesday_notes: "",
         thursday_notes: "",
         friday_notes: "",
+        is_billable: false,
       };
 
       // Save the draft with the new entry
@@ -574,6 +579,7 @@ export const useUpdateTimesheetEntry = () => {
         wednesday_notes?: string;
         thursday_notes?: string;
         friday_notes?: string;
+        is_billable?: boolean;
       };
     }) => {
       return timesheetsAPI.updateTimesheetEntry(organizationId, entryId, data);

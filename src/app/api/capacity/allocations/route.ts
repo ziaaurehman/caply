@@ -162,11 +162,11 @@ export async function GET(req: NextRequest) {
             user_id: r.organizationMember.userId,
             users: r.organizationMember.user
               ? {
-                  id: r.organizationMember.user.id,
-                  full_name: r.organizationMember.user.fullName,
-                  email: r.organizationMember.user.email,
-                  avatar_url: r.organizationMember.user.avatarUrl,
-                }
+                id: r.organizationMember.user.id,
+                full_name: r.organizationMember.user.fullName,
+                email: r.organizationMember.user.email,
+                avatar_url: r.organizationMember.user.avatarUrl,
+              }
               : null,
           },
         },
@@ -302,6 +302,19 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // Check for duplicate active assignment
+      const existingAssignment = await tx.projectAssignment.findFirst({
+        where: {
+          resourceAllocationId: resource.id,
+          projectId: project_id,
+          isActive: true,
+        },
+      });
+
+      if (existingAssignment) {
+        throw new Error("Project is already assigned to this resource");
+      }
+
       // Create project assignment (with per-day defaults and weekend flag)
       const assignment = await tx.projectAssignment.create({
         data: {
@@ -358,41 +371,41 @@ export async function POST(req: NextRequest) {
         updated_at: assignment.updatedAt,
         projects: assignment.project
           ? {
-              id: assignment.project.id,
-              name: assignment.project.name,
-              code: assignment.project.code,
-              status: assignment.project.status,
-            }
+            id: assignment.project.id,
+            name: assignment.project.name,
+            code: assignment.project.code,
+            status: assignment.project.status,
+          }
           : null,
         resource_allocations: assignment.resourceAllocation
           ? {
-              id: assignment.resourceAllocation.id,
-              organization_member_id:
-                assignment.resourceAllocation.organizationMemberId,
-              organization_members: assignment.resourceAllocation
-                .organizationMember
-                ? {
-                    id: assignment.resourceAllocation.organizationMember.id,
-                    user_id:
-                      assignment.resourceAllocation.organizationMember.userId,
-                    users: assignment.resourceAllocation.organizationMember.user
-                      ? {
-                          id: assignment.resourceAllocation.organizationMember
-                            .user.id,
-                          full_name:
-                            assignment.resourceAllocation.organizationMember
-                              .user.fullName,
-                          email:
-                            assignment.resourceAllocation.organizationMember
-                              .user.email,
-                          avatar_url:
-                            assignment.resourceAllocation.organizationMember
-                              .user.avatarUrl,
-                        }
-                      : null,
+            id: assignment.resourceAllocation.id,
+            organization_member_id:
+              assignment.resourceAllocation.organizationMemberId,
+            organization_members: assignment.resourceAllocation
+              .organizationMember
+              ? {
+                id: assignment.resourceAllocation.organizationMember.id,
+                user_id:
+                  assignment.resourceAllocation.organizationMember.userId,
+                users: assignment.resourceAllocation.organizationMember.user
+                  ? {
+                    id: assignment.resourceAllocation.organizationMember
+                      .user.id,
+                    full_name:
+                      assignment.resourceAllocation.organizationMember
+                        .user.fullName,
+                    email:
+                      assignment.resourceAllocation.organizationMember
+                        .user.email,
+                    avatar_url:
+                      assignment.resourceAllocation.organizationMember
+                        .user.avatarUrl,
                   }
-                : null,
-            }
+                  : null,
+              }
+              : null,
+          }
           : null,
       };
     });
