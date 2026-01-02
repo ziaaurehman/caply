@@ -90,14 +90,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ resources: [], weeks: [] });
     }
 
+    const isManager =
+      userRoles[0]?.role?.displayName === "Manager" ||
+      userRoles[0]?.role?.name === "manager";
+
     // 1) Get resources (resource_allocations) and member/user info
     const resources = await prisma.resourceAllocation.findMany({
       where: {
         organizationId,
         ...(onlyActive ? { isActive: true } : {}),
-        ...(!isAdmin && currentMemberId
+        ...(!isAdmin && !isManager && currentMemberId
           ? { organizationMemberId: currentMemberId }
-          : {}), // filter by member if not admin
+          : {}), // filter by member if not admin or manager
       },
       include: {
         organizationMember: {
@@ -187,12 +191,12 @@ export async function GET(req: NextRequest) {
     const byResource = resources.map((res) => {
       const memberUser = res.organizationMember?.user
         ? {
-            id: res.organizationMember.user.id,
-            full_name: res.organizationMember.user.fullName,
-            email: res.organizationMember.user.email,
-            avatar_url: res.organizationMember.user.avatarUrl,
-            position: res.organizationMember.user.position,
-          }
+          id: res.organizationMember.user.id,
+          full_name: res.organizationMember.user.fullName,
+          email: res.organizationMember.user.email,
+          avatar_url: res.organizationMember.user.avatarUrl,
+          position: res.organizationMember.user.position,
+        }
         : null;
       const resPlans = weeklyPlans.filter(
         (p) => p.resourceAllocationId === res.id
@@ -232,11 +236,11 @@ export async function GET(req: NextRequest) {
         projectsByWeek[ws].push({
           project: plan.project
             ? {
-                id: plan.project.id,
-                name: plan.project.name,
-                code: plan.project.code,
-                status: plan.project.status,
-              }
+              id: plan.project.id,
+              name: plan.project.name,
+              code: plan.project.code,
+              status: plan.project.status,
+            }
             : null,
           weekly_hours: total,
           default_hours_per_day: defaultPerDay,
@@ -269,6 +273,7 @@ export async function GET(req: NextRequest) {
         organization_member_id: res.organizationMemberId,
         user: memberUser,
         weekly_capacity_hours: weeklyCapacity,
+        hourly_rate: Number(res.hourlyRate || 0),
         weeks,
       };
     });

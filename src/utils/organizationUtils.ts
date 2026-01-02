@@ -314,11 +314,16 @@ export async function validateOrganizationAccessWithId(
 
       // Allow admin and manager users even without specific permissions (fallback for missing DB data)
       if (!hasRequiredPermission) {
-        return {
-          success: false,
-          error: `Permission denied: ${requiredPermission.resource}:${requiredPermission.action}`,
-          status: 403,
-        };
+        // Check if user has admin role (admin is superuser)
+        if (hasRole(context, 'admin')) {
+          // Allow access
+        } else {
+          return {
+            success: false,
+            error: `Permission denied: ${requiredPermission.resource}:${requiredPermission.action}`,
+            status: 403,
+          };
+        }
       }
     }
 

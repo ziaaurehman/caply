@@ -462,8 +462,8 @@ export default function ProjectsPage() {
                       key={option.value}
                       onClick={() => handleStatusFilter(option.value)}
                       className={`${statusFilter === option.value
-                          ? "bg-orange-50 text-orange-900"
-                          : "text-gray-900"
+                        ? "bg-orange-50 text-orange-900"
+                        : "text-gray-900"
                         } group relative cursor-pointer select-none py-2 pl-3 pr-9 hover:bg-orange-50 hover:text-orange-900 w-full text-left`}
                     >
                       <span className="block truncate font-normal">
@@ -653,28 +653,67 @@ export default function ProjectsPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {(() => {
-                          const budget = getProjectBudget(project);
-                          if (!budget) {
-                            return (
-                              <div className="text-sm text-gray-900">
-                                No budget set
-                              </div>
-                            );
-                          }
+                        <div className="flex flex-col gap-2">
+                          {/* Project Type Badge */}
+                          <div>
+                            {project.project_type === "fixed_fee" && (
+                              <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                                Fixed Fee
+                              </span>
+                            )}
+                            {project.project_type === "time_materials" && (
+                              <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700">
+                                Time & Materials
+                              </span>
+                            )}
+                            {project.project_type === "non_billable" && (
+                              <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs font-semibold text-gray-700">
+                                Non-Billable
+                              </span>
+                            )}
+                          </div>
 
-                          return (
-                            <>
-                              <div className="text-sm text-gray-900">
-                                ${budget.spent.toLocaleString()} / $
-                                {budget.total.toLocaleString()}
-                              </div>
-                              <div className="text-sm text-green-600">
-                                +${budget.remaining.toLocaleString()}
-                              </div>
-                            </>
-                          );
-                        })()}
+                          {/* Budget Details */}
+                          {(() => {
+                            const budget = getProjectBudget(project);
+                            if (project.project_type === "non_billable") {
+                              return null;
+                            }
+
+                            if (!budget && project.project_type !== "non_billable") {
+                              return (
+                                <div className="text-xs text-gray-500 italic">
+                                  No budget set
+                                </div>
+                              );
+                            }
+
+                            if (project.project_type === "fixed_fee" && budget) {
+                              return (
+                                <div className="text-sm text-gray-900 font-medium">
+                                  ${budget.total.toLocaleString()}
+                                </div>
+                              );
+                            }
+
+                            if (project.project_type === "time_materials" && budget) {
+                              return (
+                                <div className="flex flex-col">
+                                  {project.budget_hours && project.billing_rate ? (
+                                    <span className="text-xs text-gray-500">
+                                      {project.budget_hours} hrs × ${project.billing_rate}/hr
+                                    </span>
+                                  ) : null}
+                                  <span className="text-sm text-gray-900 font-medium">
+                                    Total: ${budget.total.toLocaleString()}
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            return null;
+                          })()}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">

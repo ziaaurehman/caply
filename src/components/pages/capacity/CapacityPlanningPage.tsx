@@ -338,6 +338,7 @@ export default function CapacityPlanningPage() {
       <AddResourceModal
         isOpen={showAddResourceModal}
         onClose={() => setShowAddResourceModal(false)}
+        existingMemberIds={(capacityOverview || []).map((item) => item.member.id)}
         onResourceAdded={() => {
           // Broadly invalidate to ensure both Weekly and Monthly views update
           import("@tanstack/react-query").then(({ useQueryClient }) => {

@@ -20,6 +20,7 @@ export async function PUT(req: NextRequest) {
     wednesday_notes,
     thursday_notes,
     friday_notes,
+    is_billable,
   } = body;
 
   if (!organizationId || !entryId) {
@@ -93,6 +94,7 @@ export async function PUT(req: NextRequest) {
       if (thursday_notes !== undefined)
         updateData.thursdayNotes = thursday_notes;
       if (friday_notes !== undefined) updateData.fridayNotes = friday_notes;
+      if (is_billable !== undefined) updateData.isBillable = is_billable;
 
       const updatedEntry = await tx.timesheetEntry.update({
         where: { id: entryId },
@@ -161,14 +163,15 @@ export async function PUT(req: NextRequest) {
       wednesday_notes: result.wednesdayNotes,
       thursday_notes: result.thursdayNotes,
       friday_notes: result.fridayNotes,
+      is_billable: result.isBillable,
       created_at: result.createdAt,
       updated_at: result.updatedAt,
       projects: result.project
         ? {
-            id: result.project.id,
-            name: result.project.name,
-            code: result.project.code,
-          }
+          id: result.project.id,
+          name: result.project.name,
+          code: result.project.code,
+        }
         : null,
     };
 

@@ -478,6 +478,7 @@ model TimesheetEntry {
   wednesdayNotes        String?  @map("wednesday_notes")
   thursdayNotes         String?  @map("thursday_notes")
   fridayNotes           String?  @map("friday_notes")
+  isBillable            Boolean  @default(false) @map("is_billable")
   createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
 

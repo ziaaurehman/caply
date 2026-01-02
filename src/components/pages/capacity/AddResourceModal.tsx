@@ -13,6 +13,7 @@ interface AddResourceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onResourceAdded: () => void;
+  existingMemberIds?: string[];
 }
 
 interface ProjectMember {
@@ -42,6 +43,7 @@ export default function AddResourceModal({
   isOpen,
   onClose,
   onResourceAdded,
+  existingMemberIds = [],
 }: AddResourceModalProps) {
   const queryClient = useQueryClient();
   const { currentOrganization } = useOrganizationStore();
@@ -51,12 +53,14 @@ export default function AddResourceModal({
   const [formData, setFormData] = useState<{
     organization_member_id: string;
     weekly_capacity_hours: number;
+    hourly_rate: number | "";
     start_date: string;
     end_date: string;
     notes: string;
   }>({
     organization_member_id: "",
     weekly_capacity_hours: 40,
+    hourly_rate: "",
     start_date: "",
     end_date: "",
     notes: "",
@@ -102,6 +106,7 @@ export default function AddResourceModal({
         ...prev,
         start_date: currentWeekStart.toISOString().split("T")[0],
         weekly_capacity_hours: 40,
+        hourly_rate: "",
       }));
     }
   }, [isOpen, currentOrganization?.id]);
@@ -110,6 +115,12 @@ export default function AddResourceModal({
     e.preventDefault();
     if (!formData.organization_member_id) {
       setError("Please fill in all required fields");
+      return;
+    }
+
+    // Check for duplicates
+    if (existingMemberIds.includes(formData.organization_member_id)) {
+      toast.error("This resource is already added. Please edit the existing entry instead.");
       return;
     }
 
@@ -133,6 +144,7 @@ export default function AddResourceModal({
           organization_member_id:
             member?.organization_member_id || formData.organization_member_id,
           weekly_capacity_hours: formData.weekly_capacity_hours,
+          hourly_rate: formData.hourly_rate === "" ? null : Number(formData.hourly_rate),
           start_date: formData.start_date,
           end_date: formData.end_date || null,
           notes: formData.notes || null,
@@ -176,6 +188,7 @@ export default function AddResourceModal({
     setFormData({
       organization_member_id: "",
       weekly_capacity_hours: 40,
+      hourly_rate: "",
       start_date: "",
       end_date: "",
       notes: "",
@@ -310,7 +323,30 @@ export default function AddResourceModal({
                 </p>
               </div>
 
-              <div></div>
+              <div>
+                <label
+                  htmlFor="hourly_rate"
+                  className="block text-sm font-medium text-gray-700 mb-2"
+                >
+                  <Clock className="inline h-4 w-4 mr-1" />
+                  Hourly Rate ($)
+                </label>
+                <input
+                  type="number"
+                  id="hourly_rate"
+                  value={formData.hourly_rate}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      hourly_rate: e.target.value === "" ? "" : Number(e.target.value),
+                    }))
+                  }
+                  min="0"
+                  step="0.01"
+                  className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  placeholder="e.g., 50.00"
+                />
+              </div>
             </div>
 
             {/* Date Range */}

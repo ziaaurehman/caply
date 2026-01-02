@@ -60,13 +60,17 @@ export async function GET(req: NextRequest) {
 
     const supabase = await createClient();
 
+    const isManager =
+      userRoles[0]?.role?.displayName === "Manager" ||
+      userRoles[0]?.role?.name === "manager";
+
     const resources = await prisma.resourceAllocation.findMany({
       where: {
         organizationId,
         ...(onlyActive ? { isActive: true } : {}),
-        ...(!isAdmin && currentMemberId
+        ...(!isAdmin && !isManager && currentMemberId
           ? { organizationMemberId: currentMemberId }
-          : {}), // filter by member if not admin
+          : {}), // filter by member if not admin or manager
       },
       select: {
         id: true,
@@ -124,25 +128,25 @@ export async function GET(req: NextRequest) {
         organization_id: organizationId, // Add back for compatibility
         organization_members: member
           ? {
-              id: member.id,
-              user_id: member.userId,
-              status: member.status,
-              roles: member.role
-                ? {
-                    id: member.role.id,
-                    name: member.role.name,
-                  }
-                : null,
-              users: member.user
-                ? {
-                    id: member.user.id,
-                    full_name: member.user.fullName,
-                    email: member.user.email,
-                    avatar_url: member.user.avatarUrl,
-                    position: member.user.position,
-                  }
-                : null,
-            }
+            id: member.id,
+            user_id: member.userId,
+            status: member.status,
+            roles: member.role
+              ? {
+                id: member.role.id,
+                name: member.role.name,
+              }
+              : null,
+            users: member.user
+              ? {
+                id: member.user.id,
+                full_name: member.user.fullName,
+                email: member.user.email,
+                avatar_url: member.user.avatarUrl,
+                position: member.user.position,
+              }
+              : null,
+          }
           : null,
       };
     });
@@ -191,7 +195,7 @@ export async function POST(req: NextRequest) {
 
     const validation = await validateOrganizationAccessWithId(organizationId, {
       resource: "capacity",
-      action: "manage",
+      action: "create",
     });
     if (!validation.success) {
       return NextResponse.json(
@@ -295,7 +299,7 @@ export async function PUT(req: NextRequest) {
 
     const validation = await validateOrganizationAccessWithId(organizationId, {
       resource: "capacity",
-      action: "manage",
+      action: "update",
     });
 
     if (!validation.success) {
@@ -372,7 +376,7 @@ export async function DELETE(req: NextRequest) {
       resource.organizationId,
       {
         resource: "capacity",
-        action: "manage",
+        action: "delete",
       }
     );
 

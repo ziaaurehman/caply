@@ -19,7 +19,7 @@ export interface User {
   updated_at: string;
   timezone?: string;
   language?: string;
-  
+
   // Relations
   organization_memberships?: OrganizationMember[];
   current_organization?: Organization;
@@ -35,9 +35,9 @@ export interface AuthUser extends User {
 // =====================================================
 
 // RBAC Types
-export type UserRole = 'superadmin' | 'support_admin' | 'admin' | 'manager' | 'member';
+export type UserRole = 'superadmin' | 'support_admin' | 'admin' | 'manager' | 'member' | string;
 
-export type PermissionName = 
+export type PermissionName =
   // User management
   | 'users.create' | 'users.read' | 'users.update' | 'users.delete' | 'users.global_read'
   // Organization management  
@@ -57,6 +57,8 @@ export type PermissionName =
   | 'estimates.create' | 'estimates.read' | 'estimates.update' | 'estimates.delete' | 'estimates.send'
   // Expense management
   | 'expenses.create' | 'expenses.read' | 'expenses.update' | 'expenses.delete' | 'expenses.approve'
+  // Capacity management
+  | 'capacity.create' | 'capacity.read' | 'capacity.update' | 'capacity.delete' | 'capacity.manage'
   // Leave management
   | 'leave_requests.create' | 'leave_requests.read' | 'leave_requests.update' | 'leave_requests.delete' | 'leave_requests.approve'
   // Reports and analytics
@@ -65,7 +67,8 @@ export type PermissionName =
   | 'settings.read' | 'settings.update'
   // Support and platform management
   | 'support.access_logs' | 'support.view_tickets' | 'support.access_analytics'
-  | 'platform.manage_subscriptions' | 'platform.global_settings';
+  | 'platform.manage_subscriptions' | 'platform.global_settings'
+  | string;
 
 export interface Permission {
   id: string;
@@ -434,7 +437,7 @@ export interface AuthStore {
   userPermissions: Permission[];
   isLoading: boolean;
   error: string | null;
-  
+
   // Actions
   setUser: (user: AuthUser | null) => void;
   setOrganization: (org: Organization | null) => void;
@@ -444,7 +447,7 @@ export interface AuthStore {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearAuth: () => void;
-  
+
   // Permission helpers
   hasPermission: (permission: string) => boolean;
   hasAnyPermission: (permissions: string[]) => boolean;
@@ -631,10 +634,10 @@ export interface TableFilters {
 // =====================================================
 
 /** @deprecated Use Organization instead */
-export interface Workspace extends Organization {}
+export interface Workspace extends Organization { }
 
 /** @deprecated Use OrganizationMember instead */
-export interface WorkspaceMember extends OrganizationMember {}
+export interface WorkspaceMember extends OrganizationMember { }
 
 /** @deprecated Use OrganizationInvitation instead */
-export interface WorkspaceInvitation extends OrganizationInvitation {}
+export interface WorkspaceInvitation extends OrganizationInvitation { }

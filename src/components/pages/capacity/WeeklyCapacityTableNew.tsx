@@ -450,7 +450,7 @@ export default function WeeklyCapacityTableNew({
       setAddModalTarget(null);
     } catch (error) {
       console.error("Failed to add project:", error);
-      toast.error("Failed to add project");
+      toast.error(error instanceof Error ? error.message : "Failed to add project");
     }
   };
 
