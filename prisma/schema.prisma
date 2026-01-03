@@ -25,6 +25,7 @@ model User {
   isSuperAdmin  Boolean   @default(false) @map("is_super_admin")
   isActive      Boolean   @default(true) @map("is_active")
   emailVerified Boolean   @default(false) @map("email_verified")
+  googleId      String?   @unique @map("google_id")
   lastSignInAt  DateTime? @map("last_sign_in_at") @db.Timestamptz
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz

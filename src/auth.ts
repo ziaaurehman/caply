@@ -6,6 +6,11 @@ import { prisma } from "@/lib/prisma";
 import { verifyPassword } from "@/lib/password";
 import { JWT } from "next-auth/jwt";
 import { Session } from "next-auth";
+import {
+  createOrganizationWithRoles,
+  addUserAsAdmin,
+  generateOrgSlug,
+} from "@/utils/rbac/organizationSetup";
 
 const userProfileCache = new Map<string, { profile: any; timestamp: number }>();
 const CACHE_DURATION = 5 * 60 * 1000;
@@ -137,7 +142,7 @@ export const authConfig: NextAuthOptions = {
             // Throw error - frontend will handle sending verification code
             throw new Error("EMAIL_NOT_VERIFIED");
           }
-          
+
 
           console.log("User authenticated successfully:", user.id);
 
@@ -204,9 +209,35 @@ export const authConfig: NextAuthOptions = {
     }) {
       // Initial sign in
       if (user) {
-        console.log("JWT callback - user:", user);
-        token.id = user.id;
-        token.avatar = user.avatar;
+        console.log("JWT callback - initial sign-in, user from provider:", user);
+
+        // IMPORTANT: For OAuth providers like Google, user.id is the provider's ID (e.g. numeric string),
+        // but our database uses UUIDs. We MUST look up the user in our DB to get the correct UUID.
+        // The signIn callback runs before this and should have created/updated the user.
+
+        // We look up by email OR googleId to handle cases where the email in DB might differ 
+        // from the current Google email (but accounts are linked via googleId).
+        // For credential login, user.id is already the UUID. For Google, user.id is the Google ID.
+        const dbUser = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { email: user.email },
+              { googleId: user.id } // user.id is the Google ID for Google provider
+            ]
+          },
+          select: { id: true }
+        });
+
+        if (dbUser) {
+          console.log(`JWT callback - mapped provider ID (${user.id}) to DB UUID: ${dbUser.id}`);
+          token.id = dbUser.id;
+        } else {
+          console.error(`JWT callback - user not found in DB for email: ${user.email} or googleId: ${user.id} despite signIn success.`);
+          // Fallback to user.id, but this will likely fail subsequent API calls if it's not a UUID
+          token.id = user.id;
+        }
+
+        token.avatar = user.avatar || user.image;
         token.name = user.name;
         token.email = user.email;
         token.lastRefresh = Date.now();
@@ -253,38 +284,130 @@ export const authConfig: NextAuthOptions = {
       // For OAuth providers (Google), handle profile creation
       if (account?.provider === "google" && user.email) {
         try {
-          // Check if user already exists in our users table
-          const existingUser = await prisma.user.findUnique({
-            where: { email: user.email },
+          // Check if user already exists in our users table by email OR googleId
+          // This prevents unique constraint violations if the user exists with a different email
+          // or if they exist with the same email but we need to link accounts.
+          const existingUser = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { email: user.email },
+                { googleId: account.providerAccountId }
+              ]
+            }
           });
 
           if (!existingUser) {
             // Create user profile manually for OAuth users
             console.log("Creating profile for OAuth user:", user.email);
 
-            await prisma.user.create({
+            const newUser = await prisma.user.create({
               data: {
-                id: user.id,
+                // Ensure we let Prisma generate the ID (UUID) if we don't have a reliable mapped one
+                // But typically for new users we want a UUID.
+                // Depending on schema, id is @default(uuid()).
+                // So we should NOT pass 'id' unless we want to force it.
+                // NextAuth user.id for Google is the google ID (numeric string), which might not valid UUID.
                 email: user.email,
                 fullName:
                   user.name || user.email?.split("@")[0] || "Unknown User",
                 emailVerified: true, // OAuth providers verify email
                 avatarUrl: user.image || null,
+                googleId: account.providerAccountId,
               },
             });
+
+            // Create default organization for the new user
+            try {
+              const orgName = `${newUser.fullName}'s Organization`;
+              const orgSlug = generateOrgSlug(orgName, newUser.id);
+
+              console.log("Creating default organization for Google user:", orgName);
+
+              const organizationResult = await createOrganizationWithRoles({
+                name: orgName,
+                slug: orgSlug,
+                owner_id: newUser.id,
+              });
+
+              if (organizationResult.error) {
+                console.error("Failed to create organization for Google user:", organizationResult.error);
+              } else {
+                const adminResult = await addUserAsAdmin(
+                  newUser.id,
+                  organizationResult.organization.id
+                );
+
+                if (adminResult.error) {
+                  console.error("Failed to add Google user as admin:", adminResult.error);
+                } else {
+                  console.log("Successfully created organization and assigned admin role for Google user");
+                }
+              }
+            } catch (orgError) {
+              console.error("Error setting up organization for Google user:", orgError);
+              // We don't block login if org creation fails, but it might result in a user without an org
+            }
           } else {
+            // User exists (either by email or googleId)
+            console.log("User already exists, updating OAuth info:", existingUser.email);
+
             // Update last sign in time for existing OAuth user
+            // And link Google ID if not already linked
             await prisma.user
               .update({
-                where: { id: user.id },
+                where: { id: existingUser.id },
                 data: {
                   lastSignInAt: new Date(),
                   avatarUrl: user.image || existingUser.avatarUrl,
+                  // Ensure googleId is set (linking account if found by email but no googleId)
+                  googleId: account.providerAccountId,
+                  // Also update email if it was found by googleId but email changed (optional, be careful with unique constraints)
+                  // For now, we assume email in DB is the source of truth or we don't change it to avoid conflicts
+                  emailVerified: true, // Re-verify email on login
                 },
               })
               .catch((err: unknown) => {
                 console.warn("Failed to update OAuth user:", err);
               });
+
+            // Self-healing: Check if user has an organization. If not, create one.
+            // This handles cases where user creation succeeded but org creation failed previously.
+            const membershipCount = await prisma.organizationMember.count({
+              where: { userId: existingUser.id }
+            });
+
+            if (membershipCount === 0) {
+              console.log("Existing user has no organization. Attempting recovery...");
+              try {
+                const orgName = `${existingUser.fullName || existingUser.email?.split("@")[0]}'s Organization`;
+                const orgSlug = generateOrgSlug(orgName, existingUser.id);
+
+                console.log("Creating default organization for existing user (Recovery):", orgName);
+
+                const organizationResult = await createOrganizationWithRoles({
+                  name: orgName,
+                  slug: orgSlug,
+                  owner_id: existingUser.id,
+                });
+
+                if (organizationResult.error) {
+                  console.error("Failed to create organization for existing user:", organizationResult.error);
+                } else {
+                  const adminResult = await addUserAsAdmin(
+                    existingUser.id,
+                    organizationResult.organization.id
+                  );
+
+                  if (adminResult.error) {
+                    console.error("Failed to add existing user as admin:", adminResult.error);
+                  } else {
+                    console.log("Successfully created organization and assigned admin role for existing user (Recovery)");
+                  }
+                }
+              } catch (orgError) {
+                console.error("Error setting up organization for existing user:", orgError);
+              }
+            }
           }
 
           return true;

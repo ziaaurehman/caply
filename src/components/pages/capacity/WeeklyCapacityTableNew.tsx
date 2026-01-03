@@ -13,7 +13,9 @@ import {
   Edit2,
   X,
 } from "lucide-react";
+
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
+import ProjectAssignmentModal from "./ProjectAssignmentModal";
 import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -172,6 +174,7 @@ export default function WeeklyCapacityTableNew({
     memberId: string;
     projectId: string;
   } | null>(null);
+  const [editAssignmentTarget, setEditAssignmentTarget] = useState<ProjectAssignment | null>(null);
   const [addModalTarget, setAddModalTarget] = useState<string | null>(null); // memberId
   const [addForm, setAddForm] = useState<AddProjectForm>({
     projectId: "",
@@ -386,6 +389,43 @@ export default function WeeklyCapacityTableNew({
     onError: (error) => {
       console.error("Delete resource error:", error);
       toast.error(error.message || "Failed to delete resource");
+    },
+  });
+
+  const updateProjectAssignmentMutation = useMutation({
+    mutationFn: async (data: {
+      assignmentId: string;
+      hoursPerWeek: number;
+      defaultHoursPerDay: number;
+      startDate: string;
+      endDate: string | null;
+      allowWeekends: boolean;
+      notes: string | null;
+    }) => {
+      const response = await fetch("/api/capacity/project-assignments", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to update project assignment");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["capacity"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["project-assignments"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["resources"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["overview"], exact: false });
+      await queryClient.invalidateQueries({ queryKey: ["allocations"], exact: false });
+      toast.success("Project assignment updated");
+      setEditAssignmentTarget(null);
+    },
+    onError: (error) => {
+      toast.error("Failed to update project assignment");
     },
   });
 
@@ -1449,38 +1489,21 @@ export default function WeeklyCapacityTableNew({
                           <div className="inline-flex items-center gap-3">
                             <button
                               className="text-gray-600 hover:text-gray-800"
-                              title={
-                                isEditing(memberId, allocation.projectId)
-                                  ? "Save changes"
-                                  : "Edit allocation"
-                              }
+                              title="Edit assignment"
                               onClick={() => {
-                                if (isEditing(memberId, allocation.projectId)) {
-                                  // Save changes
-                                  handleSaveEdit(
-                                    memberId,
-                                    allocation.projectId,
-                                    allocation
-                                  );
+                                const assignment = projectAssignments.find(
+                                  (pa: ProjectAssignment) =>
+                                    pa.resourceAllocationId === memberId &&
+                                    pa.projectId === allocation.projectId
+                                );
+                                if (assignment) {
+                                  setEditAssignmentTarget(assignment);
                                 } else {
-                                  // Start editing
-                                  handleStartEdit(
-                                    memberId,
-                                    allocation.projectId,
-                                    allocation
-                                  );
+                                  toast.error("Project assignment not found");
                                 }
                               }}
-                              disabled={
-                                updateWeeklyPlanMutation.isPending ||
-                                createWeeklyPlanMutation.isPending
-                              }
                             >
-                              {isEditing(memberId, allocation.projectId) ? (
-                                <Save className="h-4 w-4" />
-                              ) : (
-                                <Pencil className="h-4 w-4" />
-                              )}
+                              <Pencil className="h-4 w-4" />
                             </button>
                             <button
                               onClick={() => {
@@ -1508,6 +1531,7 @@ export default function WeeklyCapacityTableNew({
                             >
                               <Trash className="h-4 w-4" />
                             </button>
+                            {/* Commented out Link/Unlink as requested
                             <button
                               className={`${linkedStatus[
                                 `${memberId}:${allocation.projectId}`
@@ -1538,6 +1562,7 @@ export default function WeeklyCapacityTableNew({
                                 <Unlink className="h-4 w-4" />
                               )}
                             </button>
+                            */}
                           </div>
                         </td>
                       </tr>
@@ -1653,6 +1678,48 @@ export default function WeeklyCapacityTableNew({
           </div>
         </div>
       )}
+
+      <ProjectAssignmentModal
+        isOpen={!!editAssignmentTarget}
+        onClose={() => setEditAssignmentTarget(null)}
+        onSubmit={async (data) => {
+          if (!editAssignmentTarget) return;
+          const daysPerWeek = data.includeWeekends ? 7 : 5;
+
+          try {
+            await updateProjectAssignmentMutation.mutateAsync({
+              assignmentId: editAssignmentTarget.id,
+              hoursPerWeek: data.hours * daysPerWeek,
+              defaultHoursPerDay: data.hours,
+              startDate: data.startDate,
+              endDate: data.endDate || null,
+              allowWeekends: data.includeWeekends,
+              notes: data.notes || null,
+            });
+          } catch (error) {
+            console.error("Failed to update assignment:", error);
+          }
+        }}
+        title="Edit Project Assignment"
+        initialData={
+          editAssignmentTarget
+            ? {
+              projectId: editAssignmentTarget.projectId,
+              hours: editAssignmentTarget.defaultHoursPerDay,
+              includeWeekends: editAssignmentTarget.allowWeekends,
+              startDate: editAssignmentTarget.startDate
+                ? new Date(editAssignmentTarget.startDate).toISOString().split("T")[0]
+                : "",
+              endDate: editAssignmentTarget.endDate
+                ? new Date(editAssignmentTarget.endDate).toISOString().split("T")[0]
+                : "",
+              notes: editAssignmentTarget.notes || "",
+            }
+            : undefined
+        }
+        projects={projects}
+        isSubmitting={updateProjectAssignmentMutation.isPending}
+      />
     </>
   );
 }
