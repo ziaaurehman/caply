@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
 import { prisma } from "@/lib/prisma";
 import { startOfWeek, getWeek, getMonth, getYear } from "date-fns";
+import { checkProjectBudget } from "@/utils/budgetUtils";
 
 export async function GET(req: NextRequest) {
   try {
@@ -281,6 +282,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Check project budget synchronously to ensure it runs
+    try {
+      await checkProjectBudget(projectId);
+    } catch (err) {
+      console.error("Failed to check project budget:", err);
+    }
+
     return NextResponse.json(
       {
         projectAssignment,
@@ -428,6 +436,13 @@ export async function PUT(req: NextRequest) {
         notes: notes ?? undefined,
       },
     });
+
+    // Check project budget synchronously
+    try {
+      await checkProjectBudget(assignment.projectId);
+    } catch (err) {
+      console.error("Failed to check project budget:", err);
+    }
 
     return NextResponse.json({
       assignment: updatedAssignment,

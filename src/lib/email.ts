@@ -547,3 +547,136 @@ function generateVerificationCodeEmailHTML(
 </html>
   `;
 }
+
+// Interface for Budget Alert
+interface BudgetAlertEmailData {
+  email: string;
+  name: string;
+  projectName: string;
+  currentUsageHours: number;
+  budgetHours: number;
+  utilizationPercentage: number;
+}
+
+// Send budget alert email
+export async function sendBudgetAlertEmail(
+  data: BudgetAlertEmailData
+): Promise<EmailResult> {
+  try {
+    const subject = `⚠️ Budget Alert: ${data.projectName} has reached ${data.utilizationPercentage.toFixed(1)}% of budget`;
+
+    // Verify FROM_EMAIL is set
+    const fromEmail = process.env.FROM_EMAIL;
+    if (!fromEmail) {
+      console.error("❌ FROM_EMAIL environment variable is not set");
+      return {
+        success: false,
+        error: "FROM_EMAIL environment variable is not set",
+      };
+    }
+
+    const emailHtml = generateBudgetAlertEmailHTML(data);
+
+    // Option 1: Using SendGrid SMTP
+    if (process.env.SENDGRID_API_KEY) {
+      try {
+        const transporter = createSendGridTransporter();
+        const info = await transporter.sendMail({
+          from: {
+            name: process.env.FROM_NAME || "Caply",
+            address: fromEmail,
+          },
+          to: data.email,
+          subject: subject,
+          html: emailHtml,
+        });
+
+        console.log("✅ Budget alert email sent via SendGrid SMTP:", info.messageId);
+        return { success: true, provider: "sendgrid-smtp" };
+      } catch (sendgridError: any) {
+        console.error("❌ SendGrid SMTP error:", sendgridError);
+
+        // Try Resend as fallback
+        if (process.env.RESEND_API_KEY) {
+          return await sendBudgetAlertViaResend(data, subject, emailHtml);
+        }
+        return logBudgetAlertToConsole(data);
+      }
+    }
+    // Option 2: Using Resend
+    else if (process.env.RESEND_API_KEY) {
+      return await sendBudgetAlertViaResend(data, subject, emailHtml);
+    }
+    // Option 3: Log to console
+    else {
+      return logBudgetAlertToConsole(data);
+    }
+  } catch (error) {
+    console.error("❌ Failed to send budget alert email:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+async function sendBudgetAlertViaResend(
+  data: BudgetAlertEmailData,
+  subject: string,
+  html: string
+): Promise<EmailResult> {
+  try {
+    const { Resend } = await import("resend");
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const fromEmail = process.env.FROM_EMAIL || "noreply@yourcompany.com";
+
+    await resend.emails.send({
+      from: `${process.env.FROM_NAME || "Caply"} <${fromEmail}>`,
+      to: data.email,
+      subject: subject,
+      html: html,
+    });
+
+    return { success: true, provider: "resend" };
+  } catch (error) {
+    console.error("❌ Resend error:", error);
+    return logBudgetAlertToConsole(data);
+  }
+}
+
+function logBudgetAlertToConsole(data: BudgetAlertEmailData): EmailResult {
+  console.log("📧 BUDGET ALERT EMAIL (Development Mode):");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(`To: ${data.email}`);
+  console.log(`Subject: Budget Alert for ${data.projectName}`);
+  console.log(`Usage: ${data.currentUsageHours} / ${data.budgetHours} hours (${data.utilizationPercentage.toFixed(1)}%)`);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  return { success: true, provider: "console", fallback: true };
+}
+
+function generateBudgetAlertEmailHTML(data: BudgetAlertEmailData): string {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <body style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+          <div style="background-color: #ef4444; padding: 20px; text-align: center;">
+            <h2 style="color: white; margin: 0;">Budget Alert</h2>
+          </div>
+          <div style="padding: 30px;">
+            <p>Hi ${data.name},</p>
+            <p>The project <strong>${data.projectName}</strong> has exceeded 70% of its budgeted hours.</p>
+            
+            <div style="margin: 20px 0; padding: 20px; background-color: #f9fafb; border-radius: 8px;">
+               <p style="margin: 5px 0;"><strong>Budget:</strong> ${data.budgetHours} hours</p>
+               <p style="margin: 5px 0;"><strong>Used/Assigned:</strong> ${data.currentUsageHours.toFixed(1)} hours</p>
+               <div style="margin-top: 15px; background-color: #e5e7eb; height: 10px; border-radius: 5px; overflow: hidden;">
+                 <div style="width: ${Math.min(data.utilizationPercentage, 100)}%; background-color: ${data.utilizationPercentage > 100 ? '#ef4444' : '#f97316'}; height: 100%;"></div>
+               </div>
+               <p style="text-align: right; font-size: 12px; color: #666; margin-top: 5px;">${data.utilizationPercentage.toFixed(1)}%</p>
+            </div>
+
+            <p>Please review the project capacity plan.</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+}

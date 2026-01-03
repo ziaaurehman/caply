@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateOrganizationAccessWithId } from "@/utils/organizationUtils";
+import { checkProjectBudget } from "@/utils/budgetUtils";
 
 // PUT /api/capacity/weekly-plans
 // Body: { organizationId, resource_allocation_id, project_id, week_start_date, default_hours_per_day?, allow_weekends?, is_linked? }
@@ -122,6 +123,17 @@ export async function PUT(req: NextRequest) {
         },
       },
     });
+
+
+
+    // Check project budget
+    if (existingPlan && existingPlan.projectId) {
+      try {
+        await checkProjectBudget(existingPlan.projectId);
+      } catch (err) {
+        console.error("Failed to check project budget:", err);
+      }
+    }
 
     return NextResponse.json({
       weeklyPlan: planWithOverrides,
@@ -246,6 +258,15 @@ export async function POST(req: NextRequest) {
           skipDuplicates: true,
         });
       }
+    }
+
+
+
+    // Check project budget
+    try {
+      await checkProjectBudget(projectId);
+    } catch (err) {
+      console.error("Failed to check project budget:", err);
     }
 
     return NextResponse.json({
