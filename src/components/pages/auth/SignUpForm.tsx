@@ -92,14 +92,14 @@ export default function SignUpForm() {
         console.error("Failed to send verification code:", verificationResult.error);
         // Still redirect to verification page, user can request a new code there
       }
-      
+
       // Redirect to email verification page
-     return router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`);
+      return router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`);
     } catch (error: any) {
       console.error("Registration error:", error);
       setError(
         error.message ||
-          "Something went wrong during registration. Please try again."
+        "Something went wrong during registration. Please try again."
       );
       setIsLoading(false);
     }
@@ -115,7 +115,7 @@ export default function SignUpForm() {
   const handleGoogleSignUp = async () => {
     setIsLoading(true);
     try {
-      await signIn("google", { callbackUrl: "/workspace" });
+      await signIn("google", { callbackUrl: "/dashboard" });
     } catch (error) {
       console.error("Google sign up error:", error);
       setError("Failed to sign up with Google");

@@ -363,3 +363,81 @@ export async function DELETE(req: NextRequest) {
     );
   }
 }
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      assignmentId,
+      hoursPerWeek,
+      startDate,
+      endDate,
+      defaultHoursPerDay,
+      allowWeekends,
+      notes,
+    } = body;
+
+    if (!assignmentId) {
+      return NextResponse.json(
+        { error: "Assignment ID is required" },
+        { status: 400 }
+      );
+    }
+
+    // Get the assignment to verify permissions
+    const assignment = await prisma.projectAssignment.findUnique({
+      where: { id: assignmentId },
+      include: {
+        resourceAllocation: {
+          select: { organizationId: true },
+        },
+      },
+    });
+
+    if (!assignment) {
+      return NextResponse.json(
+        { error: "Project assignment not found" },
+        { status: 404 }
+      );
+    }
+
+    const validation = await validateOrganizationAccessWithId(
+      assignment.resourceAllocation.organizationId,
+      {
+        resource: "capacity",
+        action: "update",
+      }
+    );
+
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: validation.status }
+      );
+    }
+
+    // Update the assignment
+    const updatedAssignment = await prisma.projectAssignment.update({
+      where: { id: assignmentId },
+      data: {
+        hoursPerWeek: hoursPerWeek ?? undefined,
+        startDate: startDate ? new Date(startDate) : undefined,
+        endDate: endDate ? new Date(endDate) : null, // explicit null allowed
+        defaultHoursPerDay: defaultHoursPerDay ?? undefined,
+        allowWeekends: allowWeekends ?? undefined,
+        notes: notes ?? undefined,
+      },
+    });
+
+    return NextResponse.json({
+      assignment: updatedAssignment,
+      message: "Project assignment updated successfully",
+    });
+  } catch (e) {
+    console.error("Error updating project assignment:", e);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
