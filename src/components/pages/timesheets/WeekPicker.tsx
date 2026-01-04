@@ -54,12 +54,12 @@ export default function WeekPicker({
     return monday;
   };
 
-  // Get Friday of the week for any given date - FIXED VERSION
-  const getFridayOfWeek = (date: Date): Date => {
+  // Get Sunday of the week for any given date
+  const getSundayOfWeek = (date: Date): Date => {
     const monday = getMondayOfWeek(new Date(date));
-    const friday = new Date(monday);
-    friday.setDate(monday.getDate() + 4); // Friday is 4 days after Monday
-    return friday;
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6); // Sunday is 6 days after Monday
+    return sunday;
   };
 
   // Generate calendar days for current month
@@ -105,12 +105,12 @@ export default function WeekPicker({
 
   const formatWeekRange = (weekStart: string) => {
     const monday = new Date(weekStart);
-    const friday = getFridayOfWeek(new Date(monday));
+    const sunday = getSundayOfWeek(new Date(monday));
 
     return `${monday.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
-    })} - ${friday.toLocaleDateString("en-US", {
+    })} - ${sunday.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -197,11 +197,10 @@ export default function WeekPicker({
                   key={index}
                   type="button"
                   onClick={() => handleDateClick(day)}
-                  disabled={!isWeekday}
                   className={`
                     text-xs py-2 px-1 rounded transition-colors
                     ${!isCurrentMonth ? "text-gray-300" : "text-gray-700"}
-                    ${!isWeekday ? "cursor-not-allowed opacity-50" : "hover:bg-gray-100 cursor-pointer"}
+                    ${"hover:bg-gray-100 cursor-pointer"}
                     ${isToday ? "bg-blue-100 text-blue-700 font-semibold" : ""}
                     ${isSelected ? "bg-primary-500 text-white font-semibold" : ""}
                     ${isInSelectedWeek && !isSelected ? "bg-primary-50 text-primary-700" : ""}
@@ -216,7 +215,7 @@ export default function WeekPicker({
           {/* Instructions */}
           <div className="p-3 border-t border-gray-200 bg-gray-50">
             <p className="text-xs text-gray-600 text-center">
-              Click any weekday to select that week (Monday - Friday)
+              Click any day to select that week (Monday - Sunday)
             </p>
           </div>
         </div>
