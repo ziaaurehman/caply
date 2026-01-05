@@ -168,6 +168,10 @@ export default function AddResourceModal({
         queryKey: ["capacity"],
         exact: false,
       });
+      queryClient.invalidateQueries({
+        queryKey: ["capacity-projects"],
+        exact: false,
+      });
 
       toast.success("Resource added successfully!");
 

@@ -78,9 +78,10 @@ export function useProjects(
     queryKey: projectQueryKey,
     queryFn: () => projectAPI.getProjects(organizationId, filters),
     enabled: !!organizationId,
-    staleTime: 2 * 60 * 1000, // 2 minutes
+    staleTime: 0, // Always consider data stale to ensure freshness
     gcTime: 5 * 60 * 1000, // 5 minutes
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true, // Refetch when window gains focus
+    refetchOnMount: true, // Refetch when component mounts
   });
 }
 

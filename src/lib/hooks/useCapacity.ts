@@ -105,9 +105,10 @@ export function useCapacityOverview(
     queryKey: capacityKeys.overviewByOrg(organizationId, params),
     queryFn: () => capacityAPI.getOverview(organizationId, params),
     enabled: !!organizationId,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 5 * 60 * 1000, // 5 minutes
-    refetchOnWindowFocus: false,
+    staleTime: 0,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
   });
 }
 
@@ -222,6 +223,12 @@ export function useCreateAllocation() {
         queryKey: ["projects"],
         exact: false,
       });
+
+      // Invalidate timesheet capacity projects
+      queryClient.invalidateQueries({
+        queryKey: ["capacity-projects"],
+        exact: false,
+      });
     },
     onError: (error) => {
       console.error("Failed to create allocation:", error);
@@ -254,6 +261,12 @@ export function useUpdateAllocation() {
         queryKey: ["projects"],
         exact: false,
       });
+
+      // Invalidate timesheet capacity projects
+      queryClient.invalidateQueries({
+        queryKey: ["capacity-projects"],
+        exact: false,
+      });
     },
     onError: (error) => {
       console.error("Failed to update allocation:", error);
@@ -282,6 +295,12 @@ export function useDeleteAllocation() {
       // Invalidate project queries (allocations affect project capacity)
       queryClient.invalidateQueries({
         queryKey: ["projects"],
+        exact: false,
+      });
+
+      // Invalidate timesheet capacity projects
+      queryClient.invalidateQueries({
+        queryKey: ["capacity-projects"],
         exact: false,
       });
     },
