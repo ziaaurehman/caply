@@ -13,7 +13,17 @@ import {
 } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useOrganizationStore } from "@/lib/stores/organizationStore";
+import {
+  useProjects,
+  useProjectsProgress,
+} from "@/lib/hooks/useProjects";
+import { useCapacityOverview } from "@/lib/hooks/useCapacity";
+import type { Project } from "@/utils/api/project";
+import { useMemo } from "react";
 
+// Local interfaces removed in favor of imported types
 interface TeamMember {
   id: string;
   name: string;
@@ -22,24 +32,6 @@ interface TeamMember {
   utilization: number;
   hours: string;
   status: "available" | "optimal" | "overallocated";
-}
-
-interface Project {
-  id: string;
-  name: string;
-  description: string;
-  progress: number;
-  budget: {
-    spent: number;
-    total: number;
-    remaining: number;
-  };
-  timeline: {
-    daysLeft: number;
-    endDate: string;
-  };
-  status: "on-track" | "behind" | "at-risk";
-  color: string;
 }
 
 // Professional donut chart component
@@ -146,6 +138,169 @@ const DashboardContent: React.FC = () => {
     }
   }, [searchParams]);
 
+  const {
+    currentOrganization,
+    loading: organizationLoading,
+    fetchUserOrganizations,
+    userOrganizations,
+  } = useOrganizationStore();
+
+  // Initialize organization store if needed
+  useEffect(() => {
+    if (!organizationLoading && userOrganizations.length === 0) {
+      fetchUserOrganizations();
+    }
+  }, [organizationLoading, userOrganizations.length, fetchUserOrganizations]);
+
+  // Fetch projects using React Query
+  // Limit to 5 projects for dashboard view, active status
+  const filters = useMemo(
+    () => ({
+      page: 1,
+      limit: 5,
+      status: "active",
+    }),
+    []
+  );
+
+  const {
+    data: projectsData,
+    isLoading: projectsLoading,
+  } = useProjects(currentOrganization?.id || "", filters);
+
+  const projects = useMemo(() => projectsData?.projects || [], [projectsData]);
+
+  // Fetch progress data for projects
+  const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
+  const { data: progressData } = useProjectsProgress(projectIds);
+
+  // Merge progress data with projects
+  const projectsWithProgress = useMemo(() => {
+    if (!progressData?.progress) return projects;
+
+    return projects.map((project) => {
+      const progressInfo = progressData.progress.find(
+        (p) => p.projectId === project.id
+      );
+      if (progressInfo) {
+        return {
+          ...project,
+          progress: progressInfo.progress,
+        };
+      }
+      return project;
+    });
+  }, [projects, progressData]);
+
+  const calculateTimeProgress = (project: Project) => {
+    if (!project.start_date || !project.end_date) return 0;
+
+    const start = new Date(project.start_date);
+    const end = new Date(project.end_date);
+    const today = new Date();
+
+    const total = end.getTime() - start.getTime();
+    const elapsed = today.getTime() - start.getTime();
+
+    return Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)));
+  };
+
+  const getRemainingDays = (endDate: string | undefined) => {
+    if (!endDate) return 0;
+    const end = new Date(endDate);
+    const today = new Date();
+    const days = Math.ceil(
+      (end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    return days;
+  };
+
+  const getBudgetUtilization = (project: Project) => {
+    const timeProgress = calculateTimeProgress(project);
+    return Math.min(100, timeProgress);
+  };
+
+  const getProjectBudget = (project: Project) => {
+    if (project.project_type === "fixed_fee" && project.budget_amount) {
+      const budgetUtilization = getBudgetUtilization(project);
+      const spent = Math.round(
+        (budgetUtilization / 100) * project.budget_amount
+      );
+      return {
+        total: project.budget_amount,
+        spent: spent,
+        remaining: project.budget_amount - spent,
+      };
+    } else if (
+      project.project_type === "time_materials" &&
+      project.billing_rate
+    ) {
+      const estimatedHours = project.budget_hours || 40;
+      const totalBudget = estimatedHours * project.billing_rate;
+      const budgetUtilization = getBudgetUtilization(project);
+      const spent = Math.round((budgetUtilization / 100) * totalBudget);
+      return {
+        total: totalBudget,
+        spent: spent,
+        remaining: totalBudget - spent,
+      };
+    }
+    return null;
+  };
+
+  // Helper to get random color for project icon (since it's not in DB yet)
+  const getProjectColor = (id: string) => {
+    const colors = ["bg-blue-500", "bg-green-500", "bg-yellow-500", "bg-purple-500", "bg-pink-500", "bg-indigo-500"];
+    const index = id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) % colors.length;
+    return colors[index];
+  };
+
+  // --- Capacity Data Fetching ---
+  const currentMonthDateRange = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of month
+
+    return {
+      start_date: start.toISOString().split("T")[0],
+      end_date: end.toISOString().split("T")[0],
+    };
+  }, []);
+
+  const {
+    data: capacityData,
+    isLoading: capacityLoading
+  } = useCapacityOverview(currentOrganization?.id || "", {
+    start_date: currentMonthDateRange.start_date,
+    end_date: currentMonthDateRange.end_date,
+    only_active: true
+  });
+
+  const capacityOverview = capacityData?.capacityOverview;
+
+  const teamMembers: TeamMember[] = useMemo(() => {
+    if (!capacityOverview) return [];
+
+    return capacityOverview.map((item: any) => {
+      const utilization = item.capacity > 0 ? Math.round((item.totalAllocatedHours / item.capacity) * 100) : 0;
+
+      let status: "available" | "optimal" | "overallocated" = "available";
+      if (utilization >= 90) status = "overallocated";
+      else if (utilization >= 70) status = "optimal";
+
+      return {
+        id: item.member.id,
+        name: item.member.user.full_name,
+        role: item.member.role || "Team Member",
+        avatar: item.member.user.avatar_url || "/placeholder.svg?height=40&width=40",
+        utilization: utilization,
+        hours: `${item.totalAllocatedHours}h / ${item.capacity}h`,
+        status: status
+      };
+    }).slice(0, 5); // Limit to 5 members
+  }, [capacityOverview]);
+
+
   const metrics = [
     {
       title: "Team Members",
@@ -179,77 +334,8 @@ const DashboardContent: React.FC = () => {
     },
   ];
 
-  const projects: Project[] = [
-    {
-      id: "1",
-      name: "Website Redesign",
-      description: "Redesign the company website with modern UI/UX",
-      progress: 55,
-      budget: { spent: 9800, total: 20000, remaining: 10200 },
-      timeline: { daysLeft: 118, endDate: "3/31/2025" },
-      status: "behind",
-      color: "bg-blue-500",
-    },
-    {
-      id: "2",
-      name: "Mobile App Development",
-      description: "Develop a mobile app for iOS and Android",
-      progress: 33,
-      budget: { spent: 13500, total: 40000, remaining: 26500 },
-      timeline: { daysLeft: 27, endDate: "6/30/2025" },
-      status: "behind",
-      color: "bg-green-500",
-    },
-    {
-      id: "3",
-      name: "CRM Integration",
-      description: "Integrate with third-party CRM software",
-      progress: 0,
-      budget: { spent: 0, total: 12000, remaining: 12000 },
-      timeline: { daysLeft: 103, endDate: "4/15/2025" },
-      status: "behind",
-      color: "bg-yellow-500",
-    },
-  ];
 
-  const teamMembers: TeamMember[] = [
-    {
-      id: "1",
-      name: "Jane Cooper",
-      role: "Frontend Developer",
-      avatar: "/placeholder.svg?height=40&width=40",
-      utilization: 25,
-      hours: "10h / 40h",
-      status: "available",
-    },
-    {
-      id: "2",
-      name: "Cody Fisher",
-      role: "UX Designer",
-      avatar: "/placeholder.svg?height=40&width=40",
-      utilization: 20,
-      hours: "4h / 20h",
-      status: "available",
-    },
-    {
-      id: "3",
-      name: "Esther Howard",
-      role: "Backend Developer",
-      avatar: "/placeholder.svg?height=40&width=40",
-      utilization: 75,
-      hours: "6h / 8h",
-      status: "optimal",
-    },
-    {
-      id: "4",
-      name: "Cameron Williamson",
-      role: "Project Manager",
-      avatar: "/placeholder.svg?height=40&width=40",
-      utilization: 0,
-      hours: "0h / 40h",
-      status: "available",
-    },
-  ];
+
 
   const getUtilizationColor = (utilization: number) => {
     if (utilization >= 90) return "bg-red-500";
@@ -414,10 +500,12 @@ const DashboardContent: React.FC = () => {
                   <h2 className="text-lg font-medium text-gray-800">
                     Active Projects
                   </h2>
-                  <button className="flex items-center text-orange-500 hover:text-orange-600 text-sm font-medium">
-                    <Eye className="h-4 w-4 mr-1" />
-                    View all
-                  </button>
+                  <Link href="/projects">
+                    <button className="flex items-center text-orange-500 hover:text-orange-600 text-sm font-medium">
+                      <Eye className="h-4 w-4 mr-1" />
+                      View all
+                    </button>
+                  </Link>
                 </div>
               </div>
               <div className="p-0 flex-1 flex flex-col overflow-hidden">
@@ -452,69 +540,95 @@ const DashboardContent: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {projects.map((project) => (
-                        <tr key={project.id} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div
-                                className={`h-2.5 w-2.5 rounded-full ${project.color} mr-3 flex-shrink-0 ring-2 ring-white`}
-                              ></div>
-                              <div className="min-w-0">
-                                <div className="text-sm font-semibold text-gray-900 truncate">
-                                  {project.name}
-                                </div>
-                                <div className="text-xs text-gray-500 truncate mt-0.5">
-                                  {project.description}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap align-middle">
-                            <div className="w-full max-w-[140px]">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-xs font-medium text-gray-700">{project.progress}%</span>
-                              </div>
-                              <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                                <div
-                                  className="bg-primary-600 h-1.5 rounded-full transition-all duration-500"
-                                  style={{ width: `${project.progress}%`, backgroundColor: project.progress < 30 ? '#ef4444' : project.progress < 70 ? '#f59e0b' : '#10b981' }}
-                                ></div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium text-gray-900">
-                                ${project.budget.spent.toLocaleString()}
-                                <span className="text-gray-400 font-normal ml-1">
-                                  / ${project.budget.total.toLocaleString()}
-                                </span>
-                              </span>
-                              <span className={`text-xs mt-0.5 font-medium ${project.budget.remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                {project.budget.remaining >= 0 ? '+' : ''}${project.budget.remaining.toLocaleString()} left
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex flex-col">
-                              <div className="flex items-center text-sm text-gray-900">
-                                <span className={`w-1.5 h-1.5 rounded-full mr-2 ${project.timeline.daysLeft < 30 ? 'bg-red-500' : 'bg-green-500'}`}></span>
-                                {project.timeline.daysLeft} days
-                              </div>
-                              <span className="text-xs text-gray-500 pl-3.5 mt-0.5">
-                                Due {project.timeline.endDate}
-                              </span>
-                            </div>
+                      {projectsLoading ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-10 text-center text-gray-500">
+                            Loading projects...
                           </td>
                         </tr>
-                      ))}
+                      ) : projectsWithProgress.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-10 text-center text-gray-500">
+                            No active projects found. <Link href="/projects/new" className="text-orange-500 hover:underline">Create one?</Link>
+                          </td>
+                        </tr>
+                      ) : (
+                        projectsWithProgress.map((project) => {
+                          const budget = getProjectBudget(project);
+                          const remainingDays = getRemainingDays(project.end_date);
+                          const progress = project.progress || 0;
+
+                          return (
+                            <tr key={project.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div
+                                    className={`h-2.5 w-2.5 rounded-full ${getProjectColor(project.id)} mr-3 flex-shrink-0 ring-2 ring-white`}
+                                  ></div>
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-gray-900 truncate">
+                                      {project.name}
+                                    </div>
+                                    <div className="text-xs text-gray-500 truncate mt-0.5">
+                                      {project.description || "No description"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap align-middle">
+                                <div className="w-full max-w-[140px]">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-medium text-gray-700">{progress}%</span>
+                                  </div>
+                                  <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                    <div
+                                      className="bg-primary-600 h-1.5 rounded-full transition-all duration-500"
+                                      style={{ width: `${progress}%`, backgroundColor: progress < 30 ? '#ef4444' : progress < 70 ? '#f59e0b' : '#10b981' }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex flex-col">
+                                  {budget ? (
+                                    <>
+                                      <span className="text-sm font-medium text-gray-900">
+                                        ${budget.spent.toLocaleString()}
+                                        <span className="text-gray-400 font-normal ml-1">
+                                          / ${budget.total.toLocaleString()}
+                                        </span>
+                                      </span>
+                                      <span className={`text-xs mt-0.5 font-medium ${budget.remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                        {budget.remaining >= 0 ? '+' : ''}${budget.remaining.toLocaleString()} left
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-sm text-gray-500 italic">No budget set</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex flex-col">
+                                  <div className="flex items-center text-sm text-gray-900">
+                                    <span className={`w-1.5 h-1.5 rounded-full mr-2 ${remainingDays < 30 ? 'bg-red-500' : 'bg-green-500'}`}></span>
+                                    {remainingDays > 0 ? `${remainingDays} days` : Math.abs(remainingDays) + " days overdue"}
+                                  </div>
+                                  <span className="text-xs text-gray-500 pl-3.5 mt-0.5">
+                                    {project.end_date ? `Due ${new Date(project.end_date).toLocaleDateString()}` : "No due date"}
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
 
                 <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
                   <div className="text-xs text-gray-500">
-                    Showing {projects.length} active projects
+                    Showing {projectsWithProgress.length} active projects
                   </div>
                   <button className="flex items-center px-4 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm">
                     <Download className="h-3.5 w-3.5 mr-2" />
@@ -533,62 +647,71 @@ const DashboardContent: React.FC = () => {
                   <h2 className="text-lg font-medium text-gray-800">
                     Team Capacity Overview
                   </h2>
-                  <span className="text-sm text-orange-600 font-medium">
-                    Available
-                  </span>
+                  <Link href="/capacity">
+                    <span className="text-sm text-orange-600 font-medium hover:text-orange-700 cursor-pointer">
+                      Available
+                    </span>
+                  </Link>
                 </div>
               </div>
               <div className="p-0 flex-1 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-y-auto px-6 py-4">
                   <div className="space-y-6">
-                    {teamMembers.map((member) => (
-                      <div key={member.id} className="group">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-3">
-                            <div className="relative">
-                              <img
-                                src={member.avatar || "/placeholder.svg"}
-                                alt={member.name}
-                                className="w-9 h-9 rounded-full object-cover border border-gray-200"
-                              />
-                              <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${member.status === 'available' ? 'bg-green-500' : member.status === 'optimal' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
-                            </div>
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900 leading-none">
-                                {member.name}
-                              </p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                {member.role}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <span
-                              className={`text-sm font-bold ${getUtilizationTextColor(member.status)}`}
-                            >
-                              {member.utilization}%
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="relative pt-1">
-                          <div className="w-full bg-gray-100 rounded-full h-2 relative overflow-hidden">
-                            <div
-                              className={`h-2 rounded-full transition-all duration-500 ${getUtilizationColor(member.utilization)}`}
-                              style={{ width: `${member.utilization}%` }}
-                            ></div>
-                          </div>
-                          <div className="flex justify-between items-center mt-1.5">
-                            <p className="text-xs text-gray-400 font-medium">
-                              {member.hours}
-                            </p>
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">
-                              {member.status === 'available' ? 'Available' : member.status === 'optimal' ? 'Optimal' : 'Overloaded'}
-                            </p>
-                          </div>
-                        </div>
+                    {capacityLoading ? (
+                      <div className="text-center py-10 text-gray-500">Loading capacity...</div>
+                    ) : teamMembers.length === 0 ? (
+                      <div className="text-center py-10 text-gray-500">
+                        No active team members found. <Link href="/teams" className="text-orange-500 hover:underline">Manage Team</Link>
                       </div>
-                    ))}
+                    ) : (
+                      teamMembers.map((member) => (
+                        <div key={member.id} className="group cursor-pointer" onClick={() => router.push("/capacity")}>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center space-x-3">
+                              <div className="relative">
+                                <img
+                                  src={member.avatar || "/placeholder.svg"}
+                                  alt={member.name}
+                                  className="w-9 h-9 rounded-full object-cover border border-gray-200"
+                                />
+                                <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${member.status === 'available' ? 'bg-green-500' : member.status === 'optimal' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900 leading-none">
+                                  {member.name}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {member.role}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span
+                                className={`text-sm font-bold ${getUtilizationTextColor(member.status)}`}
+                              >
+                                {member.utilization}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="relative pt-1">
+                            <div className="w-full bg-gray-100 rounded-full h-2 relative overflow-hidden">
+                              <div
+                                className={`h-2 rounded-full transition-all duration-500 ${getUtilizationColor(member.utilization)}`}
+                                style={{ width: `${member.utilization}%` }}
+                              ></div>
+                            </div>
+                            <div className="flex justify-between items-center mt-1.5">
+                              <p className="text-xs text-gray-400 font-medium">
+                                {member.hours}
+                              </p>
+                              <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">
+                                {member.status === 'available' ? 'Available' : member.status === 'optimal' ? 'Optimal' : 'Overloaded'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )))}
                   </div>
                 </div>
 
