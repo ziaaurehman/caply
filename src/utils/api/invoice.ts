@@ -22,6 +22,7 @@ export interface Invoice {
   companyAddress?: string;
   province?: string;
   isInternational?: boolean;
+  isManualTax?: boolean;
   paymentMethod?: string;
   companyPhone?: string;
   title: string;
@@ -53,6 +54,7 @@ export interface CreateInvoiceData {
   companyAddress: string;
   companyPhone: string;
   isInternational: boolean;
+  isManualTax?: boolean;
   paymentMethod: string;
   province: string;
   discounttype: string;

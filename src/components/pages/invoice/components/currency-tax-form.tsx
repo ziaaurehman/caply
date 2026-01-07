@@ -52,6 +52,8 @@ export const CurrencyTaxForm: React.FC<CurrencyTaxFormProps> = ({
               setCurrentInvoice({
                 ...currentInvoice,
                 isInternational: e.target.value === "yes",
+                // Reset province if international
+                province: e.target.value === "yes" ? "" : "ON",
               })
             }
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -60,28 +62,70 @@ export const CurrencyTaxForm: React.FC<CurrencyTaxFormProps> = ({
             <option value="yes">Yes</option>
           </select>
         </div>
-        {!currentInvoice.isInternational && (
+
+        {/* Manual Tax Toggle */}
+        <div className="col-span-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="isManualTax"
+            checked={currentInvoice.isManualTax || false}
+            onChange={(e) =>
+              setCurrentInvoice({
+                ...currentInvoice,
+                isManualTax: e.target.checked,
+                manualTaxAmount: 0,
+              })
+            }
+            className="h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+          />
+          <label htmlFor="isManualTax" className="text-sm font-medium text-gray-700">
+            Manual Tax Override
+          </label>
+        </div>
+
+        {currentInvoice.isManualTax ? (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Province<span className="text-red-500">*</span>
+              Tax Amount
             </label>
-            <select
-              value={currentInvoice.province}
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={currentInvoice.manualTaxAmount || 0}
               onChange={(e) =>
                 setCurrentInvoice({
                   ...currentInvoice,
-                  province: e.target.value,
+                  manualTaxAmount: parseFloat(e.target.value) || 0,
                 })
               }
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-            >
-              {Object.entries(TAX_RATES).map(([code, { name }]) => (
-                <option key={code} value={code}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
+        ) : (
+          !currentInvoice.isInternational && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Province<span className="text-red-500">*</span>
+              </label>
+              <select
+                value={currentInvoice.province}
+                onChange={(e) =>
+                  setCurrentInvoice({
+                    ...currentInvoice,
+                    province: e.target.value,
+                  })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                {Object.entries(TAX_RATES).map(([code, { name }]) => (
+                  <option key={code} value={code}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )
         )}
       </div>
     </div>

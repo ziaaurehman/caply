@@ -80,6 +80,8 @@ const InvoicePage: React.FC = () => {
     paymentMethod: "Bank Transfer",
     currency: "CAD",
     isInternational: false,
+    isManualTax: false,
+    manualTaxAmount: 0,
     province: "ON",
     lineItems: [],
     discountType: "none",
@@ -178,6 +180,8 @@ const InvoicePage: React.FC = () => {
         paymentMethod: editingInvoice.paymentMethod || "",
         currency: editingInvoice.currency,
         isInternational: editingInvoice.isInternational,
+        isManualTax: editingInvoice.isManualTax,
+        manualTaxAmount: !editingInvoice.isManualTax ? 0 : Number(editingInvoice.taxAmount),
         province: editingInvoice.province || "",
         lineItems:
           editingInvoice.lineItems?.map((item) => ({
@@ -222,6 +226,8 @@ const InvoicePage: React.FC = () => {
         paymentMethod: viewingInvoice.paymentMethod || "",
         currency: viewingInvoice.currency,
         isInternational: viewingInvoice.isInternational,
+        isManualTax: viewingInvoice.isManualTax,
+        manualTaxAmount: !viewingInvoice.isManualTax ? 0 : Number(viewingInvoice.taxAmount),
         province: viewingInvoice.province || "",
         lineItems:
           viewingInvoice.lineItems?.map((item) => ({
@@ -289,8 +295,24 @@ const InvoicePage: React.FC = () => {
 
     // ✅ store applied tax rate
     let appliedTaxRate: { federal: number; provincial: number } | null = null;
+    let manualTaxAmount = 0;
 
-    if (!currentInvoice.isInternational && currentInvoice.province) {
+    if (currentInvoice.isManualTax) {
+      // Manual tax logic
+      // We assume taxAmount is stored somewhere or we need to add a field for manual tax amount??
+      // Wait, the Invoice model gets `taxAmount` from the calculation in `handleSave`.
+      // If we want manual tax, the user needs to input the AMOUNT directly, not the rate.
+      // So we need to store the manual tax amount in the state.
+      // But `LocalInvoice` doesn't have a specific `manualTaxAmount` field in the interface I updated?
+      // Actually `Invoice` model has `taxAmount` but that's the result.
+      // If `isManualTax` is true, we should probably use the `taxAmount` field from `currentInvoice` if we add it to LocalInvoice?
+      // OR we can add `manualTaxAmount` to LocalInvoice. Let's add `manualTaxAmount` to LocalInvoice or just use a generic field.
+      // Let's re-check `LocalInvoice`. It doesn't have `taxAmount`.
+      // The `Invoice` type has `taxAmount`.
+      // I should add `manualTaxAmount` to `LocalInvoice` to store the user input.
+    }
+
+    if (!currentInvoice.isManualTax && !currentInvoice.isInternational && currentInvoice.province) {
       const TAX_RATES: Record<string, { federal: number; provincial: number }> =
       {
         ON: { federal: 5, provincial: 8 },
@@ -306,19 +328,26 @@ const InvoicePage: React.FC = () => {
         federalTax = taxableAmount * (appliedTaxRate.federal / 100);
         provincialTax = taxableAmount * (appliedTaxRate.provincial / 100);
       }
+    } else if (currentInvoice.isManualTax) {
+      // If manual tax, we might need a separate field in LocalInvoice or just rely on the user inputting it.
+      // Let's add manualTaxAmount to LocalInvoice.
+      // For now, I will assume I will add it.
+      manualTaxAmount = currentInvoice.manualTaxAmount || 0;
     }
 
-    const total = subtotal - discountAmount + federalTax + provincialTax;
+    const total = subtotal - discountAmount + federalTax + provincialTax + manualTaxAmount;
 
     return {
       subtotal,
       discountAmount,
       federalTax,
       provincialTax,
+      manualTaxAmount,
       total,
       taxRate: appliedTaxRate, // ✅ returned
       Currency: currentInvoice.currency,
     };
+
   }, [currentInvoice]);
 
   const resetStates = () => {
@@ -383,6 +412,7 @@ const InvoicePage: React.FC = () => {
           invoice.lineItems?.map((item) => ({
             description: item.description,
             quantity: Number(item.quantity),
+            unit: item.unit,
             unitPrice: Number(item.unitPrice),
             amount: Number(item.amount),
           })) || [],
@@ -643,6 +673,8 @@ const InvoicePage: React.FC = () => {
       paymentMethod: String(invoice.paymentMethod || ""),
       currency: String(invoice.currency || ""),
       isInternational: Boolean(invoice.isInternational),
+      isManualTax: Boolean(invoice.isManualTax),
+      manualTaxAmount: Number(invoice.manualTaxAmount || 0),
       province: String(invoice.province || ""),
       lineItems: sortedLineItems,
       discountType: String(invoice.discountType || "none"),

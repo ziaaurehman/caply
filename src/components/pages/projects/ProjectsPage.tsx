@@ -53,7 +53,19 @@ export default function ProjectsPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchParams.get("search") || "");
+
+  // Debounce search term
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 500);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchTerm]);
 
   const { confirmation, confirm, handleConfirm, handleClose } =
     useConfirmation();
@@ -89,10 +101,10 @@ export default function ProjectsPage() {
     () => ({
       page: currentPage,
       limit: itemsPerPage,
-      search: searchTerm || undefined,
+      search: debouncedSearchTerm || undefined,
       status: statusFilter !== "all" ? statusFilter : undefined,
     }),
-    [currentPage, itemsPerPage, searchTerm, statusFilter]
+    [currentPage, itemsPerPage, debouncedSearchTerm, statusFilter]
   );
 
   // Fetch projects using React Query
@@ -156,7 +168,7 @@ export default function ProjectsPage() {
 
     // Reset to first page when search term changes
     setCurrentPage(1);
-  }, [searchTerm, currentOrganization?.id]);
+  }, [debouncedSearchTerm, currentOrganization?.id]);
 
   const handleEdit = (project: Project) => {
     setSelectedProject(project);

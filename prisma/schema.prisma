@@ -547,6 +547,7 @@ model Invoice {
   totalAmount        Decimal   @default(0) @map("total_amount") @db.Decimal(12, 2)
   currency           String    @default("CAD")
   isInternational    Boolean   @default(false)
+  isManualTax        Boolean   @default(false) @map("is_manual_tax")
   province           String    @default("ON")
   issueDate          DateTime  @map("issue_date") @db.Date
   dueDate            DateTime  @map("due_date") @db.Date

@@ -61,7 +61,12 @@ export default function CapacityPlanningPage() {
     const diff = today.getDate() - day + (day === 0 ? -6 : 1);
     const monday = new Date(today);
     monday.setDate(diff);
-    return monday.toISOString().split("T")[0];
+
+    // Use local time for YYYY-MM-DD format to avoid UTC date shifts
+    const year = monday.getFullYear();
+    const month = String(monday.getMonth() + 1).padStart(2, '0');
+    const date = String(monday.getDate()).padStart(2, '0');
+    return `${year}-${month}-${date}`;
   });
   const [filters, setFilters] = useState<{
     userIds: string[];
@@ -104,9 +109,16 @@ export default function CapacityPlanningPage() {
       endDate.setDate(endDate.getDate() + 28);
     }
 
+    const formatDate = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${d}`;
+    };
+
     return {
-      startDate: startDate.toISOString().split("T")[0],
-      endDate: endDate.toISOString().split("T")[0],
+      startDate: formatDate(startDate),
+      endDate: formatDate(endDate),
     };
   };
 

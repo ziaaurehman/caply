@@ -12,6 +12,8 @@ import {
   Unlink,
   Edit2,
   X,
+  CalendarDays,
+  Check,
 } from "lucide-react";
 
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
@@ -591,6 +593,7 @@ export default function WeeklyCapacityTableNew({
       try {
         await updateWeeklyPlanMutation.mutateAsync({
           weeklyPlanId: assignment.weeklyPlan.id,
+          isLinked: linkedStatus[key] ?? false,
           hoursSunday: editedHours[0],
           hoursMonday: editedHours[1],
           hoursTuesday: editedHours[2],
@@ -651,42 +654,26 @@ export default function WeeklyCapacityTableNew({
       const updated = [...current];
       const sanitized = Math.max(0, Number.isFinite(value) ? value : 0);
 
-      if (isLinked) {
-        // If linked, update all days (except weekends if not allowed)
-        const allocation = members
-          .find((m) => m.id === memberId)
-          ?.allocations.find((a) => a.projectId === projectId);
+      // Always update only the specific day, regardless of linked status
+      // We also auto-unlink when a specific day is edited to allow granular control
 
-        const allowWeekends = allocation?.includeWeekends ?? false;
+      const dayData = daysData[dayIndex];
+      const dayIsPast = dayData ? isDayInPast(dayData.date) : false;
 
-        for (let i = 0; i < 7; i++) {
-          const dayData = daysData[i];
-          const dayIsPast = dayData ? isDayInPast(dayData.date) : false;
-
-          if (dayIsPast) {
-            // Don't update past days - keep their current values
-            continue;
-          }
-
-          if (!allowWeekends && (i === 0 || i === 6)) {
-            // Don't update weekends if weekends are not allowed
-            updated[i] = 0;
-          } else {
-            updated[i] = sanitized;
-          }
-        }
-      } else {
-        // If unlinked, only update the specific day
-        const dayData = daysData[dayIndex];
-        const dayIsPast = dayData ? isDayInPast(dayData.date) : false;
-
-        if (!dayIsPast) {
-          updated[dayIndex] = sanitized;
-        }
+      if (!dayIsPast) {
+        updated[dayIndex] = sanitized;
       }
 
       return { ...prev, [key]: updated };
     });
+
+    // Auto-unlink if it was linked
+    if (isLinked) {
+      setLinkedStatus((prev) => ({
+        ...prev,
+        [key]: false,
+      }));
+    }
   };
 
   const {
@@ -1487,82 +1474,92 @@ export default function WeeklyCapacityTableNew({
                         })}
                         <td className="px-4 py-3 text-center">
                           <div className="inline-flex items-center gap-3">
-                            <button
-                              className="text-gray-600 hover:text-gray-800"
-                              title="Edit assignment"
-                              onClick={() => {
-                                const assignment = projectAssignments.find(
-                                  (pa: ProjectAssignment) =>
-                                    pa.resourceAllocationId === memberId &&
-                                    pa.projectId === allocation.projectId
-                                );
-                                if (assignment) {
-                                  setEditAssignmentTarget(assignment);
-                                } else {
-                                  toast.error("Project assignment not found");
-                                }
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                // Find the project assignment to get the assignment ID
-                                const assignment = projectAssignments.find(
-                                  (pa: ProjectAssignment) =>
-                                    pa.resourceAllocationId === memberId &&
-                                    pa.projectId === allocation.projectId
-                                );
+                            {isEditing(memberId, allocation.projectId) ? (
+                              <>
+                                <button
+                                  className="text-green-600 hover:text-green-800"
+                                  title="Save daily changes"
+                                  onClick={() =>
+                                    handleSaveEdit(
+                                      memberId,
+                                      allocation.projectId,
+                                      allocation
+                                    )
+                                  }
+                                >
+                                  <Check className="h-4 w-4" />
+                                </button>
+                                <button
+                                  className="text-gray-600 hover:text-gray-800"
+                                  title="Cancel editing"
+                                  onClick={() => setEditingTarget(null)}
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="text-gray-600 hover:text-gray-800"
+                                  title="Edit Daily Allocation"
+                                  onClick={() =>
+                                    handleStartEdit(
+                                      memberId,
+                                      allocation.projectId,
+                                      allocation
+                                    )
+                                  }
+                                >
+                                  <CalendarDays className="h-4 w-4" />
+                                </button>
+                                <button
+                                  className="text-gray-600 hover:text-gray-800"
+                                  title="Edit Assignment Settings"
+                                  onClick={() => {
+                                    const assignment = projectAssignments.find(
+                                      (pa: ProjectAssignment) =>
+                                        pa.resourceAllocationId === memberId &&
+                                        pa.projectId === allocation.projectId
+                                    );
+                                    if (assignment) {
+                                      setEditAssignmentTarget(assignment);
+                                    } else {
+                                      toast.error(
+                                        "Project assignment not found"
+                                      );
+                                    }
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const assignment = projectAssignments.find(
+                                      (pa: ProjectAssignment) =>
+                                        pa.resourceAllocationId === memberId &&
+                                        pa.projectId === allocation.projectId
+                                    );
 
-                                if (assignment) {
-                                  // Set up deletion target with assignment ID and project name
-                                  setDeletingTarget({
-                                    memberId,
-                                    projectId: allocation.projectId,
-                                    assignmentId: assignment.id,
-                                    projectName: allocation.projectName,
-                                  });
-                                } else {
-                                  toast.error("Project assignment not found");
-                                }
-                              }}
-                              className="text-red-600 hover:text-red-800"
-                              title="Delete project assignment"
-                            >
-                              <Trash className="h-4 w-4" />
-                            </button>
-                            {/* Commented out Link/Unlink as requested
-                            <button
-                              className={`${linkedStatus[
-                                `${memberId}:${allocation.projectId}`
-                              ] !== false
-                                ? "text-orange-600"
-                                : "text-gray-400"
-                                } hover:text-orange-700`}
-                              title={
-                                linkedStatus[
-                                  `${memberId}:${allocation.projectId}`
-                                ] !== false
-                                  ? "Linked (edit one updates all future days)"
-                                  : "Unlinked (edit days separately)"
-                              }
-                              onClick={() => {
-                                toggleLinked(
-                                  memberId,
-                                  allocation.projectId,
-                                  allocation
-                                );
-                              }}
-                            >
-                              {linkedStatus[
-                                `${memberId}:${allocation.projectId}`
-                              ] !== false ? (
-                                <LinkIcon className="h-4 w-4" />
-                              ) : (
-                                <Unlink className="h-4 w-4" />
-                              )}
-                            </button>
-                            */}
+                                    if (assignment) {
+                                      setDeletingTarget({
+                                        memberId,
+                                        projectId: allocation.projectId,
+                                        assignmentId: assignment.id,
+                                        projectName: allocation.projectName,
+                                      });
+                                    } else {
+                                      toast.error(
+                                        "Project assignment not found"
+                                      );
+                                    }
+                                  }}
+                                  className="text-red-600 hover:text-red-800"
+                                  title="Delete project assignment"
+                                >
+                                  <Trash className="h-4 w-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
