@@ -30,6 +30,7 @@ import { useOrganizationStore } from "@/lib/stores/organizationStore";
 import Pagination from "@/components/ui/Pagination";
 import { Input } from "@/components/ui/Input";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import {
   useTeamMembers,
   useCreateTeamMember,
@@ -41,6 +42,7 @@ import {
 
 const TeamMembersPage: React.FC = () => {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
   const [resendingId, setResendingId] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -49,7 +51,7 @@ const TeamMembersPage: React.FC = () => {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "");
 
   const { confirmation, confirm, handleConfirm, handleClose } =
     useConfirmation();
@@ -555,8 +557,8 @@ const TeamMembersPage: React.FC = () => {
                                   <span className="text-orange-700 font-medium text-lg">
                                     {member.users?.full_name
                                       ? member.users.full_name
-                                          .charAt(0)
-                                          .toUpperCase()
+                                        .charAt(0)
+                                        .toUpperCase()
                                       : "?"}
                                   </span>
                                 </div>
@@ -621,11 +623,10 @@ const TeamMembersPage: React.FC = () => {
                               isCurrentUser ||
                               deleteTeamMemberMutation.isPending
                             }
-                            className={`${
-                              isCurrentUser
-                                ? "text-gray-400 cursor-not-allowed"
-                                : "text-red-600 hover:text-red-900"
-                            }`}
+                            className={`${isCurrentUser
+                              ? "text-gray-400 cursor-not-allowed"
+                              : "text-red-600 hover:text-red-900"
+                              }`}
                             title={
                               isCurrentUser
                                 ? "You cannot delete yourself"

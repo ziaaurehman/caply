@@ -25,6 +25,8 @@ export interface LocalInvoice {
   paymentMethod: string;
   currency: string;
   isInternational?: boolean;
+  isManualTax?: boolean;
+  manualTaxAmount?: number;
   province: string;
   lineItems: LineItem[];
   discountType: "fixed" | "percentage" | "none";

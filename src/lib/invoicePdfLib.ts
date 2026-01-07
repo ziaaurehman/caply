@@ -210,7 +210,7 @@ export async function generateInvoicePDF(
       font,
       color: darkColor,
     });
-    page.drawText(`${item.quantity} Unit`, {
+    page.drawText(`${item.quantity} ${item.unit || "Unit"}`, {
       x: 250,
       y,
       size: 12,
@@ -261,42 +261,62 @@ export async function generateInvoicePDF(
   });
   y -= 15;
 
-  // Federal Tax (TPS) – ALWAYS show
-  const federalRate = calculations.taxRate?.federal ?? 0;
+  // Tax Display
+  if (currentInvoice.isManualTax) {
+    page.drawText(`Tax`, {
+      x: totalX,
+      y,
+      size: 12,
+      font,
+      color: greyColor,
+    });
+    page.drawText(`${currencySymbol}${(calculations.manualTaxAmount || 0).toFixed(2)}`, {
+      x: 450,
+      y,
+      size: 12,
+      font,
+      color: darkColor,
+    });
+    y -= 15;
+  } else {
+    // Federal Tax (TPS)
+    const federalRate = calculations.taxRate?.federal ?? 0;
 
-  page.drawText(`TPS (${federalRate}%)`, {
-    x: totalX,
-    y,
-    size: 12,
-    font,
-    color: greyColor,
-  });
-  page.drawText(`${currencySymbol}${calculations.federalTax.toFixed(2)}`, {
-    x: 450,
-    y,
-    size: 12,
-    font,
-    color: darkColor,
-  });
-  y -= 15;
+    page.drawText(`TPS (${federalRate}%)`, {
+      x: totalX,
+      y,
+      size: 12,
+      font,
+      color: greyColor,
+    });
+    page.drawText(`${currencySymbol}${calculations.federalTax.toFixed(2)}`, {
+      x: 450,
+      y,
+      size: 12,
+      font,
+      color: darkColor,
+    });
+    y -= 15;
 
-  // Provincial Tax (TVQ) – ALWAYS show
-  const provincialRate = calculations.taxRate?.provincial ?? 0;
+    // Provincial Tax (TVQ)
+    const provincialRate = calculations.taxRate?.provincial ?? 0;
 
-  page.drawText(`TVQ (${provincialRate}%)`, {
-    x: totalX,
-    y,
-    size: 12,
-    font,
-    color: greyColor,
-  });
-  page.drawText(`${currencySymbol}${calculations.provincialTax.toFixed(2)}`, {
-    x: 450,
-    y,
-    size: 12,
-    font,
-    color: darkColor,
-  });
+    page.drawText(`TVQ (${provincialRate}%)`, {
+      x: totalX,
+      y,
+      size: 12,
+      font,
+      color: greyColor,
+    });
+    page.drawText(`${currencySymbol}${calculations.provincialTax.toFixed(2)}`, {
+      x: 450,
+      y,
+      size: 12,
+      font,
+      color: darkColor,
+    });
+    y -= 15;
+  }
   y -= 20;
 
   // Total

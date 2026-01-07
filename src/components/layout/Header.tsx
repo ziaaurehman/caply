@@ -28,6 +28,7 @@ import {
   useCurrentOrganization,
 } from "@/lib/stores/organizationStore";
 import { performLogout } from "@/utils/logout";
+import GlobalSearch from "./GlobalSearch";
 
 interface HeaderProps {
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
@@ -75,13 +76,13 @@ export default function Header({
         console.log("User changed, clearing organization cache");
         clearOrganizationData();
       }
-      
+
       // First, fetch organizations (lightweight) - pass userId to ensure cache belongs to this user
       await fetchUserOrganizations(session.user.id);
-      
+
       // Warm caches for likely organizations in background
       warmCaches();
-      
+
       // Fetch context for selected organization if it exists in localStorage
       const selectedOrgId =
         typeof window !== "undefined"
@@ -215,15 +216,8 @@ export default function Header({
           </button>
 
           {/* Search bar */}
-          <div className="relative w-full max-w-md lg:max-w-lg">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search size={18} className="text-gray-400" />
-            </div>
-            <input
-              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm transition-colors"
-              placeholder="Search projects, tasks..."
-              type="search"
-            />
+          <div className="w-full max-w-md lg:max-w-lg">
+            <GlobalSearch />
           </div>
         </div>
 
@@ -296,11 +290,10 @@ export default function Header({
                         <button
                           key={org.id}
                           onClick={() => handleOrganizationSwitch(org.id)}
-                          className={`flex items-center w-full px-4 py-3 text-sm hover:bg-orange-50 transition-colors group ${
-                            currentOrganization?.id === org.id
-                              ? "bg-orange-50 border-r-2 border-orange-500"
-                              : ""
-                          }`}
+                          className={`flex items-center w-full px-4 py-3 text-sm hover:bg-orange-50 transition-colors group ${currentOrganization?.id === org.id
+                            ? "bg-orange-50 border-r-2 border-orange-500"
+                            : ""
+                            }`}
                         >
                           <div className="flex items-center space-x-3 min-w-0 flex-1">
                             <div className="flex-shrink-0">

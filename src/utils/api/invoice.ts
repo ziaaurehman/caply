@@ -2,44 +2,11 @@ export interface InvoiceLineItem {
   id: string;
   description: string;
   quantity: number;
+  unit?: string;
   unitPrice: number;
   amount: number;
   position?: number;
   createdAt?: string;
-}
-
-export interface Client {
-  id: string;
-  organizationId: string;
-  name: string;
-  email: string;
-  phone?: string;
-  website?: string;
-  address?: string;
-  city?: string | null;
-  province?: string | null;
-  postalCode?: string | null;
-  country?: string | null;
-  contactPerson?: string;
-  notes?: string | null;
-  status: string;
-  createdBy?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-export interface Project {
-  id: string;
- 
-  name: string;
-  
-}
-
-export interface InvoiceLineItem {
-  id: string;
-  description: string;
-  quantity: number;
-  unitPrice: number;
-  total: number;
 }
 
 export interface Invoice {
@@ -55,6 +22,7 @@ export interface Invoice {
   companyAddress?: string;
   province?: string;
   isInternational?: boolean;
+  isManualTax?: boolean;
   paymentMethod?: string;
   companyPhone?: string;
   title: string;
@@ -86,6 +54,7 @@ export interface CreateInvoiceData {
   companyAddress: string;
   companyPhone: string;
   isInternational: boolean;
+  isManualTax?: boolean;
   paymentMethod: string;
   province: string;
   discounttype: string;

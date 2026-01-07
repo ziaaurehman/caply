@@ -184,10 +184,6 @@ export default function MonthlyCapacityTable({
         assignmentId?: string // Add this to store assignment ID
         projectName?: string // Add this for better confirmation message
     } | null>(null)
-    const [editingTarget, setEditingTarget] = useState<{
-        memberId: string
-        projectId: string
-    } | null>(null)
     const [editAssignmentTarget, setEditAssignmentTarget] = useState<ProjectAssignment | null>(null);
     const [addModalTarget, setAddModalTarget] = useState<string | null>(null) // memberId
     const [addForm, setAddForm] = useState<AddProjectForm>({
@@ -196,16 +192,6 @@ export default function MonthlyCapacityTable({
         includeWeekends: false,
         startDate: new Date().toISOString().split("T")[0],
     })
-    const [savingTarget, setSavingTarget] = useState<{
-        memberId: string
-        projectId: string
-        projectName: string
-    } | null>(null)
-    const [confirmationText, setConfirmationText] = useState("")
-    const [isSaving, setIsSaving] = useState(false)
-    const [editedWeeklyHours, setEditedWeeklyHours] = useState<{
-        [key: string]: number[] // key: "memberId:projectId", value: array of weekly hours
-    }>({})
     const [editResourceModalOpen, setEditResourceModalOpen] = useState(false)
     const [selectedResourceForEdit, setSelectedResourceForEdit] = useState<any | null>(null)
 
@@ -665,110 +651,7 @@ export default function MonthlyCapacityTable({
 
     // Weekly plans are now included in monthlyCapacityData
 
-    const handleSaveWeeklyHours = async () => {
-        if (!savingTarget) return
 
-        const { memberId, projectId } = savingTarget
-        const key = `${memberId}:${projectId} `
-        const editedHours = editedWeeklyHours[key]
-
-        if (!editedHours || editedHours.length === 0) {
-            toast.error("No weekly hours to save")
-            setSavingTarget(null)
-            setConfirmationText("")
-            return
-        }
-
-        // Find the project assignment from monthly data
-        const resource = monthlyCapacityData?.resources?.find((r: any) => r.resource_allocation_id === memberId)
-
-        const weekData = resource?.weeks?.[0]
-        const projectData = weekData?.projects?.find((p: any) => p.project?.id === projectId)
-
-        if (!projectData || !resource) {
-            toast.error("Project assignment not found")
-            setSavingTarget(null)
-            setConfirmationText("")
-            return
-        }
-
-        setIsSaving(true)
-
-        try {
-            // For each week, update or create weekly plan
-            const updatePromises = weeksData.map(async (week, weekIndex) => {
-                const weeklyHours = editedHours[weekIndex] || 0
-
-                // Calculate Monday of the week
-                const weekStart = startOfDay(parseISO(week.startDate))
-                const weekMonday = startOfWeek(weekStart, { weekStartsOn: 1 })
-
-                // Find existing weekly plan from monthly data
-                const weekDataForWeek = resource.weeks?.find((w: any) => w.week_start_date === week.startDate.split("T")[0])
-                const existingPlan = weekDataForWeek?.projects?.find((p: any) => p.project?.id === projectId)
-
-                // Calculate hours per day (distribute evenly)
-                // Check if weekends are allowed from project data
-                const allowWeekends = projectData.allow_weekends || false
-                const daysPerWeek = allowWeekends ? 7 : 5
-                const hoursPerDay = weeklyHours / daysPerWeek
-
-                const hoursSunday = allowWeekends ? hoursPerDay : 0
-                const hoursMonday = hoursPerDay
-                const hoursTuesday = hoursPerDay
-                const hoursWednesday = hoursPerDay
-                const hoursThursday = hoursPerDay
-                const hoursFriday = hoursPerDay
-                const hoursSaturday = allowWeekends ? hoursPerDay : 0
-
-                // Use the upsert API which handles both create and update
-                const response = await fetch("/api/capacity/weekly-plans", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        organizationId: currentOrganization?.id || "",
-                        resourceAllocationId: memberId,
-                        projectId: projectId,
-                        weekStartDate: weekMonday.toISOString(),
-                        defaultHoursPerDay: hoursPerDay,
-                        allowWeekends: allowWeekends,
-                        hoursSunday,
-                        hoursMonday,
-                        hoursTuesday,
-                        hoursWednesday,
-                        hoursThursday,
-                        hoursFriday,
-                        hoursSaturday,
-                    }),
-                })
-
-                if (!response.ok) {
-                    const errorData = await response.json()
-                    throw new Error(errorData.error || "Failed to save weekly plan")
-                }
-            })
-
-            await Promise.all(updatePromises)
-
-            toast.success("Weekly hours saved successfully!")
-            setEditingTarget(null)
-            setSavingTarget(null)
-            setConfirmationText("")
-
-            // Clear edited hours after successful save
-            setEditedWeeklyHours((prev) => {
-                const newState = { ...prev }
-                delete newState[key]
-                return newState
-            })
-        } catch (error: any) {
-
-            console.error("Save weekly hours error:", error)
-            toast.error(error.message || "Failed to save weekly hours")
-        } finally {
-            setIsSaving(false)
-        }
-    }
 
     const getUtilizationColor = (allocated: number, capacity: number) => {
         const percentage = (allocated / capacity) * 100
@@ -804,52 +687,7 @@ export default function MonthlyCapacityTable({
         })
     }
 
-    const isEditing = (memberId: string, projectId: string) =>
-        editingTarget?.memberId === memberId && editingTarget?.projectId === projectId
 
-    const ensureWeeklyInitialized = (memberId: string, projectId: string, weeksCount: number) => {
-        const key = `${memberId}:${projectId} `
-        const allocation = members.find((m) => m.id === memberId)?.allocations.find((a) => a.projectId === projectId)
-
-        if (!allocation) return
-
-        // Initialize edited hours if not already set
-        if (!editedWeeklyHours[key]) {
-            const currentWeeklyHours =
-                allocation.weeklyHours && allocation.weeklyHours.length === weeksCount
-                    ? allocation.weeklyHours
-                    : Array.from({ length: weeksCount }, () => allocation.hours)
-
-            setEditedWeeklyHours((prev) => ({
-                ...prev,
-                [key]: [...currentWeeklyHours],
-            }))
-        }
-    }
-
-    const updateAllocationWeeklyHour = (
-        memberId: string,
-        projectId: string,
-        weekIndex: number,
-        value: number,
-        weeksCount: number,
-    ) => {
-        const key = `${memberId}:${projectId} `
-
-        setEditedWeeklyHours((prev) => {
-            const current = prev[key] || []
-            // Ensure array has correct length
-            const arr =
-                current.length === weeksCount ? [...current] : Array.from({ length: weeksCount }, (_, i) => current[i] ?? 0)
-
-            arr[weekIndex] = Math.max(0, Number.isFinite(value) ? value : 0)
-
-            return {
-                ...prev,
-                [key]: arr,
-            }
-        })
-    }
 
     const members: Member[] = useMemo(() => {
         if (!monthlyCapacityData?.resources) return []
@@ -875,13 +713,7 @@ export default function MonthlyCapacityTable({
                     const projectData = week.projects?.find((p: any) => p.project?.id === projectId)
 
                     if (projectData) {
-                        const key = `${resourceId}:${projectId} `
-                        const editedHours = editedWeeklyHours[key]
-
-                        weeklyHours[weekIndex] =
-                            editedHours && editedHours[weekIndex] !== undefined
-                                ? editedHours[weekIndex]
-                                : projectData.weekly_hours || 0
+                        weeklyHours[weekIndex] = projectData.weekly_hours || 0
                     }
                 })
 
@@ -922,7 +754,7 @@ export default function MonthlyCapacityTable({
                 allocations,
             }
         })
-    }, [monthlyCapacityData, weeksData, editedWeeklyHours, projectAssignments])
+    }, [monthlyCapacityData, weeksData, projectAssignments])
 
     console.log("[v0] Monthly Table Members mapped:", members)
 
@@ -1413,75 +1245,7 @@ export default function MonthlyCapacityTable({
                 </div>
             )}
 
-            {/* Save Confirmation Modal */}
-            {savingTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <div className="flex items-center gap-3">
-                                <div className="flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-red-100">
-                                    <AlertTriangle className="h-6 w-6 text-red-600" />
-                                </div>
-                                <div>
-                                    <h3 className="text-lg font-semibold text-gray-900">Override Daily Allocations</h3>
-                                    <p className="text-sm text-gray-500">
-                                        This action will override previously set daily-based allocations
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="px-6 py-4 space-y-4">
-                            <div className="bg-red-50 border border-red-200 rounded-md p-4">
-                                <p className="text-sm font-medium text-red-800 mb-2">⚠️ Severe Warning</p>
-                                <p className="text-sm text-red-700">
-                                    Saving these weekly hours will <strong>permanently override</strong> any daily-based time allocations
-                                    you have set for <strong>{savingTarget.projectName}</strong>. The hours will be distributed evenly
-                                    across all days in each week.
-                                </p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Type <strong>"CONFIRM"</strong> to proceed:
-                                </label>
-                                <input
-                                    type="text"
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                                    value={confirmationText}
-                                    onChange={(e) => setConfirmationText(e.target.value)}
-                                    placeholder="Type CONFIRM here"
-                                    autoFocus
-                                />
-                            </div>
-                        </div>
-                        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-                            <button
-                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-                                onClick={() => {
-                                    setSavingTarget(null)
-                                    setConfirmationText("")
-                                }}
-                                disabled={isSaving}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                                onClick={handleSaveWeeklyHours}
-                                disabled={isSaving || confirmationText !== "CONFIRM"}
-                            >
-                                {isSaving ? (
-                                    <>
-                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white inline-block mr-2"></div>
-                                        Saving...
-                                    </>
-                                ) : (
-                                    "Save & Override"
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+
 
             {/* Edit Resource Modal */}
             {selectedResourceForEdit && (
