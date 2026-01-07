@@ -208,7 +208,7 @@ export default function LoginForm() {
             type="submit"
             size="lg"
             isLoading={isLoading}
-            className="w-full"
+            className="w-full rounded-xl"
           >
             {isLoading ? "Signing in..." : "Sign in"}
           </Button>
@@ -229,7 +229,7 @@ export default function LoginForm() {
           type="button"
           variant="outline"
           size="lg"
-          className="w-full flex items-center justify-center"
+          className="w-full flex items-center justify-center rounded-xl"
           onClick={handleGoogleSignIn}
           disabled={isLoading}
         >

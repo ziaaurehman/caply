@@ -184,7 +184,7 @@ const InvoicePage: React.FC = () => {
             id: item.id,
             description: item.description || "",
             quantity: Number(item.quantity || 0),
-            unit: "Unit" as string, // InvoiceLineItem doesn't have unit, default to "Unit"
+            unit: (item.unit as string) || "Unit",
             unitPrice: Number(item.unitPrice || 0),
             amount: Number(item.amount || 0),
           })) || [],
@@ -228,7 +228,7 @@ const InvoicePage: React.FC = () => {
             id: item.id,
             description: item.description,
             quantity: Number(item.quantity),
-            unit: "Unit",
+            unit: item.unit || "Unit",
             unitPrice: Number(item.unitPrice),
             amount: Number(item.amount),
           })) || [],
@@ -450,6 +450,7 @@ const InvoicePage: React.FC = () => {
         lineItems: currentInvoice.lineItems.map((item) => ({
           description: item.description,
           quantity: item.quantity,
+          unit: item.unit,
           unitPrice: item.unitPrice,
           amount: item.amount,
         })),
@@ -530,6 +531,7 @@ const InvoicePage: React.FC = () => {
         lineItems: currentInvoice.lineItems.map((item) => ({
           description: item.description,
           quantity: item.quantity,
+          unit: item.unit,
           unitPrice: item.unitPrice,
           amount: item.amount,
         })),

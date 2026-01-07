@@ -19,6 +19,7 @@ import {
   useProjects,
   useProjectsProgress,
 } from "@/lib/hooks/useProjects";
+import { useTeamMembers } from "@/lib/hooks/useTeamMembers";
 import { useCapacityOverview } from "@/lib/hooks/useCapacity";
 import type { Project } from "@/utils/api/project";
 import { useMemo } from "react";
@@ -169,6 +170,11 @@ const DashboardContent: React.FC = () => {
   } = useProjects(currentOrganization?.id || "", filters);
 
   const projects = useMemo(() => projectsData?.projects || [], [projectsData]);
+  const totalActiveProjects = useMemo(() => projectsData?.pagination?.total || 0, [projectsData]);
+
+  // Fetch Team Members count
+  const { data: teamMembersData } = useTeamMembers(currentOrganization?.id || "", { limit: 1 });
+  const totalTeamMembers = useMemo(() => teamMembersData?.pagination?.total || 0, [teamMembersData]);
 
   // Fetch progress data for projects
   const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
@@ -304,14 +310,14 @@ const DashboardContent: React.FC = () => {
   const metrics = [
     {
       title: "Team Members",
-      value: "4/4",
+      value: `${totalTeamMembers}`,
       icon: Users,
       bgColor: "bg-orange-50",
       iconColor: "text-orange-500",
     },
     {
       title: "Active Projects",
-      value: "2",
+      value: `${totalActiveProjects}`,
       subtitle: "0 over budget, 2 behind",
       icon: BarChart3,
       bgColor: "bg-blue-50",
@@ -589,22 +595,65 @@ const DashboardContent: React.FC = () => {
                                 </div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="flex flex-col">
-                                  {budget ? (
-                                    <>
-                                      <span className="text-sm font-medium text-gray-900">
-                                        ${budget.spent.toLocaleString()}
-                                        <span className="text-gray-400 font-normal ml-1">
-                                          / ${budget.total.toLocaleString()}
-                                        </span>
+                                <div className="flex flex-col gap-2">
+                                  {/* Project Type Badge */}
+                                  <div>
+                                    {project.project_type === "fixed_fee" && (
+                                      <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                                        Fixed Fee
                                       </span>
-                                      <span className={`text-xs mt-0.5 font-medium ${budget.remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                        {budget.remaining >= 0 ? '+' : ''}${budget.remaining.toLocaleString()} left
+                                    )}
+                                    {project.project_type === "time_materials" && (
+                                      <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700">
+                                        Time & Materials
                                       </span>
-                                    </>
-                                  ) : (
-                                    <span className="text-sm text-gray-500 italic">No budget set</span>
-                                  )}
+                                    )}
+                                    {project.project_type === "non_billable" && (
+                                      <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs font-semibold text-gray-700">
+                                        Non-Billable
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Budget Details */}
+                                  {(() => {
+                                    if (project.project_type === "non_billable") {
+                                      return null;
+                                    }
+
+                                    if (!budget && project.project_type !== "non_billable") {
+                                      return (
+                                        <div className="text-xs text-gray-500 italic">
+                                          No budget set
+                                        </div>
+                                      );
+                                    }
+
+                                    if (project.project_type === "fixed_fee" && budget) {
+                                      return (
+                                        <div className="text-sm text-gray-900 font-medium">
+                                          ${budget.total.toLocaleString()}
+                                        </div>
+                                      );
+                                    }
+
+                                    if (project.project_type === "time_materials" && budget) {
+                                      return (
+                                        <div className="flex flex-col">
+                                          {project.budget_hours && project.billing_rate ? (
+                                            <span className="text-xs text-gray-500">
+                                              {project.budget_hours} hrs × ${project.billing_rate}/hr
+                                            </span>
+                                          ) : null}
+                                          <span className="text-sm text-gray-900 font-medium">
+                                            Total: ${budget.total.toLocaleString()}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
+
+                                    return null;
+                                  })()}
                                 </div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap">

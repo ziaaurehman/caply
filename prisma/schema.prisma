@@ -579,6 +579,7 @@ model InvoiceLineItem {
   invoiceId   String   @map("invoice_id")
   description String
   quantity    Decimal  @default(1) @map("quantity") @db.Decimal(10, 2)
+  unit        String   @default("Unit")
   unitPrice   Decimal  @map("unit_price") @db.Decimal(10, 2)
   amount      Decimal  @map("amount") @db.Decimal(12, 2)
   position    Int      @default(0)

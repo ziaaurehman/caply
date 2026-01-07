@@ -256,7 +256,7 @@ export default function SignUpForm() {
           type="submit"
           size="lg"
           isLoading={isLoading}
-          className="w-full"
+          className="w-full rounded-xl"
         >
           {isLoading ? "Creating account..." : "Create Account"}
         </Button>
@@ -276,7 +276,7 @@ export default function SignUpForm() {
           type="button"
           variant="outline"
           size="lg"
-          className="w-full flex items-center justify-center"
+          className="w-full flex items-center justify-center rounded-xl"
           onClick={handleGoogleSignUp}
           disabled={isLoading}
         >

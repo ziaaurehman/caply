@@ -210,7 +210,7 @@ export async function generateInvoicePDF(
       font,
       color: darkColor,
     });
-    page.drawText(`${item.quantity} Unit`, {
+    page.drawText(`${item.quantity} ${item.unit || "Unit"}`, {
       x: 250,
       y,
       size: 12,

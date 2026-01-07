@@ -156,14 +156,15 @@ export async function POST(req: NextRequest) {
         createdBy: userContext!.userId,
         lineItems: lineItems
           ? {
-              create: lineItems.map((item: any, idx: number) => ({
-                description: item.description,
-                quantity: item.quantity || 1,
-                unitPrice: item.unitPrice,
-                amount: item.amount,
-                position: idx,
-              })),
-            }
+            create: lineItems.map((item: any, idx: number) => ({
+              description: item.description,
+              quantity: item.quantity || 1,
+              unit: item.unit,
+              unitPrice: item.unitPrice,
+              amount: item.amount,
+              position: idx,
+            })),
+          }
           : undefined,
       },
       include: { lineItems: true },
@@ -261,15 +262,16 @@ export async function PUT(req: NextRequest) {
         notes,
         lineItems: lineItems
           ? {
-              deleteMany: {}, // remove old line items
-              create: lineItems.map((item: any, idx: number) => ({
-                description: item.description,
-                quantity: item.quantity || 1,
-                unitPrice: item.unitPrice,
-                amount: item.amount,
-                position: idx,
-              })),
-            }
+            deleteMany: {}, // remove old line items
+            create: lineItems.map((item: any, idx: number) => ({
+              description: item.description,
+              quantity: item.quantity || 1,
+              unit: item.unit,
+              unitPrice: item.unitPrice,
+              amount: item.amount,
+              position: idx,
+            })),
+          }
           : undefined,
       },
       include: { lineItems: true },
