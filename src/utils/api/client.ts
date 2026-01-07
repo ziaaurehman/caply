@@ -6,6 +6,12 @@ interface Client {
   address?: string;
   website?: string;
   notes?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+  contactPerson?: string;
+  status: 'active' | 'inactive';
   created_at?: string;
   updated_at?: string;
 }
@@ -17,6 +23,12 @@ interface CreateClientData {
   address?: string;
   website?: string;
   notes?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+  contactPerson?: string;
+  status?: 'active' | 'inactive';
 }
 
 interface UpdateClientData {
@@ -26,6 +38,12 @@ interface UpdateClientData {
   address?: string;
   website?: string;
   notes?: string;
+  city?: string;
+  province?: string;
+  postalCode?: string;
+  country?: string;
+  contactPerson?: string;
+  status?: 'active' | 'inactive';
 }
 
 interface ClientsResponse {
