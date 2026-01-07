@@ -20,6 +20,14 @@ import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import ClientModal from "./ClientModal";
 import Pagination from "@/components/ui/Pagination";
 import { Input } from "@/components/ui/Input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/Table";
 import { useClients, useDeleteClient } from "@/lib/hooks/useClients";
 import { Client } from "@/utils/api/client";
 import { useSearchParams } from "next/navigation";
@@ -262,8 +270,8 @@ export default function ClientsPage() {
                     </TableCell>
                     <TableCell>
                       <span className={`px-2.5 py-0.5 inline-flex text-xs font-medium rounded-full ${client.status === 'active'
-                          ? 'bg-green-50 text-green-700 border border-green-100'
-                          : 'bg-gray-100 text-gray-700 border border-gray-200'
+                        ? 'bg-green-50 text-green-700 border border-green-100'
+                        : 'bg-gray-100 text-gray-700 border border-gray-200'
                         }`}>
                         {client.status === 'active' ? 'Active' : 'Inactive'}
                       </span>
