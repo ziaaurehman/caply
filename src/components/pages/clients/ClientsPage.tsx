@@ -157,7 +157,7 @@ export default function ClientsPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         {isLoading ? (
           <div className="p-12 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto"></div>
@@ -195,110 +195,100 @@ export default function ClientsPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Client Name
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Contact Person
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Contact Info
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Location
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {paginatedClients.map((client) => (
-                    <tr key={client.id} className="hover:bg-gray-50 transition-colors group">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="h-10 w-10 flex-shrink-0 bg-orange-100 rounded-full flex items-center justify-center text-orange-700 font-bold text-lg">
-                            {client.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {client.name}
-                            </div>
-                            {client.website && (
-                              <a href={client.website} target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:text-orange-600 flex items-center gap-1 mt-0.5">
-                                <Globe size={10} /> {client.website.replace(/^https?:\/\//, '')}
-                              </a>
-                            )}
-                          </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[300px]">Client Name</TableHead>
+                  <TableHead>Contact Person</TableHead>
+                  <TableHead>Contact Info</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedClients.map((client) => (
+                  <TableRow key={client.id} className="group">
+                    <TableCell>
+                      <div className="flex items-center">
+                        <div className="h-10 w-10 flex-shrink-0 bg-orange-100 rounded-full flex items-center justify-center text-orange-700 font-bold text-lg">
+                          {client.name.charAt(0).toUpperCase()}
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {client.contactPerson || "-"}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex flex-col gap-1">
-                          {client.email && (
-                            <div className="flex items-center text-sm text-gray-500">
-                              <Mail size={12} className="mr-2" />
-                              {client.email}
-                            </div>
-                          )}
-                          {client.phone && (
-                            <div className="flex items-center text-sm text-gray-500">
-                              <Phone size={12} className="mr-2" />
-                              {client.phone}
-                            </div>
-                          )}
-                          {!client.email && !client.phone && (
-                            <span className="text-sm text-gray-400">-</span>
+                        <div className="ml-4">
+                          <div className="font-medium text-gray-900">
+                            {client.name}
+                          </div>
+                          {client.website && (
+                            <a href={client.website} target="_blank" rel="noopener noreferrer" className="text-xs text-muted-foreground hover:text-orange-600 flex items-center gap-1 mt-0.5">
+                              <Globe size={10} /> {client.website.replace(/^https?:\/\//, '')}
+                            </a>
                           )}
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {(client.city || client.country) ? (
-                          <div className="flex items-center text-sm text-gray-500">
-                            <MapPin size={14} className="mr-1.5 text-gray-400" />
-                            {client.city}{client.city && client.country ? ", " : ""}{client.country}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm text-gray-900">
+                        {client.contactPerson || "-"}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        {client.email && (
+                          <div className="flex items-center text-sm text-muted-foreground">
+                            <Mail size={12} className="mr-2" />
+                            {client.email}
                           </div>
-                        ) : (
-                          <span className="text-sm text-gray-400">-</span>
                         )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${client.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                          }`}>
-                          {client.status === 'active' ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        {client.phone && (
+                          <div className="flex items-center text-sm text-muted-foreground">
+                            <Phone size={12} className="mr-2" />
+                            {client.phone}
+                          </div>
+                        )}
+                        {!client.email && !client.phone && (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {(client.city || client.country) ? (
+                        <div className="flex items-center text-sm text-muted-foreground">
+                          <MapPin size={14} className="mr-1.5 text-gray-400" />
+                          {client.city}{client.city && client.country ? ", " : ""}{client.country}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className={`px-2.5 py-0.5 inline-flex text-xs font-medium rounded-full ${client.status === 'active'
+                          ? 'bg-green-50 text-green-700 border border-green-100'
+                          : 'bg-gray-100 text-gray-700 border border-gray-200'
+                        }`}>
+                        {client.status === 'active' ? 'Active' : 'Inactive'}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => handleEdit(client)}
-                          className="text-gray-400 hover:text-gray-900 mr-3 transition-colors"
+                          className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(client.id)}
-                          className="text-gray-400 hover:text-red-600 transition-colors"
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
                           disabled={deleteClientMutation.isPending}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
 
             {/* Pagination */}
             {filteredClients.length > 0 && totalPages > 1 && (
